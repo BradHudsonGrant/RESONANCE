@@ -1,0 +1,43 @@
+# Build output
+target/
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Real-music test copies stay on the machine that made them
+fixtures-local/
+
+# Audio is never committed; test audio is generated inside the tests
+*.mp3
+*.flac
+*.wav
+*.aif
+*.aiff
+*.m4a
+*.ogg
+*.opus
+
+# Model weights download on first use
+*.onnx
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+*.gguf
+*.engine
+
+# Installers and other binaries
+*.exe
+*.msi
+*.dll
+
+# Secrets
+.env
+.env.*
+
+# OS and editor files
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
