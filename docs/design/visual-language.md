@@ -9,12 +9,14 @@
 | Surface 2 | `#1E1E1F` | `#ECEAE7` |
 | Raised | `#252527` | `#FFFFFF` |
 | Border | `#343437` | `#D8D4CF` |
+| Control border | `#6E6E71` | `#8A8681` |
 | Text | `#F2F1EF` | `#171717` |
-| Text 2 | `#A9A8A6` | `#666461` |
-| Muted | `#777777` | `#8A8783` |
+| Text 2 | `#A9A8A6` | `#595754` |
+| Muted | `#8C8C8C` | `#6C6965` |
 | Accent | `#E4553D` | `#D94F3B` |
+| On accent | `#0B0B0C` | `#0B0B0C` |
 
-Check contrast for every text and background pair and adjust the muted tones if any fail WCAG AA.
+Every text and background pair meets WCAG AA. [contrast.md](contrast.md) has the ratios, and the tones that moved to get there. Border divides areas. Control border is the edge of a button or a field, where the edge has to be seen.
 
 Type: Space Grotesk for headings and the wordmark, Inter for the interface, JetBrains Mono for BPM, time, key and other numbers. All three are bundled with the app. Nothing loads from a CDN.
 
@@ -22,7 +24,7 @@ Spacing on a 4 px scale. Corner radius 4 px on controls and 6 px on panels, no l
 
 The accent is for the playhead, the active selection, the one thing that needs action, and one primary action per view.
 
-One outline icon set with a 1.5 px stroke.
+One outline icon set with a 1.5 px stroke: Lucide.
 
 Motion lasts 120 to 180 ms, eases out, and exists only to explain a change of state.
 

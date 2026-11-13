@@ -33,7 +33,7 @@ The spike:
 
 Design and shell:
 
-- [ ] Design tokens, both themes, the primitives ([#14](https://github.com/BradHudsonGrant/RESONANCE/issues/14))
+- [x] Design tokens, both themes, the primitives ([#14](https://github.com/BradHudsonGrant/RESONANCE/issues/14)). Evidence: merged in [#38](https://github.com/BradHudsonGrant/RESONANCE/pull/38); `/design.html` shows every primitive in both themes with the three fonts loaded from the dev server and no request leaving it, and [design/contrast.md](design/contrast.md) has the table, which a test rebuilds from the tokens.
 - [x] Scan a folder into the database ([#15](https://github.com/BradHudsonGrant/RESONANCE/issues/15)). Evidence: merged in [#37](https://github.com/BradHudsonGrant/RESONANCE/pull/37); `resonance scan fixtures-local` added 50 tracks with none unreadable, a second run reported 50 unchanged, and a test compares every byte and modified time before and after.
 - [ ] App shell showing real data from a scan of the fixture folder ([#16](https://github.com/BradHudsonGrant/RESONANCE/issues/16))
 - [ ] The wave component ported, with its frame cost measured ([#17](https://github.com/BradHudsonGrant/RESONANCE/issues/17))
