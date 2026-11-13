@@ -1,5 +1,6 @@
 <script lang="ts">
   import Button from '../design/Button.svelte';
+  import Wave from '../wave/Wave.svelte';
   import type { TrackPages } from './track-pages.svelte';
   import TrackTable from './TrackTable.svelte';
 
@@ -27,6 +28,7 @@
     <Button onclick={() => pages.load()}>Try again</Button>
   </div>
 {:else if pages.total === 0}
+  <div class="empty-wave"><Wave /></div>
   <div class="state">
     <h2>No tracks yet</h2>
     <p>Add a music folder to see its tracks here. Nothing in the folder is changed.</p>
@@ -48,6 +50,10 @@
     height: 8px;
     border-radius: 4px;
     background: var(--color-surface-2);
+  }
+
+  .empty-wave {
+    height: 240px;
   }
 
   .state {
