@@ -35,6 +35,8 @@ export class TrackPages {
 
   #read: ReadPage;
   #pages = new SvelteMap<number, LibraryTrack[]>();
+  #selected = $state<number | null>(null);
+  #selectedTrack = $state<LibraryTrack>();
   // eslint-disable-next-line svelte/prefer-svelte-reactivity -- bookkeeping that nothing renders
   #reading = new Set<number>();
   #waiting: number[] = [];
@@ -46,8 +48,24 @@ export class TrackPages {
     this.#read = read;
   }
 
+  get selected(): number | null {
+    return this.#selected;
+  }
+
+  set selected(index: number | null) {
+    if (index === this.#selected) return;
+    this.#selected = index;
+    this.#selectedTrack = index === null ? undefined : this.track(index);
+  }
+
+  /** Kept separately so scrolling can release its page without clearing the inspector. */
+  get selectedTrack(): LibraryTrack | undefined {
+    return this.#selectedTrack;
+  }
+
   async load() {
     this.#generation += 1;
+    this.selected = null;
     this.#pages.clear();
     this.#reading.clear();
     this.#waiting = [];
@@ -99,6 +117,9 @@ export class TrackPages {
       if (generation !== this.#generation) return;
       this.total = reply.total;
       this.#pages.set(page, reply.tracks);
+      if (this.#selected !== null && Math.floor(this.#selected / PAGE_SIZE) === page) {
+        this.#selectedTrack = reply.tracks[this.#selected % PAGE_SIZE];
+      }
       this.#keepNearby();
       if (this.state.kind === 'loading') this.state = { kind: 'ready' };
     } catch (error) {

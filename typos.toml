@@ -1,3 +1,7 @@
+[files]
+# Upstream licence text is kept byte-for-byte.
+extend-exclude = ["app/THIRD-PARTY-NOTICES.txt", "ui/dev/licences/**"]
+
 [default.extend-words]
 # The MP4 box that holds a track
 trak = "trak"

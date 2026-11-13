@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { CoreError } from '../ipc/client';
 import { fakeLibrary } from './fake-library';
@@ -12,7 +12,7 @@ describe('Library', () => {
     const { pages } = fakeLibrary(100_000);
     await pages.load();
 
-    render(Library, { pages });
+    render(Library, { pages, onscan: vi.fn() });
 
     const grid = screen.getByRole('grid', { name: 'Tracks' });
     expect(grid.getAttribute('aria-rowcount')).toBe('100001');
@@ -23,7 +23,7 @@ describe('Library', () => {
   it('moves the selection with the arrow keys', async () => {
     const { pages } = fakeLibrary(50);
     await pages.load();
-    render(Library, { pages });
+    render(Library, { pages, onscan: vi.fn() });
     const grid = screen.getByRole('grid', { name: 'Tracks' });
 
     await fireEvent.keyDown(grid, { key: 'ArrowDown' });
@@ -44,14 +44,17 @@ describe('Library', () => {
     expect(top[0]?.textContent).toContain('Track 0');
   });
 
-  it('says how to add tracks when the library is empty', async () => {
+  it('opens the folder scan when the empty library offers to add music', async () => {
     const { pages } = fakeLibrary(0);
     await pages.load();
+    const onscan = vi.fn();
 
-    render(Library, { pages });
+    render(Library, { pages, onscan });
 
     expect(screen.getByRole('heading', { name: 'No tracks yet' })).toBeTruthy();
-    expect(screen.getByText('resonance scan <folder>')).toBeTruthy();
+    await fireEvent.click(screen.getByRole('button', { name: 'Add a music folder' }));
+
+    expect(onscan).toHaveBeenCalledOnce();
   });
 
   it('says what went wrong and offers to try again', async () => {
@@ -60,7 +63,7 @@ describe('Library', () => {
     );
     await pages.load();
 
-    render(Library, { pages });
+    render(Library, { pages, onscan: vi.fn() });
 
     expect(screen.getByRole('alert').textContent).toContain('The core is not running.');
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();

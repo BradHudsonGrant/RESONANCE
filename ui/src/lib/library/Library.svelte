@@ -7,9 +7,10 @@
     pages: TrackPages;
     selected?: number | null;
     onopen?: () => void;
+    onscan: () => void;
   }
 
-  let { pages, selected = $bindable(null), onopen }: Props = $props();
+  let { pages, selected = $bindable(null), onopen, onscan }: Props = $props();
 </script>
 
 {#if pages.state.kind === 'loading'}
@@ -28,12 +29,8 @@
 {:else if pages.total === 0}
   <div class="state">
     <h2>No tracks yet</h2>
-    <p>
-      Read a music folder into the library from the command line with
-      <code class="numeric">resonance scan &lt;folder&gt;</code>, then reload. Nothing in the folder
-      is changed.
-    </p>
-    <Button onclick={() => pages.load()}>Reload</Button>
+    <p>Add a music folder to see its tracks here. Nothing in the folder is changed.</p>
+    <Button variant="primary" onclick={onscan}>Add a music folder</Button>
   </div>
 {:else}
   <TrackTable {pages} bind:selected {onopen} />
@@ -69,10 +66,5 @@
   .state p {
     margin: 0;
     color: var(--color-text-2);
-  }
-
-  code {
-    color: var(--color-text);
-    font-size: var(--text-sm);
   }
 </style>

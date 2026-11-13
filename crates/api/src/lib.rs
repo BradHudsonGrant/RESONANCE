@@ -3,24 +3,37 @@ pub mod data_folder;
 pub mod error;
 pub mod serve;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
-use command::{AppInfo, LibraryTrack, Request, Response, TrackAudio, TrackKey, TrackPage};
+use command::{
+    AppInfo, LibraryTrack, Request, Response, ScanReport, TrackAudio, TrackKey, TrackPage,
+    UnreadableFile,
+};
 use error::ApiError;
 use resonance_core::library::TagField;
 use resonance_db::{Database, TrackRow};
 
+const REPORTED_UNREADABLE_FILES: usize = 100;
+
 /// Everything the commands act on. The Tauri shell and the local socket each hold one.
 pub struct Api {
     library: Mutex<Database>,
+    own_files: Vec<PathBuf>,
 }
 
 impl Api {
     pub fn new(library: Database) -> Self {
         Self {
             library: Mutex::new(library),
+            own_files: std::env::current_exe().into_iter().collect(),
         }
+    }
+
+    /// Keeps a source scan out of the folder holding the app's data.
+    pub fn with_data_folder(mut self, folder: PathBuf) -> Self {
+        self.own_files.push(folder);
+        self
     }
 
     pub fn handle(&self, request: Request) -> Result<Response, ApiError> {
@@ -29,6 +42,7 @@ impl Api {
                 version: env!("CARGO_PKG_VERSION").to_owned(),
             })),
             Request::Tracks { offset, limit } => self.tracks(offset, limit).map(Response::Tracks),
+            Request::Scan { folder } => self.scan(Path::new(&folder)).map(Response::Scan),
         }
     }
 
@@ -46,6 +60,29 @@ impl Api {
             total,
             offset,
             tracks: rows.iter().map(library_track).collect(),
+        })
+    }
+
+    fn scan(&self, folder: &Path) -> Result<ScanReport, ApiError> {
+        let mut library = self.library.lock().unwrap_or_else(PoisonError::into_inner);
+        let report = resonance_library::scan::scan(&mut library, folder, &self.own_files)
+            .map_err(ApiError::scan_failed)?;
+        Ok(ScanReport {
+            source_folder: report.source_folder,
+            found: report.found,
+            added: report.added,
+            changed: report.changed,
+            unchanged: report.unchanged,
+            unreadable_count: report.unreadable.len(),
+            unreadable: report
+                .unreadable
+                .into_iter()
+                .take(REPORTED_UNREADABLE_FILES)
+                .map(|file| UnreadableFile {
+                    path: file.path,
+                    reason: file.reason,
+                })
+                .collect(),
         })
     }
 }

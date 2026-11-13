@@ -173,6 +173,10 @@ const QUARANTINE_FOLDERS: [&str; 4] = [
     "_converted_originals",
 ];
 
+/// A folder containing this marker is excluded as a source and while walking a parent.
+/// An explicit source below that folder can still be scanned.
+pub const SCAN_IGNORE_MARKER: &str = ".resonance-ignore";
+
 /// Whether a scan stays out of a folder with this name, at any depth.
 pub fn is_ignored_folder(name: &str) -> bool {
     name.starts_with('.')

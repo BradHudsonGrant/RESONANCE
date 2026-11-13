@@ -14,3 +14,9 @@ if (import.meta.env.DEV) {
     Object.assign(window, { measureTableScroll });
   });
 }
+
+if (import.meta.env.MODE === 'benchmark') {
+  void import('../dev/ScrollBench.svelte').then(({ default: ScrollBench }) => {
+    mount(ScrollBench, { target: document.body });
+  });
+}

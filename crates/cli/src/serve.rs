@@ -39,7 +39,8 @@ impl std::error::Error for ServeError {}
 
 pub fn run(connection_file: Option<&Path>, data_folder: Option<&Path>) -> Result<(), ServeError> {
     let data_folder = library_file::data_folder(data_folder).map_err(ServeError::Library)?;
-    let api = Api::new(library_file::open(&data_folder).map_err(ServeError::Library)?);
+    let api = Api::new(library_file::open(&data_folder).map_err(ServeError::Library)?)
+        .with_data_folder(data_folder);
     let runtime = tokio::runtime::Runtime::new().map_err(ServeError::Start)?;
     let served =
         runtime.block_on(async {

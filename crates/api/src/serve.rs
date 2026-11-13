@@ -98,7 +98,7 @@ async fn serve_connection(stream: TcpStream, api: Arc<Api>, expected: Arc<str>) 
         let Message::Text(text) = message else {
             continue;
         };
-        let reply = serde_json::to_string(&answer(&api, text.as_str()));
+        let reply = serde_json::to_string(&answer(Arc::clone(&api), text.as_str()).await);
         let Ok(reply) = reply else {
             break;
         };
@@ -108,20 +108,26 @@ async fn serve_connection(stream: TcpStream, api: Arc<Api>, expected: Arc<str>) 
     }
 }
 
-fn answer(api: &Api, text: &str) -> Reply {
+async fn answer(api: Arc<Api>, text: &str) -> Reply {
     match serde_json::from_str::<Call>(text) {
-        Ok(call) => match api.handle(call.request) {
-            Ok(response) => Reply {
-                id: Some(call.id),
-                response: Some(response),
-                error: None,
-            },
-            Err(error) => Reply {
-                id: Some(call.id),
-                response: None,
-                error: Some(error),
-            },
-        },
+        Ok(call) => {
+            let result = tokio::task::spawn_blocking(move || api.handle(call.request))
+                .await
+                .map_err(ApiError::internal)
+                .and_then(|result| result);
+            match result {
+                Ok(response) => Reply {
+                    id: Some(call.id),
+                    response: Some(response),
+                    error: None,
+                },
+                Err(error) => Reply {
+                    id: Some(call.id),
+                    response: None,
+                    error: Some(error),
+                },
+            }
+        }
         Err(error) => Reply {
             id: id_of(text),
             response: None,

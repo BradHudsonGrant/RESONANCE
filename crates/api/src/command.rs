@@ -11,6 +11,10 @@ pub enum Request {
         offset: u32,
         limit: u32,
     },
+    /// Reads a folder into the library without changing the files in it.
+    Scan {
+        folder: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -19,12 +23,35 @@ pub enum Request {
 pub enum Response {
     AppInfo(AppInfo),
     Tracks(TrackPage),
+    Scan(ScanReport),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export)]
 pub struct AppInfo {
     pub version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct ScanReport {
+    pub source_folder: String,
+    pub found: usize,
+    pub added: usize,
+    pub changed: usize,
+    pub unchanged: usize,
+    /// The total, including files beyond the bounded list shown in the interface.
+    pub unreadable_count: usize,
+    /// The first hundred failures, so a damaged source cannot make an unbounded reply.
+    pub unreadable: Vec<UnreadableFile>,
+}
+
+/// A file the scan passed over or could not read as audio.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct UnreadableFile {
+    pub path: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]

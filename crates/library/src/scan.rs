@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use resonance_core::library::{
-    AudioFormat, ScannedFile, folder_under_source_holding, is_ignored_folder,
+    AudioFormat, SCAN_IGNORE_MARKER, ScannedFile, folder_under_source_holding, is_ignored_folder,
 };
 use resonance_db::{Database, DbError, FileStamp};
 
@@ -14,6 +14,7 @@ use crate::file_tags;
 #[derive(Debug)]
 pub enum ScanError {
     Folder { path: PathBuf, source: io::Error },
+    ExcludedFolder { path: PathBuf },
     Database(DbError),
 }
 
@@ -27,6 +28,11 @@ impl fmt::Display for ScanError {
                     path.display()
                 )
             }
+            Self::ExcludedFolder { path } => write!(
+                f,
+                "The folder {} is excluded by {SCAN_IGNORE_MARKER}. Choose a music folder or an unmarked subfolder instead",
+                path.display()
+            ),
             Self::Database(source) => source.fmt(f),
         }
     }
@@ -70,6 +76,15 @@ fn is_hidden(_metadata: &Metadata) -> bool {
     false
 }
 
+fn has_scan_ignore_marker(folder: &Path) -> io::Result<bool> {
+    // A dangling marker symlink still marks the folder; only its presence matters.
+    match fs::symlink_metadata(folder.join(SCAN_IGNORE_MARKER)) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
 struct Walk<'a> {
     root: &'a Path,
     own_folders: &'a [PathBuf],
@@ -96,7 +111,8 @@ impl Walk<'_> {
         let ignored_by_name = entry.file_name().to_str().is_some_and(is_ignored_folder);
         Ok(!ignored_by_name
             && !is_hidden(&entry.metadata()?)
-            && !self.own_folders.iter().any(|own| own == path))
+            && !self.own_folders.iter().any(|own| own == path)
+            && !has_scan_ignore_marker(path)?)
     }
 
     fn folder(&mut self, folder: &Path) {
@@ -171,6 +187,11 @@ pub fn scan(
     // Walked in its canonical form because on Windows that is the only form that can open a
     // folder whose name ends in a space or a dot, and music folders have them.
     let root = fs::canonicalize(folder).map_err(unreadable_folder)?;
+    if has_scan_ignore_marker(&root).map_err(unreadable_folder)? {
+        return Err(ScanError::ExcludedFolder {
+            path: folder.to_owned(),
+        });
+    }
     fs::read_dir(&root).map_err(unreadable_folder)?;
     let source_folder = dunce::simplified(&root)
         .to_str()

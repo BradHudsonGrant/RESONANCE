@@ -9,6 +9,8 @@ use ts_rs::TS;
 pub enum ErrorCode {
     BadRequest,
     LibraryUnreadable,
+    ScanFailed,
+    Internal,
 }
 
 /// The one place a failure becomes a message for the user.
@@ -31,6 +33,41 @@ impl ApiError {
         Self {
             code: ErrorCode::LibraryUnreadable,
             message: format!("The library could not be read. {detail}"),
+        }
+    }
+
+    pub fn library_unavailable(detail: impl fmt::Display) -> Self {
+        Self {
+            code: ErrorCode::LibraryUnreadable,
+            message: format!(
+                "The library could not be opened. {detail}. Check that the data folder is writable, then restart Resonance."
+            ),
+        }
+    }
+
+    pub fn data_folder_unavailable() -> Self {
+        Self {
+            code: ErrorCode::LibraryUnreadable,
+            message: "This machine has no home folder to keep the library in. Name one with --data-folder."
+                .to_owned(),
+        }
+    }
+
+    pub fn scan_failed(detail: impl fmt::Display) -> Self {
+        Self {
+            code: ErrorCode::ScanFailed,
+            message: format!(
+                "The folder could not be scanned. {detail}. Check that the folder is readable and the library is writable, then try again."
+            ),
+        }
+    }
+
+    pub fn internal(detail: impl fmt::Display) -> Self {
+        Self {
+            code: ErrorCode::Internal,
+            message: format!(
+                "The core could not finish this request. Restart Resonance, then try again. {detail}"
+            ),
         }
     }
 }

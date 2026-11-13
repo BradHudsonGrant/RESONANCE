@@ -168,6 +168,7 @@ Day-to-day work must not rebuild the whole stack.
 - Core work happens in the crate being changed, with `cargo check`, its tests and the CLI. `just serve` runs the core for the page, and rebuilds and restarts it when a crate changes. A build that fails leaves the running core in place.
 - `just serve` serves the library in `target/dev/data`, and `just scan <folder>` reads a music folder into it. `just synthetic-library` writes 100,000 made-up tracks into `target/dev/synthetic`, and `just serve target/dev/synthetic` serves those instead.
 - The desktop shell is thin and rarely changes. Build it for smoke tests and releases.
+- `just app` builds the bundled UI and opens the native shell against `target/dev/data`. Give it another folder to isolate a smoke test. The override also keeps WebView2 storage there. `just installer` builds the Windows NSIS installer; [ADR 0009](adr/0009-native-shell-and-installer.md) covers the native transport and packaging.
 - Playwright drives the same browser page against the real core.
 
 Keep Rust builds short. Split crates so a change rebuilds one of them. Build dependencies optimised and without debug info, and keep only line-table debug info for the project's own crates. The build folder and its caches stay inside the repo folder: no Dev Drive and no antivirus exclusion. `just build-times` measures a clean build and an incremental one, and the numbers go in [benchmarks/build-times.md](benchmarks/build-times.md) so a regression shows.

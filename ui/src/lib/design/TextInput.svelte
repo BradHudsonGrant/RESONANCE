@@ -19,6 +19,7 @@
 <style>
   .field {
     display: grid;
+    min-width: 0;
     gap: var(--space-1);
   }
 
@@ -28,6 +29,8 @@
   }
 
   .input {
+    min-width: 0;
+    width: 100%;
     height: var(--control-height);
     padding: 0 var(--space-2);
     border: 1px solid var(--color-border-control);

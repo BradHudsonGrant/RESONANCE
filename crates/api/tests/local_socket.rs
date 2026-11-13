@@ -4,11 +4,13 @@
 )]
 
 use std::sync::Arc;
+use std::{fs, path::Path, time::SystemTime};
 
 use futures_util::{SinkExt, StreamExt};
 use resonance_api::Api;
 use resonance_api::serve::Server;
 use resonance_db::Database;
+use resonance_fixtures::signal::Signal;
 use serde_json::{Value, json};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -129,4 +131,47 @@ async fn each_server_makes_its_own_token() {
 
     assert_eq!(first.token.len(), 64);
     assert_ne!(first.token, second.token);
+}
+
+#[tokio::test]
+async fn a_scan_over_the_socket_makes_its_tracks_available_on_the_same_connection() {
+    let unique = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let folder = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("socket-scan")
+        .join(format!("{}-{unique}", std::process::id()));
+    fs::create_dir_all(&folder).unwrap();
+    Signal::tone(440.0, 0.1, -6.0, 48_000)
+        .write_wav(&folder.join("First Light.wav"))
+        .unwrap();
+    let core = start().await;
+    let mut socket = connect(&core.url, Some(&core.token)).await.unwrap();
+
+    let report = ask(
+        &mut socket,
+        &json!({
+            "id": 1,
+            "request": {"command": "scan", "params": {"folder": folder}}
+        })
+        .to_string(),
+    )
+    .await;
+    let page = ask(
+        &mut socket,
+        r#"{"id": 2, "request": {"command": "tracks", "params": {"offset": 0, "limit": 200}}}"#,
+    )
+    .await;
+
+    assert_eq!(report["id"], 1);
+    assert_eq!(report["error"], Value::Null);
+    assert_eq!(report["response"]["result"]["added"], 1);
+    assert_eq!(page["id"], 2);
+    assert_eq!(page["error"], Value::Null);
+    assert_eq!(page["response"]["result"]["total"], 1);
+    assert_eq!(
+        page["response"]["result"]["tracks"][0]["title"],
+        "First Light"
+    );
 }

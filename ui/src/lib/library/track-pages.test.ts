@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { CoreError } from '../ipc/client';
-import { fakeLibrary, settled } from './fake-library';
+import { fakeLibrary, fakeTrack, settled } from './fake-library';
 import { PAGE_SIZE, TrackPages } from './track-pages.svelte';
 
 describe('TrackPages', () => {
@@ -102,5 +102,61 @@ describe('TrackPages', () => {
 
     expect(pages.track(400)).toBeUndefined();
     expect(asked).toEqual([0, 400, 200, 0]);
+  });
+
+  it('keeps the selected track when scrolling lets go of its page', async () => {
+    const { pages } = fakeLibrary(100_000);
+    await pages.load();
+    pages.selected = 0;
+
+    for (let page = 1; page <= 80; page += 1) {
+      pages.want(page * PAGE_SIZE, page * PAGE_SIZE + 1);
+      await settled();
+    }
+
+    expect(pages.track(0)).toBeUndefined();
+    expect(pages.selected).toBe(0);
+    expect(pages.selectedTrack).toEqual(fakeTrack(0));
+
+    pages.selected = 80 * PAGE_SIZE;
+    expect(pages.selectedTrack).toEqual(fakeTrack(80 * PAGE_SIZE));
+    pages.selected = null;
+    expect(pages.selectedTrack).toBeUndefined();
+  });
+
+  it('shows a newly selected track when its page arrives', async () => {
+    const { pages } = fakeLibrary(1000);
+    await pages.load();
+    pages.selected = 0;
+
+    pages.selected = 400;
+    expect(pages.selectedTrack).toBeUndefined();
+    pages.want(400, 401);
+    await settled();
+
+    expect(pages.selectedTrack).toEqual(fakeTrack(400));
+  });
+
+  it('keeps a newer selection when the previous selection finishes loading', async () => {
+    const { pages } = fakeLibrary(1000);
+    await pages.load();
+
+    pages.selected = 400;
+    pages.want(400, 401);
+    pages.selected = 1;
+    await settled();
+
+    expect(pages.selectedTrack).toEqual(fakeTrack(1));
+  });
+
+  it('clears the selection when reloading changes the library order', async () => {
+    const { pages } = fakeLibrary(1000);
+    await pages.load();
+    pages.selected = 0;
+
+    await pages.load();
+
+    expect(pages.selected).toBeNull();
+    expect(pages.selectedTrack).toBeUndefined();
   });
 });

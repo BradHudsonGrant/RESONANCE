@@ -3,6 +3,7 @@
   import { trackCount } from './lib/library/format';
   import Inspector from './lib/library/Inspector.svelte';
   import Library from './lib/library/Library.svelte';
+  import ScanFolder from './lib/library/ScanFolder.svelte';
   import { TrackPages } from './lib/library/track-pages.svelte';
   import CommandBar, { type Command } from './lib/shell/CommandBar.svelte';
   import PlayerBar from './lib/shell/PlayerBar.svelte';
@@ -11,11 +12,12 @@
   const commandInput = 'command-bar';
   const pages = new TrackPages((offset, limit) => core.call('tracks', { offset, limit }));
 
-  let selected = $state<number | null>(null);
   let inspectorOpen = $state(true);
-  const track = $derived(selected === null ? undefined : pages.track(selected));
+  let scanOpen = $state(false);
+  const track = $derived(pages.selectedTrack);
 
   const commands: Command[] = $derived([
+    { name: 'Scan a music folder', run: () => (scanOpen = true) },
     {
       name: inspectorOpen ? 'Hide the inspector' : 'Show the inspector',
       shortcut: 'I',
@@ -27,11 +29,10 @@
   ]);
 
   function goTo(index: number) {
-    if (pages.total > 0) selected = index;
+    if (pages.total > 0) pages.selected = index;
   }
 
   function reload() {
-    selected = null;
     pages.load();
   }
 
@@ -74,7 +75,12 @@
     />
   </div>
   <main class="workspace">
-    <Library {pages} bind:selected onopen={() => (inspectorOpen = true)} />
+    <Library
+      {pages}
+      bind:selected={pages.selected}
+      onopen={() => (inspectorOpen = true)}
+      onscan={() => (scanOpen = true)}
+    />
   </main>
   {#if inspectorOpen}
     <div class="inspector">
@@ -83,6 +89,12 @@
   {/if}
   <div class="player"><PlayerBar {track} /></div>
 </div>
+
+<ScanFolder
+  bind:open={scanOpen}
+  scan={(folder) => core.call('scan', { folder })}
+  onscanned={reload}
+/>
 
 <style>
   .shell {

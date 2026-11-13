@@ -13,10 +13,7 @@ pub enum OpenError {
 impl fmt::Display for OpenError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NoDataFolder => write!(
-                f,
-                "This machine has no home folder to keep the library in. Name one with --data-folder."
-            ),
+            Self::NoDataFolder => resonance_api::error::ApiError::data_folder_unavailable().fmt(f),
             Self::Database(source) => source.fmt(f),
         }
     }
