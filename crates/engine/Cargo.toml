@@ -1,0 +1,20 @@
+[package]
+name = "resonance-engine"
+description = "Real-time audio: decks, the mixer, the audio clock and the metering tap."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+resonance-core.workspace = true
+# `realtime` puts the callback thread in the Windows multimedia scheduler.
+cpal = { version = "0.18.2", features = ["realtime"] }
+rtrb = "0.4.1"
+symphonia.workspace = true
+
+[dev-dependencies]
+resonance-fixtures.workspace = true
+
+[lints]
+workspace = true

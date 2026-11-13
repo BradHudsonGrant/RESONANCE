@@ -16,6 +16,26 @@
   },
   {
     "ecosystem": "cargo",
+    "name": "dasp_sample",
+    "version": "0.11.0",
+    "revision": "97c3bb9b2363c0b46ac1633858bf1054fd02a980",
+    "repository": "https://github.com/RustAudio/dasp",
+    "evidence": "Published dasp_sample-0.11.0/.cargo_vcs_info.json, git.sha1; the licence files are at the repository root",
+    "files": [
+      {
+        "path": "dasp_sample-0.11.0/LICENSE-MIT",
+        "url": "https://raw.githubusercontent.com/RustAudio/dasp/97c3bb9b2363c0b46ac1633858bf1054fd02a980/LICENSE-MIT",
+        "sha256": "b1d6df41ed3aa96806e74c729444d7c121d90e6660a6aed01d298e03fde475a0"
+      },
+      {
+        "path": "dasp_sample-0.11.0/LICENSE-APACHE",
+        "url": "https://raw.githubusercontent.com/RustAudio/dasp/97c3bb9b2363c0b46ac1633858bf1054fd02a980/LICENSE-APACHE",
+        "sha256": "756c8d2ab2dc24f256e1455b5f03937f4933d83d7bc9f2d55009fc962377d512"
+      }
+    ]
+  },
+  {
+    "ecosystem": "cargo",
     "name": "lofty",
     "version": "0.25.5",
     "revision": "59a3f5ad28f982102fdfaf8f458efd9eafb38747",

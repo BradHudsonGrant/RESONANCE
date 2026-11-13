@@ -18,13 +18,15 @@
     built: boolean;
   }
 
-  // Only Library exists so far. The others are shown so the shape of the app is clear, and say
+  let { current, onselect }: { current: string; onselect: (space: string) => void } = $props();
+
+  // Library and Mix exist so far. The others are shown so the shape of the app is clear, and say
   // they are not built rather than opening an empty page.
   const spaces: Space[] = [
     { name: 'Library', icon: Library, built: true },
     { name: 'Inbox', icon: Inbox, built: false },
     { name: 'Sets', icon: ListMusic, built: false },
-    { name: 'Mix', icon: Disc3, built: false },
+    { name: 'Mix', icon: Disc3, built: true },
     { name: 'Review', icon: ChartLine, built: false },
   ];
   const tools: Space[] = [
@@ -42,8 +44,9 @@
       type="button"
       class="item"
       aria-label={space.name}
-      aria-current={space.built ? 'page' : undefined}
+      aria-current={space.name === current ? 'page' : undefined}
       aria-disabled={!space.built}
+      onclick={() => space.built && onselect(space.name)}
     >
       <Icon icon={space.icon} size={18} />
     </button>

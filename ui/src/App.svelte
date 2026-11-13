@@ -5,6 +5,7 @@
   import Library from './lib/library/Library.svelte';
   import ScanFolder from './lib/library/ScanFolder.svelte';
   import { TrackPages } from './lib/library/track-pages.svelte';
+  import Mix from './lib/mix/Mix.svelte';
   import CommandBar, { type Command } from './lib/shell/CommandBar.svelte';
   import PlayerBar from './lib/shell/PlayerBar.svelte';
   import Rail from './lib/shell/Rail.svelte';
@@ -12,11 +13,15 @@
   const commandInput = 'command-bar';
   const pages = new TrackPages((offset, limit) => core.call('tracks', { offset, limit }));
 
+  let space = $state('Library');
   let inspectorOpen = $state(true);
   let scanOpen = $state(false);
   const track = $derived(pages.selectedTrack);
 
   const commands: Command[] = $derived([
+    space === 'Mix'
+      ? { name: 'Go to the library', run: () => (space = 'Library') }
+      : { name: 'Go to Mix', run: () => (space = 'Mix') },
     { name: 'Scan a music folder', run: () => (scanOpen = true) },
     {
       name: inspectorOpen ? 'Hide the inspector' : 'Show the inspector',
@@ -65,24 +70,28 @@
 <svelte:window {onkeydown} />
 
 <div class="shell">
-  <div class="rail"><Rail /></div>
+  <div class="rail"><Rail current={space} onselect={(name) => (space = name)} /></div>
   <div class="bar">
     <CommandBar
-      space="Library"
+      {space}
       summary={pages.state.kind === 'ready' ? trackCount(pages.total) : ''}
       {commands}
       inputId={commandInput}
     />
   </div>
   <main class="workspace">
-    <Library
-      {pages}
-      bind:selected={pages.selected}
-      onopen={() => (inspectorOpen = true)}
-      onscan={() => (scanOpen = true)}
-    />
+    {#if space === 'Mix'}
+      <Mix />
+    {:else}
+      <Library
+        {pages}
+        bind:selected={pages.selected}
+        onopen={() => (inspectorOpen = true)}
+        onscan={() => (scanOpen = true)}
+      />
+    {/if}
   </main>
-  {#if inspectorOpen}
+  {#if inspectorOpen && space === 'Library'}
     <div class="inspector">
       <Inspector {track} onclose={() => (inspectorOpen = false)} />
     </div>

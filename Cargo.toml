@@ -4,6 +4,7 @@ members = [
     "crates/core",
     "crates/db",
     "crates/library",
+    "crates/engine",
     "crates/api",
     "crates/cli",
     "crates/fixtures",
@@ -20,6 +21,7 @@ publish = false
 resonance-api = { path = "crates/api" }
 resonance-core = { path = "crates/core" }
 resonance-db = { path = "crates/db" }
+resonance-engine = { path = "crates/engine" }
 resonance-fixtures = { path = "crates/fixtures" }
 resonance-library = { path = "crates/library" }
 clap = { version = "4.6.7", features = ["derive"] }

@@ -10,6 +10,7 @@ pub enum ErrorCode {
     BadRequest,
     LibraryUnreadable,
     ScanFailed,
+    AudioFailed,
     Internal,
 }
 
@@ -58,6 +59,15 @@ impl ApiError {
             code: ErrorCode::ScanFailed,
             message: format!(
                 "The folder could not be scanned. {detail}. Check that the folder is readable and the library is writable, then try again."
+            ),
+        }
+    }
+
+    pub fn audio_failed(detail: impl fmt::Display) -> Self {
+        Self {
+            code: ErrorCode::AudioFailed,
+            message: format!(
+                "{detail}. Check that an audio output is connected and that the file plays elsewhere, then try again."
             ),
         }
     }
