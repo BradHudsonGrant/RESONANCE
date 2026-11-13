@@ -8,8 +8,11 @@ use resonance_api::Api;
 use resonance_api::serve::Server;
 use serde_json::json;
 
+use crate::library_file::{self, OpenError};
+
 #[derive(Debug)]
 pub enum ServeError {
+    Library(OpenError),
     Start(io::Error),
     ConnectionFile { path: PathBuf, source: io::Error },
     Stopped(io::Error),
@@ -18,6 +21,7 @@ pub enum ServeError {
 impl fmt::Display for ServeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Library(source) => source.fmt(f),
             Self::Start(source) => write!(f, "The core could not start listening: {source}"),
             Self::ConnectionFile { path, source } => {
                 write!(
@@ -33,7 +37,9 @@ impl fmt::Display for ServeError {
 
 impl std::error::Error for ServeError {}
 
-pub fn run(connection_file: Option<&Path>) -> Result<(), ServeError> {
+pub fn run(connection_file: Option<&Path>, data_folder: Option<&Path>) -> Result<(), ServeError> {
+    let data_folder = library_file::data_folder(data_folder).map_err(ServeError::Library)?;
+    let api = Api::new(library_file::open(&data_folder).map_err(ServeError::Library)?);
     let runtime = tokio::runtime::Runtime::new().map_err(ServeError::Start)?;
     let served =
         runtime.block_on(async {
@@ -50,7 +56,7 @@ pub fn run(connection_file: Option<&Path>) -> Result<(), ServeError> {
                 None => println!("token {}", server.token()),
             }
             tokio::select! {
-                stopped = server.run(Arc::new(Api::new())) => stopped.map_err(ServeError::Stopped),
+                stopped = server.run(Arc::new(api)) => stopped.map_err(ServeError::Stopped),
                 _ = tokio::signal::ctrl_c() => Ok(()),
             }
         });

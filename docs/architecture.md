@@ -166,6 +166,7 @@ Day-to-day work must not rebuild the whole stack.
 
 - UI work runs in an ordinary browser. `just ui` starts Vite, and the page talks to `resonance serve`, which is the core running as a local process on a localhost WebSocket with a random token. A UI change hot-reloads in place and no Rust is compiled.
 - Core work happens in the crate being changed, with `cargo check`, its tests and the CLI. `just serve` runs the core for the page, and rebuilds and restarts it when a crate changes. A build that fails leaves the running core in place.
+- `just serve` serves the library in `target/dev/data`, and `just scan <folder>` reads a music folder into it. `just synthetic-library` writes 100,000 made-up tracks into `target/dev/synthetic`, and `just serve target/dev/synthetic` serves those instead.
 - The desktop shell is thin and rarely changes. Build it for smoke tests and releases.
 - Playwright drives the same browser page against the real core.
 

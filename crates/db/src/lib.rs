@@ -5,13 +5,16 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use resonance_core::library::{AudioFacts, AudioFormat, ScannedFile, TagField};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
 const MIGRATIONS: [&str; 1] = [include_str!("../migrations/0001_library.sql")];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
+
+/// The database's file name inside the app's data folder.
+pub const FILE_NAME: &str = "library.db";
 
 #[derive(Debug)]
 pub enum DbError {
@@ -239,7 +242,7 @@ impl Database {
         Ok(())
     }
 
-    /// Every track with its file, ordered by source folder and then path.
+    /// Every track with its file, in library order.
     pub fn tracks(&self) -> Result<Vec<TrackRow>, DbError> {
         let mut tags: HashMap<i64, Vec<(TagField, String)>> = HashMap::new();
         let mut statement = self
@@ -247,60 +250,102 @@ impl Database {
             .prepare("SELECT asset_id, field, value FROM file_tag")?;
         let mut rows = statement.query([])?;
         while let Some(row) = rows.next()? {
-            let name: String = row.get(1)?;
-            let field = TagField::from_name(&name).ok_or(DbError::UnknownName {
-                column: "file_tag.field",
-                name,
-            })?;
             tags.entry(row.get(0)?)
                 .or_default()
-                .push((field, row.get(2)?));
+                .push((tag_field(row.get(1)?)?, row.get(2)?));
         }
 
-        let mut statement = self.connection.prepare(
-            "SELECT asset.id, asset.track_id, source.folder, asset.path, asset.size_bytes,
-                 asset.modified_ns, asset.format, asset.duration_ms, asset.sample_rate,
-                 asset.channels, asset.bit_depth, asset.bitrate_kbps
-             FROM asset JOIN source ON source.id = asset.source_id
-             ORDER BY source.folder, asset.path",
-        )?;
+        let mut statement = self.connection.prepare(TRACKS_IN_ORDER)?;
         let mut rows = statement.query([])?;
         let mut tracks = Vec::new();
         while let Some(row) = rows.next()? {
-            let asset: i64 = row.get(0)?;
-            let name: String = row.get(6)?;
-            let format = AudioFormat::from_name(&name).ok_or(DbError::UnknownName {
-                column: "asset.format",
-                name,
-            })?;
-            let duration_ms: Option<u64> = row.get(7)?;
-            let audio = match duration_ms {
-                Some(duration_ms) => Some(AudioFacts {
-                    duration_ms,
-                    sample_rate: row.get(8)?,
-                    channels: row.get(9)?,
-                    bit_depth: row.get(10)?,
-                    bitrate_kbps: row.get(11)?,
-                }),
-                None => None,
-            };
-            let mut file_tags = tags.remove(&asset).unwrap_or_default();
-            file_tags.sort();
-            tracks.push(TrackRow {
-                track_id: row.get(1)?,
-                source_folder: row.get(2)?,
-                file: ScannedFile {
-                    path: row.get(3)?,
-                    size_bytes: row.get(4)?,
-                    modified_ns: row.get(5)?,
-                    format,
-                    audio,
-                    tags: file_tags,
-                },
-            });
+            let (asset, mut track) = track_row(row)?;
+            track.file.tags = tags.remove(&asset).unwrap_or_default();
+            track.file.tags.sort();
+            tracks.push(track);
         }
         Ok(tracks)
     }
+
+    /// Up to `limit` tracks starting at `offset`, in library order. A table that shows a few
+    /// dozen rows of a large library asks for the part in view.
+    pub fn tracks_page(&self, offset: u32, limit: u32) -> Result<Vec<TrackRow>, DbError> {
+        let mut statement = self
+            .connection
+            .prepare(&format!("{TRACKS_IN_ORDER} LIMIT ?1 OFFSET ?2"))?;
+        let mut tags_of = self
+            .connection
+            .prepare("SELECT field, value FROM file_tag WHERE asset_id = ?1 ORDER BY field")?;
+        let mut rows = statement.query([limit, offset])?;
+        let mut tracks = Vec::new();
+        while let Some(row) = rows.next()? {
+            let (asset, mut track) = track_row(row)?;
+            let mut tags = tags_of.query([asset])?;
+            while let Some(tag) = tags.next()? {
+                track.file.tags.push((tag_field(tag.get(0)?)?, tag.get(1)?));
+            }
+            track.file.tags.sort();
+            tracks.push(track);
+        }
+        Ok(tracks)
+    }
+
+    pub fn track_count(&self) -> Result<u32, DbError> {
+        Ok(self
+            .connection
+            .query_row("SELECT count(*) FROM asset", [], |row| row.get(0))?)
+    }
+}
+
+/// Library order: by source folder, then by path. Read sources by their folder index and each
+/// source's assets by the (source, path) index, and the rows come out in this order with no
+/// sort, so a page deep in a large library costs a walk along an index. `CROSS JOIN` holds
+/// SQLite to that plan: left to choose, it sorted every row, and the last page of 100,000 took
+/// 585 ms instead of 13 ms.
+const TRACKS_IN_ORDER: &str = "SELECT asset.id, asset.track_id, source.folder, asset.path,
+         asset.size_bytes, asset.modified_ns, asset.format, asset.duration_ms, asset.sample_rate,
+         asset.channels, asset.bit_depth, asset.bitrate_kbps
+     FROM source CROSS JOIN asset ON asset.source_id = source.id
+     ORDER BY source.folder, asset.path";
+
+fn tag_field(name: String) -> Result<TagField, DbError> {
+    TagField::from_name(&name).ok_or(DbError::UnknownName {
+        column: "file_tag.field",
+        name,
+    })
+}
+
+/// A row of `TRACKS_IN_ORDER` as its asset id and its track, without tags.
+fn track_row(row: &Row<'_>) -> Result<(i64, TrackRow), DbError> {
+    let name: String = row.get(6)?;
+    let format = AudioFormat::from_name(&name).ok_or(DbError::UnknownName {
+        column: "asset.format",
+        name,
+    })?;
+    let duration_ms: Option<u64> = row.get(7)?;
+    let audio = match duration_ms {
+        Some(duration_ms) => Some(AudioFacts {
+            duration_ms,
+            sample_rate: row.get(8)?,
+            channels: row.get(9)?,
+            bit_depth: row.get(10)?,
+            bitrate_kbps: row.get(11)?,
+        }),
+        None => None,
+    };
+    let track = TrackRow {
+        track_id: row.get(1)?,
+        source_folder: row.get(2)?,
+        file: ScannedFile {
+            path: row.get(3)?,
+            size_bytes: row.get(4)?,
+            modified_ns: row.get(5)?,
+            format,
+            audio,
+            tags: Vec::new(),
+        },
+    };
+    Ok((row.get(0)?, track))
 }
 
 #[cfg(test)]

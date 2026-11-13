@@ -1,3 +1,4 @@
+mod library_file;
 mod scan;
 mod serve;
 
@@ -53,7 +54,10 @@ fn main() -> ExitCode {
     match cli.command {
         Command::Key { tags } => show_keys(&tags),
         Command::Scan { folder } => finished(scan::run(&folder, cli.data_folder.as_deref())),
-        Command::Serve { connection_file } => finished(serve::run(connection_file.as_deref())),
+        Command::Serve { connection_file } => finished(serve::run(
+            connection_file.as_deref(),
+            cli.data_folder.as_deref(),
+        )),
     }
 }
 

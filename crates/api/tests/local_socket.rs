@@ -8,6 +8,7 @@ use std::sync::Arc;
 use futures_util::{SinkExt, StreamExt};
 use resonance_api::Api;
 use resonance_api::serve::Server;
+use resonance_db::Database;
 use serde_json::{Value, json};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -28,7 +29,7 @@ async fn start() -> Running {
         url: format!("ws://{}", server.address().unwrap()),
         token: server.token().to_owned(),
     };
-    tokio::spawn(server.run(Arc::new(Api::new())));
+    tokio::spawn(server.run(Arc::new(Api::new(Database::open_in_memory().unwrap()))));
     running
 }
 

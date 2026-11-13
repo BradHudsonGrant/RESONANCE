@@ -614,6 +614,8 @@ dependencies = [
  "directories",
  "futures-util",
  "getrandom",
+ "resonance-core",
+ "resonance-db",
  "serde",
  "serde_json",
  "tokio",
@@ -652,6 +654,7 @@ name = "resonance-fixtures"
 version = "0.1.0"
 dependencies = [
  "resonance-core",
+ "resonance-db",
  "serde",
  "serde_json",
  "sha2",

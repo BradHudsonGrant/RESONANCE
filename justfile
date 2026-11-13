@@ -34,9 +34,17 @@ ui-verify:
 ui:
     npm --prefix ui run dev
 
-# The core as a local process, rebuilt and restarted when a crate changes
-serve:
-    node ui/dev/core-watch.ts
+# The core as a local process, rebuilt and restarted when a crate changes, serving the library in the data folder
+serve data_folder="target/dev/data":
+    node ui/dev/core-watch.ts --data-folder "{{ data_folder }}"
+
+# Read a music folder into the library that `just serve` serves. Nothing in the folder is changed.
+scan folder data_folder="target/dev/data":
+    cargo run --quiet --package resonance-cli -- --data-folder "{{ data_folder }}" scan "{{ folder }}"
+
+# A made-up library for measuring at scale. Serve it with `just serve target/dev/synthetic`.
+synthetic-library count="100000":
+    cargo run --quiet --package resonance-fixtures --bin synthetic-library -- target/dev/synthetic {{ count }}
 
 # Clean and incremental build times for the dev profile, recorded in docs/benchmarks/build-times.md
 build-times:

@@ -8,6 +8,7 @@ use ts_rs::TS;
 #[ts(export)]
 pub enum ErrorCode {
     BadRequest,
+    LibraryUnreadable,
 }
 
 /// The one place a failure becomes a message for the user.
@@ -23,6 +24,13 @@ impl ApiError {
         Self {
             code: ErrorCode::BadRequest,
             message: format!("The app sent a request the core could not read: {detail}"),
+        }
+    }
+
+    pub fn library_unreadable(detail: impl fmt::Display) -> Self {
+        Self {
+            code: ErrorCode::LibraryUnreadable,
+            message: format!("The library could not be read. {detail}"),
         }
     }
 }

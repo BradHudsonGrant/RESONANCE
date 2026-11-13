@@ -6,17 +6,77 @@ use ts_rs::TS;
 #[ts(export)]
 pub enum Request {
     AppInfo,
+    /// A page of the library in library order, for a table that shows the part in view.
+    Tracks {
+        offset: u32,
+        limit: u32,
+    },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(tag = "command", content = "result", rename_all = "snake_case")]
 #[ts(export)]
 pub enum Response {
     AppInfo(AppInfo),
+    Tracks(TrackPage),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export)]
 pub struct AppInfo {
     pub version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct TrackPage {
+    /// How many tracks the whole library holds when the page was read.
+    pub total: u32,
+    pub offset: u32,
+    pub tracks: Vec<LibraryTrack>,
+}
+
+/// One track as the library table and the inspector show it.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct LibraryTrack {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub title: String,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub album_artist: Option<String>,
+    pub genre: Option<String>,
+    pub year: Option<String>,
+    pub track_number: Option<String>,
+    pub label: Option<String>,
+    pub comment: Option<String>,
+    pub bpm: Option<f64>,
+    pub key: Option<TrackKey>,
+    /// The key tag as the file has it, which may not be a key at all.
+    pub key_tag: Option<String>,
+    pub format: String,
+    pub location: String,
+    #[ts(type = "number")]
+    pub size_bytes: u64,
+    /// Missing when the file could not be read as audio.
+    pub audio: Option<TrackAudio>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct TrackKey {
+    pub camelot: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct TrackAudio {
+    #[ts(type = "number")]
+    pub duration_ms: u64,
+    pub sample_rate: Option<u32>,
+    pub channels: Option<u8>,
+    pub bit_depth: Option<u8>,
+    pub bitrate_kbps: Option<u32>,
 }

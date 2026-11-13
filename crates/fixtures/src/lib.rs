@@ -3,3 +3,4 @@ pub mod flac;
 pub mod local_set;
 pub mod signal;
 pub mod silence;
+pub mod synthetic_library;

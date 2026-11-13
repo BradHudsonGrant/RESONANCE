@@ -55,7 +55,7 @@ export class Core {
         this.#socket = null;
         const gone = new CoreError(
           'disconnected',
-          'The core is not running. Start it with `just serve`.',
+          'The core is not running. Start it with just serve, then try again.',
         );
         reject(gone);
         for (const waiting of this.#waiting.values()) waiting.reject(gone);

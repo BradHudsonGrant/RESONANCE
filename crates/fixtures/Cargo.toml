@@ -1,13 +1,15 @@
 [package]
 name = "resonance-fixtures"
-description = "Test audio made from maths, and the copy of real tracks that stays on one machine. Never shipped."
+description = "Test audio made from maths, a made-up library for measuring at scale, and the copy of real tracks that stays on one machine. Never shipped."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+default-run = "resonance-fixtures"
 
 [dependencies]
 resonance-core.workspace = true
+resonance-db.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
