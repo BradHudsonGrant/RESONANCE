@@ -36,4 +36,4 @@ Tauri 2.12.5, `tauri-build` 2.7.4 and the JavaScript API and CLI 2.12.4 are Apac
 
 `just verify` builds the frontend before Rust embeds it. Windows verifies the whole workspace. The existing Linux PR job checks the platform-neutral crates; native builds and installer checks run on Windows.
 
-An installer still needs an installed-app smoke test. Running the executable from `target/` proves the native transport and bundled assets, but does not prove installation or uninstall behaviour.
+On 13 November 2026, the installer was run and the installed app scanned all 50 fixture tracks through its scan form. Closing and reopening it kept the tracks. The [installed-app check and startup observation](../benchmarks/native-shell.md) record the method and limits. Uninstall behaviour was not tested.
