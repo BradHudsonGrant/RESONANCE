@@ -1,0 +1,728 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resonance wave surface reference</title>
+<style>
+  :root {
+    --bg: #0B0B0C; --surface: #141415; --surface-2: #1E1E1F; --border: #343437;
+    --text: #F2F1EF; --text-2: #A9A8A6; --accent: #E4553D;
+  }
+  :root[data-theme="light"] {
+    --bg: #F8F7F5; --surface: #FFFFFF; --surface-2: #ECEAE7; --border: #D8D4CF;
+    --text: #171717; --text-2: #666461; --accent: #D94F3B;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.4 Inter, system-ui, sans-serif;
+    display: grid; grid-template-columns: minmax(0, 1fr) 312px; grid-template-rows: minmax(0, 1fr) auto;
+  }
+  canvas { display: block; width: 100%; height: 100%; min-height: 320px; }
+  aside {
+    grid-row: 1 / span 2; grid-column: 2; overflow-y: auto;
+    border-left: 1px solid var(--border); background: var(--surface); padding: 14px 16px 20px;
+  }
+  footer {
+    display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 9px 16px;
+    border-top: 1px solid var(--border); background: var(--surface); color: var(--text-2);
+    font: 12px/1.4 "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums;
+  }
+  h2 {
+    margin: 18px 0 8px; font-size: 11px; font-weight: 500; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--text-2);
+  }
+  h2:first-child { margin-top: 0; }
+  .row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; margin-bottom: 9px; }
+  .row input[type="range"] { grid-column: 1 / span 2; width: 100%; accent-color: var(--accent); margin: 0; }
+  .row output { color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 9px; }
+  .check { display: flex; gap: 8px; align-items: center; margin-bottom: 7px; }
+  .check input { accent-color: var(--accent); margin: 0; }
+  label.stack { display: grid; gap: 3px; color: var(--text-2); }
+  select, button, textarea, input[type="file"] {
+    font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid var(--border); border-radius: 4px; padding: 5px 8px; width: 100%;
+  }
+  button { cursor: pointer; }
+  button[aria-pressed="true"] { border-color: var(--accent); }
+  textarea {
+    height: 150px; resize: vertical;
+    font: 11px/1.45 "JetBrains Mono", ui-monospace, monospace; color: var(--text-2);
+  }
+  p.note { margin: 8px 0 0; color: var(--text-2); font-size: 12px; }
+  @media (max-width: 860px) {
+    body { grid-template-columns: 1fr; grid-template-rows: 46vh auto auto; }
+    aside { grid-row: 3; grid-column: 1; border-left: 0; border-top: 1px solid var(--border); }
+  }
+</style>
+</head>
+<body>
+<canvas id="surface"></canvas>
+<footer id="readout">idle</footer>
+<aside>
+  <h2>Look</h2>
+  <div class="pair">
+    <label class="stack">Preset
+      <select id="preset">
+        <option value="still">Still</option>
+        <option value="calm">Calm</option>
+        <option value="balanced" selected>Balanced</option>
+        <option value="lively">Lively</option>
+      </select>
+    </label>
+    <label class="stack">Theme
+      <select id="theme"><option value="dark">Dark</option><option value="light">Light</option></select>
+    </label>
+  </div>
+  <div id="look"></div>
+  <div class="pair">
+    <label class="stack">Density
+      <select id="density">
+        <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
+      </select>
+    </label>
+    <label class="stack">Frame cap
+      <select id="frameCap"><option value="30">30</option><option value="60">60</option><option value="0">Display</option></select>
+    </label>
+  </div>
+
+  <h2>Motion</h2>
+  <div id="motion"></div>
+  <label class="check"><input type="checkbox" id="followTempo"> Flow follows the tempo</label>
+  <label class="check"><input type="checkbox" id="followTone"> Shape follows the tone</label>
+  <label class="check"><input type="checkbox" id="calmBreakdowns"> Settle in breakdowns</label>
+  <label class="stack">Bars per flow cycle
+    <select id="barsPerCycle"><option>8</option><option>16</option><option>32</option><option>64</option></select>
+  </label>
+
+  <h2>Response</h2>
+  <div id="response"></div>
+
+  <h2>Sound</h2>
+  <div class="pair">
+    <button id="test" aria-pressed="false">Test signal</button>
+    <button id="reset">Reset</button>
+  </div>
+  <label class="stack">Audio file <input id="file" type="file" accept="audio/*"></label>
+  <p class="note">
+    The test signal is synthesised here: ten bars of groove, a four-bar breakdown, a two-bar build, at 124 BPM.
+    In this page tempo and beats are estimated from the audio. In the app they come from the beat grid.
+  </p>
+
+  <h2>Settings</h2>
+  <textarea id="json" readonly spellcheck="false"></textarea>
+  <button id="copy" style="margin-top: 8px">Copy settings</button>
+</aside>
+
+<script>
+const TAU = Math.PI * 2;
+const DENSITY = { low: [170, 68], medium: [260, 104], high: [360, 144] };
+const BANDS_HZ = { low: [25, 150], mid: [150, 2500], high: [2500, 12000] };
+const TONE_RANGE_HZ = [40, 10000];
+const SILENCE = 0.03;
+const IDLE_FLOW_RATE = 0.035;
+const IDLE_RIPPLE_RATE = 0.03;
+const BEAT_REFRACTORY_S = 0.22;
+const BEAT_PERIOD_RANGE_S = [0.375, 0.75];
+
+const DEFAULTS = {
+  drift: 1, reactivity: 0.6, smoothing: 0.6,
+  followTempo: true, followTone: true, calmBreakdowns: true, barsPerCycle: 32,
+  bass: 1, mids: 1, highs: 1, pulse: 0.6,
+  height: 1, pointSize: 1, elevation: 0.5, zoom: 1,
+  density: 'medium', frameCap: 60,
+};
+
+const PRESETS = {
+  still: { drift: 0, reactivity: 0, pulse: 0 },
+  calm: { drift: 0.6, reactivity: 0.35, pulse: 0.3, smoothing: 0.8 },
+  balanced: {},
+  lively: { drift: 1.6, reactivity: 1, pulse: 1, smoothing: 0.4, barsPerCycle: 16 },
+};
+
+const SLIDERS = {
+  look: [
+    { key: 'height', label: 'Height', min: 0.4, max: 1.6 },
+    { key: 'pointSize', label: 'Dot size', min: 0.6, max: 2 },
+    { key: 'elevation', label: 'Camera tilt', min: 0.3, max: 0.8 },
+    { key: 'zoom', label: 'Zoom', min: 0.7, max: 1.4 },
+  ],
+  motion: [
+    { key: 'drift', label: 'Idle drift', min: 0, max: 4 },
+    { key: 'reactivity', label: 'Reactivity', min: 0, max: 1.5 },
+    { key: 'smoothing', label: 'Smoothing', min: 0, max: 1 },
+  ],
+  response: [
+    { key: 'bass', label: 'Bass lifts the swell', min: 0, max: 2 },
+    { key: 'mids', label: 'Mids stir the cross-waves', min: 0, max: 2 },
+    { key: 'highs', label: 'Highs raise the ripple', min: 0, max: 2 },
+    { key: 'pulse', label: 'Beat pulse', min: 0, max: 2 },
+  ],
+};
+
+const VERTEX = `#version 300 es
+precision highp float;
+layout(location = 0) in vec2 aGrid;
+uniform float uFlow;
+uniform float uRipple;
+uniform float uRing;
+uniform vec2 uRidge;
+uniform vec4 uGain;
+uniform vec3 uCamera;
+uniform float uAspect;
+uniform float uDpr;
+out float vAlpha;
+
+const float TAU = 6.28318530718;
+const float CAMERA_DISTANCE = 2.5;
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+
+float noise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  float a = mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x);
+  float b = mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x);
+  return mix(a, b, u.y) * 2.0 - 1.0;
+}
+
+float height(vec2 g) {
+  float ridge = exp(-pow((g.x - uRidge.x) / uRidge.y, 2.0));
+  float wander = noise(g * vec2(1.6, 1.2) + uFlow * vec2(0.11, -0.07));
+  float swell = sin(TAU * (1.30 * g.x + 0.30 * g.y) + uFlow + 0.5 * wander);
+  float cross = sin(TAU * (2.4 * g.x - 1.1 * g.y) - uFlow * 1.6)
+              * sin(TAU * 0.75 * g.y + uFlow * 0.6);
+  float ripple = sin(TAU * (9.0 * g.x + 2.5 * g.y) + uRipple);
+  float fromCrest = length((g - vec2(uRidge.x, 0.45)) * vec2(1.0, 0.62));
+  float ring = exp(-pow((fromCrest - uRing) / 0.06, 2.0));
+
+  return (0.11 + 0.24 * ridge) * swell * uGain.x
+       + 0.075 * cross * uGain.y
+       + 0.010 * ripple * uGain.z
+       + 0.07 * ring * uGain.w;
+}
+
+void main() {
+  float h = height(aGrid);
+  vec3 p = vec3((aGrid.x - 0.5) * 3.5, h, (aGrid.y - 0.5) * 2.0);
+
+  float c = cos(uCamera.x);
+  float s = sin(uCamera.x);
+  float screenY = p.y * c + p.z * s;
+  float depth = CAMERA_DISTANCE + p.z * c - p.y * s;
+  float fit = min(1.0, uAspect / 1.9);
+  float scale = 2.0 * uCamera.y * fit / depth;
+
+  gl_Position = vec4(p.x * scale / uAspect, screenY * scale * 1.15 - 0.06, 0.0, 1.0);
+
+  float edge = smoothstep(0.0, 0.16, aGrid.x) * smoothstep(1.0, 0.84, aGrid.x)
+             * smoothstep(0.0, 0.22, aGrid.y) * smoothstep(1.0, 0.72, aGrid.y);
+  float crest = smoothstep(-0.22, 0.30, h);
+  vAlpha = edge * (0.22 + 0.78 * crest);
+  gl_PointSize = max(1.0, uDpr * uCamera.z * mix(0.9, 1.7, crest) * scale);
+}`;
+
+const FRAGMENT = `#version 300 es
+precision mediump float;
+uniform vec3 uColor;
+in float vAlpha;
+out vec4 outColor;
+void main() { outColor = vec4(uColor, vAlpha); }`;
+
+const canvas = document.getElementById('surface');
+const readout = document.getElementById('readout');
+const jsonBox = document.getElementById('json');
+const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, powerPreference: 'low-power' });
+if (!gl) {
+  readout.textContent = 'WebGL2 is not available in this browser';
+  throw new Error('WebGL2 unavailable');
+}
+
+function compile(type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(shader));
+  return shader;
+}
+
+const program = gl.createProgram();
+gl.attachShader(program, compile(gl.VERTEX_SHADER, VERTEX));
+gl.attachShader(program, compile(gl.FRAGMENT_SHADER, FRAGMENT));
+gl.linkProgram(program);
+if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+gl.useProgram(program);
+
+const uniforms = Object.fromEntries(
+  ['uFlow', 'uRipple', 'uRing', 'uRidge', 'uGain', 'uCamera', 'uAspect', 'uDpr', 'uColor']
+    .map((name) => [name, gl.getUniformLocation(program, name)]),
+);
+
+gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+gl.enable(gl.BLEND);
+gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+const params = new URLSearchParams(location.search);
+const frozenFlow = params.has('t') ? Number(params.get('t')) : null;
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+
+const settings = { ...DEFAULTS, ...(reducedMotion.matches ? PRESETS.still : {}) };
+const view = {
+  flow: frozenFlow ?? 0, ripple: 0, ring: 1, ridge: 0.6, width: 0.26,
+  points: 0, visible: true, background: [0, 0, 0], foreground: [1, 1, 1],
+};
+const sound = {
+  low: 0, mid: 0, high: 0, level: 0, levelSlow: 0, lowSlow: 0, lowLong: 0,
+  activity: 0, calm: 0, beat: 0, sinceBeat: 9, period: 0.5,
+  tone: 0.5, spread: 0.25, previousLow: 0, fluxAverage: 0,
+};
+const beatIntervals = new Float32Array(8);
+const sortedIntervals = new Float32Array(8);
+let beatCount = 0;
+
+const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
+const approach = (current, target, seconds, dt) => target + (current - target) * Math.exp(-dt / seconds);
+const follow = (current, target, attack, release, dt) =>
+  approach(current, target, target > current ? attack : release, dt);
+
+function buildGrid() {
+  const [cols, rows] = DENSITY[settings.density];
+  const grid = new Float32Array(cols * rows * 2);
+  for (let row = 0, i = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      grid[i++] = col / (cols - 1);
+      grid[i++] = row / (rows - 1);
+    }
+  }
+  gl.bufferData(gl.ARRAY_BUFFER, grid, gl.STATIC_DRAW);
+  view.points = cols * rows;
+}
+
+function cssColor(name) {
+  const hex = getComputedStyle(document.documentElement).getPropertyValue(name).trim().slice(1);
+  return [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  view.background = cssColor('--bg');
+  view.foreground = cssColor('--text');
+}
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.max(1, Math.round(canvas.clientWidth * dpr));
+  const height = Math.max(1, Math.round(canvas.clientHeight * dpr));
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  gl.viewport(0, 0, width, height);
+  gl.uniform1f(uniforms.uAspect, width / height);
+  gl.uniform1f(uniforms.uDpr, dpr);
+}
+
+let audioContext = null;
+let analyser = null;
+let spectrum = null;
+let binTone = null;
+let linearAmplitude = null;
+let stopTestSignal = null;
+let filePlayer = null;
+
+function ensureAudio() {
+  if (audioContext) return;
+  audioContext = new AudioContext();
+  analyser = audioContext.createAnalyser();
+  analyser.fftSize = 2048;
+  analyser.smoothingTimeConstant = 0;
+  analyser.connect(audioContext.destination);
+  spectrum = new Uint8Array(analyser.frequencyBinCount);
+
+  const hzPerBin = audioContext.sampleRate / analyser.fftSize;
+  const octaves = Math.log2(TONE_RANGE_HZ[1] / TONE_RANGE_HZ[0]);
+  binTone = new Float32Array(spectrum.length);
+  for (let bin = 1; bin < spectrum.length; bin++) {
+    binTone[bin] = Math.log2((bin * hzPerBin) / TONE_RANGE_HZ[0]) / octaves;
+  }
+  const dbRange = analyser.maxDecibels - analyser.minDecibels;
+  linearAmplitude = new Float32Array(256);
+  for (let value = 0; value < 256; value++) {
+    linearAmplitude[value] = 10 ** ((analyser.minDecibels + (value / 255) * dbRange) / 20);
+  }
+}
+
+function bandLevel([fromHz, toHz]) {
+  const hzPerBin = audioContext.sampleRate / analyser.fftSize;
+  const first = Math.max(1, Math.floor(fromHz / hzPerBin));
+  const last = Math.min(spectrum.length - 1, Math.ceil(toHz / hzPerBin));
+  let sum = 0;
+  for (let bin = first; bin <= last; bin++) sum += spectrum[bin];
+  return sum / ((last - first + 1) * 255);
+}
+
+function measureTone() {
+  let weight = 0, first = 0, second = 0;
+  for (let bin = 1; bin < spectrum.length; bin++) {
+    const position = binTone[bin];
+    if (position < 0 || position > 1) continue;
+    const amplitude = linearAmplitude[spectrum[bin]];
+    weight += amplitude;
+    first += amplitude * position;
+    second += amplitude * position * position;
+  }
+  if (weight === 0) return;
+  const mean = first / weight;
+  sound.tone = mean;
+  sound.spread = Math.sqrt(Math.max(0, second / weight - mean * mean));
+}
+
+function registerBeat() {
+  let interval = sound.sinceBeat;
+  const [shortest, longest] = BEAT_PERIOD_RANGE_S;
+  if (interval < 3) {
+    while (interval > longest) interval /= 2;
+    while (interval < shortest) interval *= 2;
+    beatIntervals[beatCount % beatIntervals.length] = interval;
+    beatCount++;
+    const filled = Math.min(beatCount, beatIntervals.length);
+    sortedIntervals.set(beatIntervals);
+    const window = sortedIntervals.subarray(0, filled).sort();
+    sound.period = window[filled >> 1];
+  }
+  sound.beat = 1;
+  sound.sinceBeat = 0;
+}
+
+function analyse(dt) {
+  let low = 0, mid = 0, high = 0;
+  if (analyser && audioContext.state === 'running') {
+    analyser.getByteFrequencyData(spectrum);
+    low = bandLevel(BANDS_HZ.low);
+    mid = bandLevel(BANDS_HZ.mid);
+    high = bandLevel(BANDS_HZ.high);
+  }
+  const level = (low + mid + high) / 3;
+  if (level > SILENCE) measureTone();
+
+  const attack = 0.02 + 0.10 * settings.smoothing;
+  const release = 0.12 + 0.60 * settings.smoothing;
+  sound.low = follow(sound.low, low, attack, release, dt);
+  sound.mid = follow(sound.mid, mid, attack, release * 0.7, dt);
+  sound.high = follow(sound.high, high, attack, release * 0.5, dt);
+  sound.level = follow(sound.level, level, attack, release, dt);
+  sound.levelSlow = approach(sound.levelSlow, level, 3, dt);
+  sound.lowSlow = approach(sound.lowSlow, low, 1.2, dt);
+  sound.lowLong = approach(sound.lowLong, low, 10, dt);
+  sound.activity = approach(sound.activity, level > SILENCE ? 1 : 0, 0.6, dt);
+
+  const flux = Math.max(0, low - sound.previousLow);
+  sound.previousLow = low;
+  sound.sinceBeat += dt;
+  const isOnset = flux > sound.fluxAverage * 2.5 + 0.02 && sound.sinceBeat > BEAT_REFRACTORY_S;
+  sound.fluxAverage = approach(sound.fluxAverage, flux, 1, dt);
+  if (isOnset) registerBeat();
+  else sound.beat = approach(sound.beat, 0, 0.25 + 0.35 * settings.smoothing, dt);
+
+  const inBreakdown = settings.calmBreakdowns && sound.activity > 0.5 && sound.lowSlow < sound.lowLong * 0.5;
+  sound.calm = approach(sound.calm, inBreakdown ? 1 : 0, 1.2, dt);
+}
+
+function advance(dt) {
+  const playing = sound.activity > 0.5;
+  const react = settings.reactivity * sound.activity;
+  const quiet = 1 - 0.6 * sound.calm;
+
+  let flowRate = IDLE_FLOW_RATE * settings.drift;
+  if (settings.followTempo) {
+    const cycleSeconds = sound.period * 4 * settings.barsPerCycle;
+    flowRate += react * (TAU / cycleSeconds) * (0.6 + 0.8 * sound.beat);
+  } else {
+    flowRate += react * 0.08;
+  }
+  if (frozenFlow === null) view.flow += dt * flowRate;
+  view.ripple += dt * (IDLE_RIPPLE_RATE * settings.drift + react * settings.highs * sound.high * 1.5);
+
+  const ringSeconds = clamp(sound.period * 1.2, 0.35, 0.9);
+  view.ring = 0.8 * Math.min(1, sound.sinceBeat / ringSeconds);
+
+  const follows = settings.followTone && playing;
+  const ridge = follows ? 0.42 + 0.36 * clamp((sound.tone - 0.3) / 0.4) : 0.6;
+  const width = (follows ? 0.2 + 0.5 * sound.spread : 0.26) + 0.05 * sound.calm;
+  view.ridge = approach(view.ridge, ridge, 1.4, dt);
+  view.width = approach(view.width, clamp(width, 0.18, 0.36), 1.4, dt);
+
+  gl.uniform4f(
+    uniforms.uGain,
+    settings.height * (1 + react * quiet * (0.7 * settings.bass * sound.low + 0.5 * sound.levelSlow)),
+    settings.height * (1 + react * quiet * settings.mids * sound.mid),
+    0.4 + react * quiet * 3 * settings.highs * sound.high,
+    react * settings.pulse * sound.beat,
+  );
+}
+
+function draw() {
+  const [r, g, b] = view.background;
+  gl.clearColor(r, g, b, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.uniform3fv(uniforms.uColor, view.foreground);
+  gl.uniform1f(uniforms.uFlow, view.flow);
+  gl.uniform1f(uniforms.uRipple, view.ripple);
+  gl.uniform1f(uniforms.uRing, view.ring);
+  gl.uniform2f(uniforms.uRidge, view.ridge, view.width);
+  gl.uniform3f(uniforms.uCamera, settings.elevation, settings.zoom, settings.pointSize);
+  gl.drawArrays(gl.POINTS, 0, view.points);
+}
+
+function startTestSignal() {
+  ensureAudio();
+  const out = audioContext.createGain();
+  out.gain.value = 0.5;
+  out.connect(analyser);
+
+  const noise = audioContext.createBuffer(1, audioContext.sampleRate * 0.1, audioContext.sampleRate);
+  const samples = noise.getChannelData(0);
+  for (let i = 0; i < samples.length; i++) samples[i] = Math.random() * 2 - 1;
+
+  const beat = 60 / 124;
+  let next = audioContext.currentTime + 0.05;
+  let step = 0;
+
+  function kick(at) {
+    const osc = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    osc.frequency.setValueAtTime(150, at);
+    osc.frequency.exponentialRampToValueAtTime(45, at + 0.12);
+    gain.gain.setValueAtTime(1, at);
+    gain.gain.exponentialRampToValueAtTime(0.001, at + 0.28);
+    osc.connect(gain).connect(out);
+    osc.start(at);
+    osc.stop(at + 0.3);
+  }
+
+  function hat(at, level) {
+    const source = audioContext.createBufferSource();
+    const filter = audioContext.createBiquadFilter();
+    const gain = audioContext.createGain();
+    source.buffer = noise;
+    filter.type = 'highpass';
+    filter.frequency.value = 7000;
+    gain.gain.setValueAtTime(level, at);
+    gain.gain.exponentialRampToValueAtTime(0.001, at + 0.06);
+    source.connect(filter).connect(gain).connect(out);
+    source.start(at);
+  }
+
+  function tone(at, hz, seconds, level, cutoffHz) {
+    const osc = audioContext.createOscillator();
+    const filter = audioContext.createBiquadFilter();
+    const gain = audioContext.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.value = hz;
+    filter.type = 'lowpass';
+    filter.frequency.value = cutoffHz;
+    gain.gain.setValueAtTime(0.0001, at);
+    gain.gain.linearRampToValueAtTime(level, at + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, at + seconds);
+    osc.connect(filter).connect(gain).connect(out);
+    osc.start(at);
+    osc.stop(at + seconds + 0.02);
+  }
+
+  function schedule(at) {
+    const bar = Math.floor(step / 4) % 16;
+    const groove = bar < 10;
+    const build = bar >= 14;
+    if (groove) {
+      kick(at);
+      tone(at + beat / 2, bar % 4 < 2 ? 55 : 65.4, beat * 0.45, 0.25, 400);
+      hat(at + beat / 2, 0.35);
+    } else {
+      if (step % 4 === 0) tone(at, 220, beat * 4, 0.12, 1400);
+      if (step % 4 === 0) tone(at, 329.6, beat * 4, 0.1, 1400);
+      hat(at + beat / 2, build ? 0.4 : 0.18);
+      if (build) hat(at, 0.3);
+    }
+  }
+
+  const timer = setInterval(() => {
+    while (next < audioContext.currentTime + 0.2) {
+      schedule(next);
+      next += beat;
+      step++;
+    }
+  }, 50);
+
+  return () => {
+    clearInterval(timer);
+    out.disconnect();
+  };
+}
+
+function showSettings() {
+  jsonBox.value = JSON.stringify(settings, null, 2);
+}
+
+function syncControls() {
+  for (const group of Object.values(SLIDERS)) {
+    for (const { key } of group) {
+      document.getElementById(key).value = settings[key];
+      document.getElementById(`${key}-value`).textContent = settings[key].toFixed(2);
+    }
+  }
+  for (const key of ['followTempo', 'followTone', 'calmBreakdowns']) {
+    document.getElementById(key).checked = settings[key];
+  }
+  for (const key of ['density', 'frameCap', 'barsPerCycle']) {
+    document.getElementById(key).value = String(settings[key]);
+  }
+  showSettings();
+}
+
+function buildSliders() {
+  for (const [groupId, group] of Object.entries(SLIDERS)) {
+    const host = document.getElementById(groupId);
+    for (const { key, label, min, max } of group) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.innerHTML =
+        `<label for="${key}">${label}</label><output id="${key}-value"></output>` +
+        `<input type="range" id="${key}" min="${min}" max="${max}" step="0.05">`;
+      host.append(row);
+      row.querySelector('input').addEventListener('input', (event) => {
+        settings[key] = Number(event.target.value);
+        document.getElementById(`${key}-value`).textContent = settings[key].toFixed(2);
+        showSettings();
+      });
+    }
+  }
+}
+
+function applyPreset(name) {
+  const { density, frameCap } = settings;
+  Object.assign(settings, DEFAULTS, PRESETS[name], { density, frameCap });
+  syncControls();
+}
+
+let lastFrame = performance.now();
+let frameMs = 16.7;
+let lastReadout = 0;
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (!view.visible || document.hidden) {
+    lastFrame = now;
+    return;
+  }
+  const elapsed = now - lastFrame;
+  if (settings.frameCap && elapsed < 1000 / settings.frameCap - 1) return;
+  lastFrame = now;
+  const dt = Math.min(elapsed / 1000, 0.1);
+
+  analyse(dt);
+  advance(dt);
+  draw();
+
+  frameMs += (elapsed - frameMs) * 0.05;
+  if (now - lastReadout > 250) {
+    lastReadout = now;
+    const playing = sound.activity > 0.5;
+    const state = !playing ? 'idle' : sound.calm > 0.5 ? 'breakdown' : 'playing';
+    const tempo = playing && beatCount > 3 ? `${(60 / sound.period).toFixed(0)} bpm` : '-- bpm';
+    readout.textContent =
+      `${(1000 / frameMs).toFixed(0)} fps   ${state}   ${tempo}   ` +
+      `level ${sound.level.toFixed(2)}   low ${sound.low.toFixed(2)}   mid ${sound.mid.toFixed(2)}   ` +
+      `high ${sound.high.toFixed(2)}   tone ${sound.tone.toFixed(2)}`;
+  }
+}
+
+buildSliders();
+
+document.getElementById('preset').addEventListener('change', (event) => applyPreset(event.target.value));
+document.getElementById('theme').addEventListener('change', (event) => applyTheme(event.target.value));
+document.getElementById('density').addEventListener('change', (event) => {
+  settings.density = event.target.value;
+  buildGrid();
+  showSettings();
+});
+for (const key of ['frameCap', 'barsPerCycle']) {
+  document.getElementById(key).addEventListener('change', (event) => {
+    settings[key] = Number(event.target.value);
+    showSettings();
+  });
+}
+for (const key of ['followTempo', 'followTone', 'calmBreakdowns']) {
+  document.getElementById(key).addEventListener('change', (event) => {
+    settings[key] = event.target.checked;
+    showSettings();
+  });
+}
+
+document.getElementById('reset').addEventListener('click', () => {
+  document.getElementById('preset').value = 'balanced';
+  applyPreset('balanced');
+});
+
+const testButton = document.getElementById('test');
+testButton.addEventListener('click', async () => {
+  if (stopTestSignal) {
+    stopTestSignal();
+    stopTestSignal = null;
+  } else {
+    ensureAudio();
+    await audioContext.resume();
+    stopTestSignal = startTestSignal();
+  }
+  testButton.setAttribute('aria-pressed', String(Boolean(stopTestSignal)));
+});
+
+document.getElementById('file').addEventListener('change', async (event) => {
+  const [file] = event.target.files;
+  if (!file) return;
+  ensureAudio();
+  await audioContext.resume();
+  if (!filePlayer) {
+    filePlayer = new Audio();
+    audioContext.createMediaElementSource(filePlayer).connect(analyser);
+  }
+  filePlayer.src = URL.createObjectURL(file);
+  filePlayer.play();
+});
+
+document.getElementById('copy').addEventListener('click', async (event) => {
+  jsonBox.select();
+  try {
+    await navigator.clipboard.writeText(jsonBox.value);
+    event.target.textContent = 'Copied';
+  } catch {
+    event.target.textContent = 'Select the text and copy it';
+  }
+  setTimeout(() => { event.target.textContent = 'Copy settings'; }, 1600);
+});
+
+reducedMotion.addEventListener('change', (event) => {
+  if (!event.matches) return;
+  document.getElementById('preset').value = 'still';
+  applyPreset('still');
+});
+
+new IntersectionObserver(([entry]) => { view.visible = entry.isIntersecting; }).observe(canvas);
+new ResizeObserver(resize).observe(canvas);
+
+const initialTheme = params.get('theme') === 'light' ? 'light' : 'dark';
+document.getElementById('theme').value = initialTheme;
+if (reducedMotion.matches) document.getElementById('preset').value = 'still';
+applyTheme(initialTheme);
+buildGrid();
+syncControls();
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 # The wave
 
-The wave reference page is a working reference and a tuning tool. It joins the repo when the component is ported in M0. Open it, play the test signal or a real track, move the sliders, and copy the settings box. Saved values become the component's defaults. Until some are saved, the defaults are the Balanced preset.
+[wave-reference.html](wave-reference.html) is a working reference and a tuning tool. The component is in `ui/src/lib/wave/`, with the same maths. Open the reference in a browser, play the test signal or a real track, move the sliders, and copy the settings box. Saved values become the component's defaults. Until some are saved, the defaults are the Balanced preset.
 
 How it moves:
 
@@ -20,4 +20,4 @@ Settings > Appearance offers the presets (Still, Calm, Balanced, Lively), idle d
 
 Use it in empty states, the now-playing header, collection headers, and as artwork when a track has none (a still frame seeded from that track's own band energy, so each track gets a consistent tile). Never behind a table. The default preset is Balanced.
 
-Budget: under 1 ms of UI-thread time per frame at 60 fps. Drop to 30 fps or pause while GPU analysis is running. Measure it and record the numbers.
+Budget: under 1 ms of UI-thread time per frame at 60 fps. Drop to 30 fps or pause while GPU analysis is running. Measure it and record the numbers. The numbers are in [benchmarks/wave.md](../benchmarks/wave.md).
