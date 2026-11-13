@@ -42,6 +42,10 @@ serve:
 build-times:
     node ui/dev/build-times.ts
 
+# About 50 real tracks copied from a music folder into fixtures-local/, which git ignores. The originals are only read.
+fixtures-local source:
+    cargo run --quiet --package resonance-fixtures -- "{{ source }}"
+
 # The tests regenerate the TypeScript types, so any change here means the committed ones are stale
 [unix]
 bindings-current:

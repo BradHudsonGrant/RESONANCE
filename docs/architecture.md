@@ -44,6 +44,7 @@ RESONANCE/
     jobs/          persistent queue, scheduling, GPU arbitration
     api/           the command layer: typed handlers served over Tauri IPC and a local socket
     cli/           the `resonance` binary: scan, analyse, bench, verify, serve
+    fixtures/      test audio made from maths, and the copy of real tracks for local tests; never shipped
   app/             Tauri shell: commands, events, window
   ui/              Svelte app
     src/lib/design/        tokens and primitives
@@ -134,7 +135,7 @@ Keep secrets (Discogs token, AcoustID key, paid API keys) in the OS credential s
 On the development laptop the repo sits inside the music library. These limits apply to anyone and anything working there:
 
 - Don't write, rename, move or delete anything under `D:\Music` outside `D:\Music\RESONANCE`. The library has about 2,700 tracks in rekordbox and it is not test data.
-- For real-music tests, copy around 50 tracks across styles into `D:\Music\RESONANCE\fixtures-local\` (ignored by git) and work on the copies.
+- For real-music tests, `just fixtures-local <music folder>` copies around 50 tracks across styles and formats into `fixtures-local/` (ignored by git). Work on the copies.
 - `D:\Music\ZMusic Manager` and `%APPDATA%\com.bradd.v3` are read-only. Open any database there in read-only mode.
 - Integration work uses copies of rekordbox and Engine DJ data in a sandbox folder.
 - Don't install or upgrade global tools without saying what and why first.
