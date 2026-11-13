@@ -164,11 +164,13 @@ The Mix view is the risk, so M0 builds it first as a spike: two decks playing re
 Day-to-day work must not rebuild the whole stack.
 
 - UI work runs in an ordinary browser. `just ui` starts Vite, and the page talks to `resonance serve`, which is the core running as a local process on a localhost WebSocket with a random token. A UI change hot-reloads in place and no Rust is compiled.
-- Core work happens in the crate being changed, with `cargo check`, its tests and the CLI. `resonance serve` restarts when a crate changes.
+- Core work happens in the crate being changed, with `cargo check`, its tests and the CLI. `just serve` runs the core for the page, and rebuilds and restarts it when a crate changes. A build that fails leaves the running core in place.
 - The desktop shell is thin and rarely changes. Build it for smoke tests and releases.
 - Playwright drives the same browser page against the real core.
 
-Keep Rust builds short. Split crates so a change rebuilds one of them. Build dependencies optimised and without debug info, and keep only line-table debug info for the project's own crates. Cache with sccache. Try `rust-lld` as the linker on Windows and keep it if it measures faster. The build folder and its caches stay inside the repo folder: no Dev Drive and no antivirus exclusion. Record clean and incremental build times in `docs/benchmarks/` so a regression shows.
+Keep Rust builds short. Split crates so a change rebuilds one of them. Build dependencies optimised and without debug info, and keep only line-table debug info for the project's own crates. The build folder and its caches stay inside the repo folder: no Dev Drive and no antivirus exclusion. `just build-times` measures a clean build and an incremental one, and the numbers go in [benchmarks/build-times.md](benchmarks/build-times.md) so a regression shows.
+
+`sccache` and `rust-lld` as the Windows linker were both measured in M0 and neither made the incremental build faster, so neither is used. The numbers are in the same file. Measure both again when the Tauri shell joins the workspace, because its dependency tree is several times larger.
 
 Two things were looked at and left out for now. The Cranelift backend still needs nightly, and its measured gain on a large project was in single digits. Dioxus's Subsecond hot-patching is experimental and patches only the top crate.
 

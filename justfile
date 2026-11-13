@@ -30,6 +30,18 @@ ui-verify:
     npm --prefix ui run test
     npm --prefix ui run build
 
+# The UI in a browser with hot reload, talking to the core that `just serve` runs
+ui:
+    npm --prefix ui run dev
+
+# The core as a local process, rebuilt and restarted when a crate changes
+serve:
+    node ui/dev/core-watch.ts
+
+# Clean and incremental build times for the dev profile, recorded in docs/benchmarks/build-times.md
+build-times:
+    node ui/dev/build-times.ts
+
 # The tests regenerate the TypeScript types, so any change here means the committed ones are stale
 [unix]
 bindings-current:

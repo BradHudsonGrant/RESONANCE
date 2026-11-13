@@ -9,4 +9,6 @@ const connectionFile = fileURLToPath(new URL('../target/dev/connection.json', im
 
 export default defineConfig({
   plugins: [svelte(), coreProxy(connectionFile)],
+  // A fixed address, so the page and anything that drives it agree on where it is.
+  server: { port: 5173, strictPort: true },
 });
