@@ -18,6 +18,8 @@ How work gets into this repo. Everything below is a requirement.
 
 - `core` and `metrics`: unit and property tests (time-mapping round trips, key maths, duration maths).
 - Audio: fixtures generated inside the tests. Click tracks at a known tempo, tones, known offsets, known loudness. The expected answers are exact. No copyrighted audio in git.
+  The `fixtures` crate makes them and writes them as WAV or AIFF. Add it as a dev-dependency.
+- Real music: `just fixtures-local <music folder>` copies about 50 tracks across formats into `fixtures-local/`, with a `manifest.json` of where each came from and its hash. It only reads the originals. Git ignores the folder, so tests that need it run on the machine that has it and nowhere else.
 - File operations: integration tests in temporary folders, covering undo and a crash halfway through an operation.
 - Database: a migration test from every earlier version.
 - Integrations: small synthetic libraries committed as fixtures.

@@ -25,7 +25,7 @@ Development loop:
 
 - [x] Typed command layer and `resonance serve` ([#11](https://github.com/BradHudsonGrant/RESONANCE/issues/11)). Evidence: merged in [#33](https://github.com/BradHudsonGrant/RESONANCE/pull/33) and [#34](https://github.com/BradHudsonGrant/RESONANCE/pull/34); the page in a browser shows the core's version through the generated client, and a connection without the token gets a 401.
 - [x] `just ui` and `just serve`, with build times recorded ([#12](https://github.com/BradHudsonGrant/RESONANCE/issues/12)). Evidence: merged in [#35](https://github.com/BradHudsonGrant/RESONANCE/pull/35); `just serve` restarted the core after a change in `api` and kept the old one running through a build that failed, and the times are in [benchmarks/build-times.md](benchmarks/build-times.md).
-- [ ] Test fixtures: generated audio, and a local set of real tracks ([#18](https://github.com/BradHudsonGrant/RESONANCE/issues/18))
+- [x] Test fixtures: generated audio, and a local set of real tracks ([#18](https://github.com/BradHudsonGrant/RESONANCE/issues/18)). Evidence: merged in [#36](https://github.com/BradHudsonGrant/RESONANCE/pull/36); generated WAV and AIFF files decode through Symphonia to the samples that were written, and `fixtures-local/` holds 50 tracks (20 MP3, 10 FLAC, 8 AIFF, 7 WAV, 5 M4A, 1.45 GB) with a manifest, copied on 13 November 2026.
 
 The spike:
 
