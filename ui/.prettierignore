@@ -1,3 +1,4 @@
 dist
 package-lock.json
 src/lib/ipc/bindings
+dev/licences

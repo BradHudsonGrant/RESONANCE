@@ -20,6 +20,7 @@ How work gets into this repo. Everything below is a requirement.
 - Audio: fixtures generated inside the tests. Click tracks at a known tempo, tones, known offsets, known loudness. The expected answers are exact. No copyrighted audio in git.
   The `fixtures` crate makes them and writes them as WAV or AIFF. Add it as a dev-dependency.
 - Real music: `just fixtures-local <music folder>` copies about 50 tracks across formats into `fixtures-local/`, with a `manifest.json` of where each came from and its hash. It only reads the originals. Git ignores the folder, so tests that need it run on the machine that has it and nowhere else.
+- Scale: `just synthetic-library` writes 100,000 made-up tracks with plausible tags into `target/dev/synthetic`, for measuring the library at sizes no real folder here has.
 - File operations: integration tests in temporary folders, covering undo and a crash halfway through an operation.
 - Database: a migration test from every earlier version.
 - Integrations: small synthetic libraries committed as fixtures.

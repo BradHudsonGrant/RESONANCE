@@ -1,5 +1,7 @@
 use std::path::{Component, Path, PathBuf};
 
+use crate::key::Key;
+
 /// The audio formats the library takes in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AudioFormat {
@@ -118,6 +120,50 @@ pub struct ScannedFile {
     pub tags: Vec<(TagField, String)>,
 }
 
+impl ScannedFile {
+    pub fn tag(&self, field: TagField) -> Option<&str> {
+        self.tags
+            .iter()
+            .find(|(tagged, _)| *tagged == field)
+            .map(|(_, value)| value.as_str())
+    }
+
+    /// The title tag, or the file's name without its extension when the tag is missing or blank,
+    /// so every track has something to be listed by.
+    pub fn title(&self) -> &str {
+        match self.tag(TagField::Title).map(str::trim) {
+            Some(title) if !title.is_empty() => title,
+            _ => {
+                let name = self.path.rsplit('/').next().unwrap_or(&self.path);
+                name.rsplit_once('.').map_or(name, |(stem, _)| stem).trim()
+            }
+        }
+    }
+
+    /// The BPM tag as a number. Software writes it as `128`, `128.00` or, in some locales,
+    /// `127,5`. Zero is how some of it writes "unknown", so it reads as no tempo.
+    pub fn bpm(&self) -> Option<f64> {
+        let bpm: f64 = self
+            .tag(TagField::Bpm)?
+            .trim()
+            .replace(',', ".")
+            .parse()
+            .ok()?;
+        (bpm.is_finite() && bpm > 0.0).then_some(bpm)
+    }
+
+    pub fn key(&self) -> Option<Key> {
+        self.tag(TagField::Key)?.parse().ok()
+    }
+
+    /// The file on this machine, given the folder of the source it was scanned from.
+    pub fn location(&self, source_folder: &Path) -> PathBuf {
+        let mut location = source_folder.to_owned();
+        location.extend(self.path.split('/'));
+        location
+    }
+}
+
 /// Where the old app parked files it had replaced, converted or rejected. They sit inside music
 /// folders, and scanning them would bring every one back as a track.
 const QUARANTINE_FOLDERS: [&str; 4] = [
@@ -126,6 +172,10 @@ const QUARANTINE_FOLDERS: [&str; 4] = [
     "_trash",
     "_converted_originals",
 ];
+
+/// A folder containing this marker is excluded as a source and while walking a parent.
+/// An explicit source below that folder can still be scanned.
+pub const SCAN_IGNORE_MARKER: &str = ".resonance-ignore";
 
 /// Whether a scan stays out of a folder with this name, at any depth.
 pub fn is_ignored_folder(name: &str) -> bool {
@@ -194,6 +244,89 @@ mod tests {
         for field in TagField::ALL {
             assert_eq!(TagField::from_name(field.name()), Some(field));
         }
+    }
+
+    fn tagged(path: &str, tags: &[(TagField, &str)]) -> ScannedFile {
+        ScannedFile {
+            path: path.to_owned(),
+            size_bytes: 1,
+            modified_ns: 0,
+            format: AudioFormat::Mp3,
+            audio: None,
+            tags: tags
+                .iter()
+                .map(|(field, value)| (*field, (*value).to_owned()))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn the_title_tag_names_the_track() {
+        let file = tagged("House/a.mp3", &[(TagField::Title, " Blue Hour ")]);
+
+        assert_eq!(file.title(), "Blue Hour");
+    }
+
+    #[test]
+    fn a_file_without_a_title_is_named_by_its_file_name() {
+        assert_eq!(
+            tagged("House/Ada Marsh - Blue Hour.mp3", &[]).title(),
+            "Ada Marsh - Blue Hour"
+        );
+        assert_eq!(
+            tagged("v1.2 edit.flac", &[(TagField::Title, "  ")]).title(),
+            "v1.2 edit"
+        );
+        assert_eq!(tagged("no extension", &[]).title(), "no extension");
+    }
+
+    #[test]
+    fn bpm_tags_read_in_the_forms_software_writes() {
+        for (text, bpm) in [
+            ("128", 128.0),
+            ("128.00", 128.0),
+            ("127,5", 127.5),
+            (" 90 ", 90.0),
+        ] {
+            assert_eq!(
+                tagged("a.mp3", &[(TagField::Bpm, text)]).bpm(),
+                Some(bpm),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_zero_or_unreadable_bpm_tag_is_no_tempo() {
+        for text in ["0", "", "fast", "NaN", "-120", "inf"] {
+            assert_eq!(
+                tagged("a.mp3", &[(TagField::Bpm, text)]).bpm(),
+                None,
+                "{text}"
+            );
+        }
+        assert_eq!(tagged("a.mp3", &[]).bpm(), None);
+    }
+
+    #[test]
+    fn a_key_tag_reads_as_a_key_and_anything_else_as_none() {
+        let key = tagged("a.mp3", &[(TagField::Key, "Am")]).key();
+
+        assert_eq!(key.map(Key::camelot).as_deref(), Some("8A"));
+        assert_eq!(tagged("a.mp3", &[(TagField::Key, "Am/C")]).key(), None);
+    }
+
+    #[test]
+    fn a_file_is_found_under_its_source_folder_with_the_platform_separator() {
+        let file = tagged("House/2024/one.mp3", &[]);
+
+        assert_eq!(
+            file.location(Path::new("music")),
+            Path::new("music")
+                .join("House")
+                .join("2024")
+                .join("one.mp3")
+        );
     }
 
     #[test]

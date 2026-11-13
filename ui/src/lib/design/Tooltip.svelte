@@ -5,10 +5,12 @@
     text: string;
     /** The keys that do the same thing, shown after the text. */
     shortcut?: string;
+    /** Where it opens. Beside the anchor for controls at the edge of the window. */
+    side?: 'above' | 'right' | 'left';
     children: Snippet;
   }
 
-  let { text, shortcut, children }: Props = $props();
+  let { text, shortcut, side = 'above', children }: Props = $props();
   let shown = $state(false);
   const id = $props.id();
 </script>
@@ -26,7 +28,7 @@
   }}
 >
   {@render children()}
-  <span {id} class={['tooltip', { shown }]} role="tooltip">
+  <span {id} class={['tooltip', side, { shown }]} role="tooltip">
     {text}
     {#if shortcut}
       <kbd class="numeric">{shortcut}</kbd>
@@ -60,6 +62,22 @@
     transform: translateX(-50%);
     transition: opacity var(--motion-fast) var(--ease-out);
     pointer-events: none;
+  }
+
+  .right,
+  .left {
+    top: 50%;
+    bottom: auto;
+    transform: translateY(-50%);
+  }
+
+  .right {
+    left: calc(100% + var(--space-1));
+  }
+
+  .left {
+    right: calc(100% + var(--space-1));
+    left: auto;
   }
 
   .shown {

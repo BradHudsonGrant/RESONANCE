@@ -10,6 +10,8 @@ const devFolder = join(root, 'target', 'dev');
 // The core runs from a copy, so cargo can replace the built file while the old core keeps serving.
 const serving = join(devFolder, `resonance${suffix}`);
 const connectionFile = join(devFolder, 'connection.json');
+// Arguments for the core itself, such as `--data-folder`, which go before its `serve` command.
+const coreArguments = process.argv.slice(2);
 
 let core: ChildProcess | null = null;
 let servingBuiltAt = 0;
@@ -40,7 +42,7 @@ async function refresh() {
   mkdirSync(devFolder, { recursive: true });
   copyFileSync(built, serving);
   servingBuiltAt = builtAt;
-  const started = spawn(serving, ['serve', '--connection-file', connectionFile], {
+  const started = spawn(serving, [...coreArguments, 'serve', '--connection-file', connectionFile], {
     stdio: 'inherit',
   });
   started.once('exit', () => {

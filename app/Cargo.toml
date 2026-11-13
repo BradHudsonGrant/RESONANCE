@@ -1,0 +1,23 @@
+[package]
+name = "resonance-app"
+description = "The desktop window and native transport for Resonance."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "=2.7.4", features = [] }
+
+[dependencies]
+clap.workspace = true
+resonance-api.workspace = true
+resonance-db.workspace = true
+rfd = "=0.18.0"
+tauri = { version = "=2.12.5", features = [] }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
+[lints]
+workspace = true

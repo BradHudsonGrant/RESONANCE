@@ -5,6 +5,8 @@ all-features = true
 allow = [
     "MIT",
     "Apache-2.0",
+    # target-lexicon's build-time exception grants additional permissions.
+    "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",

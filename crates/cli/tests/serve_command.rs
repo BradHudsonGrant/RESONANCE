@@ -32,13 +32,16 @@ fn wait_for(path: &Path) -> Value {
 }
 
 #[test]
-fn serve_writes_a_connection_file_naming_the_port_it_listens_on_and_its_token() {
-    let path = Path::new(env!("CARGO_TARGET_TMPDIR"))
-        .join("serve_command")
-        .join("connection.json");
+fn serve_opens_the_library_and_writes_a_connection_file_naming_its_port_and_token() {
+    let folder = Path::new(env!("CARGO_TARGET_TMPDIR")).join("serve_command");
+    let path = folder.join("connection.json");
+    let data_folder = folder.join("data");
     let _ = fs::remove_file(&path);
+    let _ = fs::remove_dir_all(&data_folder);
     let _core = Core(
         Command::new(env!("CARGO_BIN_EXE_resonance"))
+            .arg("--data-folder")
+            .arg(&data_folder)
             .arg("serve")
             .arg("--connection-file")
             .arg(&path)
@@ -52,4 +55,5 @@ fn serve_writes_a_connection_file_naming_the_port_it_listens_on_and_its_token() 
     let port = u16::try_from(connection["port"].as_u64().unwrap()).unwrap();
     assert!(TcpStream::connect(("127.0.0.1", port)).is_ok());
     assert_eq!(connection["token"].as_str().unwrap().len(), 64);
+    assert!(data_folder.join("library.db").is_file());
 }

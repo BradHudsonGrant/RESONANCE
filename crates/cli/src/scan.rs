@@ -1,27 +1,20 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use resonance_api::data_folder::default_data_folder;
-use resonance_db::{Database, DbError};
 use resonance_library::scan::{ScanError, scan};
 
-pub const DATABASE_NAME: &str = "library.db";
+use crate::library_file::{self, OpenError};
 
 #[derive(Debug)]
 pub enum ScanCommandError {
-    NoDataFolder,
-    Database(DbError),
+    Open(OpenError),
     Scan(ScanError),
 }
 
 impl fmt::Display for ScanCommandError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NoDataFolder => write!(
-                f,
-                "This machine has no home folder to keep the library in. Name one with --data-folder."
-            ),
-            Self::Database(source) => source.fmt(f),
+            Self::Open(source) => source.fmt(f),
             Self::Scan(source) => source.fmt(f),
         }
     }
@@ -30,12 +23,8 @@ impl fmt::Display for ScanCommandError {
 impl std::error::Error for ScanCommandError {}
 
 pub fn run(folder: &Path, data_folder: Option<&Path>) -> Result<(), ScanCommandError> {
-    let data_folder = match data_folder {
-        Some(folder) => folder.to_owned(),
-        None => default_data_folder().ok_or(ScanCommandError::NoDataFolder)?,
-    };
-    let mut database =
-        Database::open(&data_folder.join(DATABASE_NAME)).map_err(ScanCommandError::Database)?;
+    let data_folder = library_file::data_folder(data_folder).map_err(ScanCommandError::Open)?;
+    let mut database = library_file::open(&data_folder).map_err(ScanCommandError::Open)?;
 
     let mut own_files: Vec<PathBuf> = vec![data_folder];
     own_files.extend(std::env::current_exe().ok());

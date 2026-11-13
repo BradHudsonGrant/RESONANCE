@@ -4,10 +4,10 @@ import type { Reply } from './bindings/Reply';
 import type { Request } from './bindings/Request';
 import type { Response } from './bindings/Response';
 
-type Command = Request['command'];
-type ParamsOf<C extends Command> =
+export type Command = Request['command'];
+export type ParamsOf<C extends Command> =
   Extract<Request, { command: C }> extends { params: infer P } ? [params: P] : [];
-type ResultOf<C extends Command> = Extract<Response, { command: C }>['result'];
+export type ResultOf<C extends Command> = Extract<Response, { command: C }>['result'];
 
 export class CoreError extends Error {
   constructor(
@@ -55,7 +55,7 @@ export class Core {
         this.#socket = null;
         const gone = new CoreError(
           'disconnected',
-          'The core is not running. Start it with `just serve`.',
+          'The core is not running. Start it with just serve, then try again.',
         );
         reject(gone);
         for (const waiting of this.#waiting.values()) waiting.reject(gone);

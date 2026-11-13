@@ -133,3 +133,47 @@ fn a_database_file_is_made_with_its_folder_and_keeps_its_rows_between_openings()
     );
     assert_eq!(reopened.tracks().expect("the tracks read").len(), 1);
 }
+
+#[test]
+fn a_page_holds_the_tracks_of_that_part_of_the_library_in_order() {
+    let mut database = Database::open_in_memory().expect("a database opens");
+    let later = database.source("b-music").expect("the source is added");
+    let earlier = database.source("a-music").expect("the source is added");
+    database
+        .record_scan(later, &[file("y.flac", "Y"), file("x.flac", "X")])
+        .expect("the scan is stored");
+    database
+        .record_scan(earlier, &[file("z.flac", "Z"), file("a.flac", "A")])
+        .expect("the scan is stored");
+
+    let all = database.tracks().expect("the tracks read");
+    let paths: Vec<_> = all
+        .iter()
+        .map(|track| format!("{}/{}", track.source_folder, track.file.path))
+        .collect();
+    assert_eq!(
+        paths,
+        [
+            "a-music/a.flac",
+            "a-music/z.flac",
+            "b-music/x.flac",
+            "b-music/y.flac"
+        ]
+    );
+
+    assert_eq!(database.track_count().expect("the count reads"), 4);
+    assert_eq!(
+        database.tracks_page(1, 2).expect("the page reads"),
+        all[1..3]
+    );
+    assert_eq!(
+        database.tracks_page(3, 10).expect("the page reads"),
+        all[3..]
+    );
+    assert!(
+        database
+            .tracks_page(4, 10)
+            .expect("the page reads")
+            .is_empty()
+    );
+}

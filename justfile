@@ -2,26 +2,29 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 
 base := "origin/master"
 attribution_pattern := "co-authored-by|generated with"
+shell_exclusion := if os() == "windows" { "" } else { "--exclude resonance-app" }
+export CARGO_HOME := justfile_directory() / "target/cargo-home"
+export NPM_CONFIG_CACHE := justfile_directory() / "target/npm-cache"
 
 # Format check, lint, licence check, tests, build, and the attribution check
-verify: fmt-check lint licences test bindings-current build ui-verify attribution
-    @echo "verify passed: format, clippy, typos, licences, tests, bindings, build, ui, attribution"
+verify: ui-verify fmt-check lint licences test bindings-current build notices-current attribution
+    @echo "verify passed: format, clippy, typos, licences, tests, bindings, build, ui, notices, attribution"
 
 fmt-check:
     cargo fmt --all --check
 
 lint:
-    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy --workspace {{ shell_exclusion }} --all-targets -- -D warnings
     typos
 
 licences:
     cargo deny check licenses sources
 
 test:
-    cargo test --workspace
+    cargo test --workspace {{ shell_exclusion }}
 
 build:
-    cargo build --workspace
+    cargo build --workspace {{ shell_exclusion }}
 
 # Type check, lint, format check, tests and build for the UI. Needs `npm ci --prefix ui` once.
 ui-verify:
@@ -34,9 +37,43 @@ ui-verify:
 ui:
     npm --prefix ui run dev
 
-# The core as a local process, rebuilt and restarted when a crate changes
-serve:
-    node ui/dev/core-watch.ts
+# The desktop shell uses the same development library, with its webview data beside it.
+app data_folder="target/dev/data":
+    npm --prefix ui run build
+    cargo run --package resonance-app --features custom-protocol -- --data-folder "{{ data_folder }}"
+
+# Native scroll measurements over the library made by `just synthetic-library`.
+app-bench:
+    npm --prefix ui run build -- --mode benchmark
+    cargo run --release --package resonance-app --features custom-protocol -- --data-folder target/dev/synthetic
+
+# The Windows installer, with bundled assets and project-local packaging tools.
+[windows]
+[working-directory: 'app']
+installer:
+    npm --prefix ../ui run build
+    node ../ui/dev/notices.ts --check
+    ../ui/node_modules/.bin/tauri.cmd build --bundles nsis
+
+# Licence texts from the exact Rust dependencies and the frontend's bundled modules.
+notices:
+    npm --prefix ui run build
+    node ui/dev/notices.ts
+
+notices-current:
+    node ui/dev/notices.ts --check
+
+# The core as a local process, rebuilt and restarted when a crate changes, serving the library in the data folder
+serve data_folder="target/dev/data":
+    node ui/dev/core-watch.ts --data-folder "{{ data_folder }}"
+
+# Read a music folder into the library that `just serve` serves. Nothing in the folder is changed.
+scan folder data_folder="target/dev/data":
+    cargo run --quiet --package resonance-cli -- --data-folder "{{ data_folder }}" scan "{{ folder }}"
+
+# A made-up library for measuring at scale. Serve it with `just serve target/dev/synthetic`.
+synthetic-library count="100000":
+    cargo run --quiet --package resonance-fixtures --bin synthetic-library -- target/dev/synthetic {{ count }}
 
 # Clean and incremental build times for the dev profile, recorded in docs/benchmarks/build-times.md
 build-times:

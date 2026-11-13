@@ -1,0 +1,172 @@
+[
+  {
+    "ecosystem": "cargo",
+    "name": "alloc-stdlib",
+    "version": "0.3.0",
+    "revision": "0a81fd6928ea3b33c8cd484aa4575d50ffb98012",
+    "repository": "https://github.com/dropbox/rust-alloc-no-stdlib",
+    "evidence": "Published alloc-stdlib-0.3.0/.cargo_vcs_info.json, git.sha1 and path_in_vcs=alloc-stdlib",
+    "files": [
+      {
+        "path": "alloc-stdlib-0.3.0/LICENSE",
+        "url": "https://raw.githubusercontent.com/dropbox/rust-alloc-no-stdlib/0a81fd6928ea3b33c8cd484aa4575d50ffb98012/LICENSE",
+        "sha256": "c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae"
+      }
+    ]
+  },
+  {
+    "ecosystem": "cargo",
+    "name": "lofty",
+    "version": "0.25.5",
+    "revision": "59a3f5ad28f982102fdfaf8f458efd9eafb38747",
+    "repository": "https://github.com/Serial-ATA/lofty-rs",
+    "evidence": "Published lofty-0.25.5/.cargo_vcs_info.json, git.sha1 and path_in_vcs=lofty",
+    "files": [
+      {
+        "path": "lofty-0.25.5/LICENSE-MIT",
+        "url": "https://raw.githubusercontent.com/Serial-ATA/lofty-rs/59a3f5ad28f982102fdfaf8f458efd9eafb38747/LICENSE-MIT",
+        "sha256": "0884e92e74c08412d08bb7cbd121e3c09cbf2ae357972440b06f81b3305b0176"
+      },
+      {
+        "path": "lofty-0.25.5/LICENSE-APACHE",
+        "url": "https://raw.githubusercontent.com/Serial-ATA/lofty-rs/59a3f5ad28f982102fdfaf8f458efd9eafb38747/LICENSE-APACHE",
+        "sha256": "33ee463a651c2dd0417e68e97d97c811c7bb19280c2116bff9906fe8d2718551"
+      }
+    ]
+  },
+  {
+    "ecosystem": "cargo",
+    "name": "lofty_attr",
+    "version": "0.13.0",
+    "revision": "5affdd9aea68e7b06d5e1a651bec7814882f44c7",
+    "repository": "https://github.com/Serial-ATA/lofty-rs",
+    "evidence": "Published lofty_attr-0.13.0/.cargo_vcs_info.json, git.sha1 and path_in_vcs=lofty_attr",
+    "files": [
+      {
+        "path": "lofty_attr-0.13.0/LICENSE-MIT",
+        "url": "https://raw.githubusercontent.com/Serial-ATA/lofty-rs/5affdd9aea68e7b06d5e1a651bec7814882f44c7/LICENSE-MIT",
+        "sha256": "0884e92e74c08412d08bb7cbd121e3c09cbf2ae357972440b06f81b3305b0176"
+      },
+      {
+        "path": "lofty_attr-0.13.0/LICENSE-APACHE",
+        "url": "https://raw.githubusercontent.com/Serial-ATA/lofty-rs/5affdd9aea68e7b06d5e1a651bec7814882f44c7/LICENSE-APACHE",
+        "sha256": "33ee463a651c2dd0417e68e97d97c811c7bb19280c2116bff9906fe8d2718551"
+      }
+    ]
+  },
+  {
+    "ecosystem": "cargo",
+    "name": "ogg_pager",
+    "version": "0.8.0",
+    "revision": "0c9c8222fb78d870b3b7068645197cc16c63560d",
+    "repository": "https://github.com/Serial-ATA/lofty-rs",
+    "evidence": "Published ogg_pager-0.8.0/.cargo_vcs_info.json, git.sha1 and path_in_vcs=ogg_pager",
+    "files": [
+      {
+        "path": "ogg_pager-0.8.0/LICENSE-MIT",
+        "url": "https://raw.githubusercontent.com/Serial-ATA/lofty-rs/0c9c8222fb78d870b3b7068645197cc16c63560d/LICENSE-MIT",
+        "sha256": "0884e92e74c08412d08bb7cbd121e3c09cbf2ae357972440b06f81b3305b0176"
+      },
+      {
+        "path": "ogg_pager-0.8.0/LICENSE-APACHE",
+        "url": "https://raw.githubusercontent.com/Serial-ATA/lofty-rs/0c9c8222fb78d870b3b7068645197cc16c63560d/LICENSE-APACHE",
+        "sha256": "33ee463a651c2dd0417e68e97d97c811c7bb19280c2116bff9906fe8d2718551"
+      }
+    ]
+  },
+  {
+    "ecosystem": "cargo",
+    "name": "ts-rs",
+    "version": "12.0.1",
+    "revision": "7182ad8289596097235406b715fa04506443b4ad",
+    "repository": "https://github.com/Aleph-Alpha/ts-rs",
+    "evidence": "Published ts-rs-12.0.1/.cargo_vcs_info.json, git.sha1 and path_in_vcs=ts-rs",
+    "files": [
+      {
+        "path": "ts-rs-12.0.1/LICENSE",
+        "url": "https://raw.githubusercontent.com/Aleph-Alpha/ts-rs/7182ad8289596097235406b715fa04506443b4ad/LICENSE",
+        "sha256": "db7f7f8e7236a2d0b41b855b2501b7b913caebbcda6ce498637a304ad1706ce1"
+      }
+    ]
+  },
+  {
+    "ecosystem": "cargo",
+    "name": "ts-rs-macros",
+    "version": "12.0.1",
+    "revision": "7182ad8289596097235406b715fa04506443b4ad",
+    "repository": "https://github.com/Aleph-Alpha/ts-rs",
+    "evidence": "Published ts-rs-macros-12.0.1/.cargo_vcs_info.json, git.sha1 and path_in_vcs=macros",
+    "files": [
+      {
+        "path": "ts-rs-macros-12.0.1/LICENSE",
+        "url": "https://raw.githubusercontent.com/Aleph-Alpha/ts-rs/7182ad8289596097235406b715fa04506443b4ad/LICENSE",
+        "sha256": "db7f7f8e7236a2d0b41b855b2501b7b913caebbcda6ce498637a304ad1706ce1"
+      }
+    ]
+  },
+  {
+    "ecosystem": "cargo",
+    "name": "webview2-com",
+    "version": "0.39.1",
+    "revision": "edc2caf886175ccaebe86078c9cfe1ae2a187328",
+    "repository": "https://github.com/wravery/webview2-rs",
+    "evidence": "Published webview2-com-0.39.1/.cargo_vcs_info.json, git.sha1 and path_in_vcs=crates/webview2-com",
+    "files": [
+      {
+        "path": "webview2-com-0.39.1/LICENSE",
+        "url": "https://raw.githubusercontent.com/wravery/webview2-rs/edc2caf886175ccaebe86078c9cfe1ae2a187328/LICENSE",
+        "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73"
+      }
+    ]
+  },
+  {
+    "ecosystem": "cargo",
+    "name": "webview2-com-sys",
+    "version": "0.39.1",
+    "revision": "edc2caf886175ccaebe86078c9cfe1ae2a187328",
+    "repository": "https://github.com/wravery/webview2-rs",
+    "evidence": "Published webview2-com-sys-0.39.1/.cargo_vcs_info.json, git.sha1 and path_in_vcs=crates/bindings",
+    "files": [
+      {
+        "path": "webview2-com-sys-0.39.1/LICENSE",
+        "url": "https://raw.githubusercontent.com/wravery/webview2-rs/edc2caf886175ccaebe86078c9cfe1ae2a187328/LICENSE",
+        "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73"
+      }
+    ]
+  },
+  {
+    "ecosystem": "cargo",
+    "name": "webview2-com-macros",
+    "version": "0.8.1",
+    "revision": "dffa41a8a46d3f5565eefbff2de57d38d399f158",
+    "repository": "https://github.com/wravery/webview2-rs",
+    "evidence": "Published webview2-com-macros-0.8.1/.cargo_vcs_info.json, git.sha1 and path_in_vcs=crates/callback-macros",
+    "files": [
+      {
+        "path": "webview2-com-macros-0.8.1/LICENSE",
+        "url": "https://raw.githubusercontent.com/wravery/webview2-rs/dffa41a8a46d3f5565eefbff2de57d38d399f158/LICENSE",
+        "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73"
+      }
+    ]
+  },
+  {
+    "ecosystem": "cargo",
+    "name": "selectors",
+    "version": "0.38.0",
+    "revision": "572ecba2d1600e7c3d490586692a209faf703baa",
+    "repository": "https://github.com/servo/stylo",
+    "evidence": "Published selectors-0.38.0/.cargo_vcs_info.json, git.sha1 and path_in_vcs=selectors. SOURCE-NOTICE is the unchanged opening comment of pinned selectors/lib.rs; it points to Mozilla MPL 2.0. The pinned tree contains no complete MPL text, so LICENSE-MPL-2.0 is the canonical Mozilla text.",
+    "files": [
+      {
+        "path": "selectors-0.38.0/SOURCE-NOTICE",
+        "url": "https://raw.githubusercontent.com/servo/stylo/572ecba2d1600e7c3d490586692a209faf703baa/selectors/lib.rs",
+        "sha256": "766674381e88a468d55e07de3596987391cf0e8beebe51baf4fddf11078785b3"
+      },
+      {
+        "path": "selectors-0.38.0/LICENSE-MPL-2.0",
+        "url": "https://www.mozilla.org/media/MPL/2.0/index.txt",
+        "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04"
+      }
+    ]
+  }
+]
