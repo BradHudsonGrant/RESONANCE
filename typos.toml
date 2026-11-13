@@ -1,0 +1,3 @@
+[default.extend-words]
+# The MP4 box that holds a track
+trak = "trak"

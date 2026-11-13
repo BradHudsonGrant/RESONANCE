@@ -1,3 +1,4 @@
+mod scan;
 mod serve;
 
 use std::path::PathBuf;
@@ -9,6 +10,9 @@ use resonance_core::key::Key;
 #[derive(Parser)]
 #[command(name = "resonance", version, about = "Resonance from the command line")]
 struct Cli {
+    /// Keep the library database in this folder instead of the usual place for app data
+    #[arg(long, global = true, value_name = "FOLDER")]
+    data_folder: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -21,6 +25,11 @@ enum Command {
         #[arg(required = true)]
         tags: Vec<String>,
     },
+    /// Read the audio files under a folder into the library. Nothing in the folder is changed
+    Scan {
+        /// The music folder to read
+        folder: PathBuf,
+    },
     /// Run the core as a local process for the browser UI to talk to
     Serve {
         /// Write the port and token to this file as JSON, for the dev server to read
@@ -29,16 +38,22 @@ enum Command {
     },
 }
 
+fn finished<E: std::fmt::Display>(result: Result<(), E>) -> ExitCode {
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn main() -> ExitCode {
-    match Cli::parse().command {
+    let cli = Cli::parse();
+    match cli.command {
         Command::Key { tags } => show_keys(&tags),
-        Command::Serve { connection_file } => match serve::run(connection_file.as_deref()) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => {
-                eprintln!("{error}");
-                ExitCode::FAILURE
-            }
-        },
+        Command::Scan { folder } => finished(scan::run(&folder, cli.data_folder.as_deref())),
+        Command::Serve { connection_file } => finished(serve::run(connection_file.as_deref())),
     }
 }
 

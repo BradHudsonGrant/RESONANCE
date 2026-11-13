@@ -34,7 +34,7 @@ The spike:
 Design and shell:
 
 - [ ] Design tokens, both themes, the primitives ([#14](https://github.com/BradHudsonGrant/RESONANCE/issues/14))
-- [ ] Scan a folder into the database ([#15](https://github.com/BradHudsonGrant/RESONANCE/issues/15))
+- [x] Scan a folder into the database ([#15](https://github.com/BradHudsonGrant/RESONANCE/issues/15)). Evidence: merged in [#37](https://github.com/BradHudsonGrant/RESONANCE/pull/37); `resonance scan fixtures-local` added 50 tracks with none unreadable, a second run reported 50 unchanged, and a test compares every byte and modified time before and after.
 - [ ] App shell showing real data from a scan of the fixture folder ([#16](https://github.com/BradHudsonGrant/RESONANCE/issues/16))
 - [ ] The wave component ported, with its frame cost measured ([#17](https://github.com/BradHudsonGrant/RESONANCE/issues/17))
 - [ ] Tauri shell, `just app` and Windows installer ([#20](https://github.com/BradHudsonGrant/RESONANCE/issues/20))
