@@ -1,3 +1,6 @@
+mod serve;
+
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
@@ -18,11 +21,24 @@ enum Command {
         #[arg(required = true)]
         tags: Vec<String>,
     },
+    /// Run the core as a local process for the browser UI to talk to
+    Serve {
+        /// Write the port and token to this file as JSON, for the dev server to read
+        #[arg(long, value_name = "PATH")]
+        connection_file: Option<PathBuf>,
+    },
 }
 
 fn main() -> ExitCode {
     match Cli::parse().command {
         Command::Key { tags } => show_keys(&tags),
+        Command::Serve { connection_file } => match serve::run(connection_file.as_deref()) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("{error}");
+                ExitCode::FAILURE
+            }
+        },
     }
 }
 

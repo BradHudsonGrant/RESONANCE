@@ -4,8 +4,8 @@ base := "origin/master"
 attribution_pattern := "co-authored-by|generated with"
 
 # Format check, lint, licence check, tests, build, and the attribution check
-verify: fmt-check lint licences test build attribution
-    @echo "verify passed: format, clippy, typos, licences, tests, build, attribution"
+verify: fmt-check lint licences test bindings-current build attribution
+    @echo "verify passed: format, clippy, typos, licences, tests, bindings, build, attribution"
 
 fmt-check:
     cargo fmt --all --check
@@ -22,6 +22,15 @@ test:
 
 build:
     cargo build --workspace
+
+# The tests regenerate the TypeScript types, so any change here means the committed ones are stale
+[unix]
+bindings-current:
+    @test -z "$(git ls-files --modified --others --exclude-standard -- ui/src/lib/ipc/bindings)"
+
+[windows]
+bindings-current:
+    @if (git ls-files --modified --others --exclude-standard -- ui/src/lib/ipc/bindings) { Write-Host 'The TypeScript types in ui/src/lib/ipc/bindings are out of date. Stage the regenerated files.'; exit 1 }
 
 # Commits carry the author's name only, so no message on the branch may hold a co-author trailer or a generator footer
 [unix]
