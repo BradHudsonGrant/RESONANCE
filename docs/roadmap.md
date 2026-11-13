@@ -24,7 +24,7 @@ Repo and pipeline:
 Development loop:
 
 - [x] Typed command layer and `resonance serve` ([#11](https://github.com/BradHudsonGrant/RESONANCE/issues/11)). Evidence: merged in [#33](https://github.com/BradHudsonGrant/RESONANCE/pull/33) and [#34](https://github.com/BradHudsonGrant/RESONANCE/pull/34); the page in a browser shows the core's version through the generated client, and a connection without the token gets a 401.
-- [ ] `just ui`, `just serve` and `just app`, with build times recorded ([#12](https://github.com/BradHudsonGrant/RESONANCE/issues/12))
+- [x] `just ui` and `just serve`, with build times recorded ([#12](https://github.com/BradHudsonGrant/RESONANCE/issues/12)). Evidence: merged in [#35](https://github.com/BradHudsonGrant/RESONANCE/pull/35); `just serve` restarted the core after a change in `api` and kept the old one running through a build that failed, and the times are in [benchmarks/build-times.md](benchmarks/build-times.md).
 - [ ] Test fixtures: generated audio, and a local set of real tracks ([#18](https://github.com/BradHudsonGrant/RESONANCE/issues/18))
 
 The spike:
@@ -37,7 +37,7 @@ Design and shell:
 - [ ] Scan a folder into the database ([#15](https://github.com/BradHudsonGrant/RESONANCE/issues/15))
 - [ ] App shell showing real data from a scan of the fixture folder ([#16](https://github.com/BradHudsonGrant/RESONANCE/issues/16))
 - [ ] The wave component ported, with its frame cost measured ([#17](https://github.com/BradHudsonGrant/RESONANCE/issues/17))
-- [ ] Tauri shell and Windows installer ([#20](https://github.com/BradHudsonGrant/RESONANCE/issues/20))
+- [ ] Tauri shell, `just app` and Windows installer ([#20](https://github.com/BradHudsonGrant/RESONANCE/issues/20))
 - [ ] Playwright suite against the real core ([#21](https://github.com/BradHudsonGrant/RESONANCE/issues/21))
 
 Docs:
@@ -58,7 +58,7 @@ Accept:
 
 - [ ] Every budget that can be measured at this stage has a number recorded in `docs/benchmarks/`.
 - [ ] The Mix spike meets its budget.
-- [ ] A UI change shows up in the browser without a Rust build.
+- [x] A UI change shows up in the browser without a Rust build. Evidence: on 13 November 2026, with `just ui` and `just serve` running, an edit to `App.svelte` showed in the open page without a reload, and `just serve` built nothing.
 - [ ] A tagged build installs and runs on the laptop, scans the fixture folder and shows the tracks.
 - [ ] The release page exists with an installer.
 
