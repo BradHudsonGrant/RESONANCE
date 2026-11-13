@@ -19,7 +19,7 @@ Repo and pipeline:
 - [x] One verify command, `just verify` ([#7](https://github.com/BradHudsonGrant/RESONANCE/issues/7)). Evidence: merged in [#30](https://github.com/BradHudsonGrant/RESONANCE/pull/30); `just verify` exits 0 on a clean branch and 1 on a commit message with a co-author trailer.
 - [x] CI on pull requests ([#8](https://github.com/BradHudsonGrant/RESONANCE/issues/8)). Evidence: merged in [#32](https://github.com/BradHudsonGrant/RESONANCE/pull/32); the PR's own check passed, and `just verify` exits 1 on a badly formatted tree.
 - [x] Issue and pull-request templates ([#9](https://github.com/BradHudsonGrant/RESONANCE/issues/9)). Evidence: merged in [#31](https://github.com/BradHudsonGrant/RESONANCE/pull/31); GitHub lists the three issue templates and the PR template.
-- [ ] Version script, changelog and release workflow ([#10](https://github.com/BradHudsonGrant/RESONANCE/issues/10))
+- [ ] Version script, changelog and release workflow ([#10](https://github.com/BradHudsonGrant/RESONANCE/issues/10)). Merged in [#41](https://github.com/BradHudsonGrant/RESONANCE/pull/41); ticked once a test tag has drafted a release with the installer attached.
 
 Development loop:
 

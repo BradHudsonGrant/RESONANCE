@@ -7,8 +7,8 @@ export CARGO_HOME := justfile_directory() / "target/cargo-home"
 export NPM_CONFIG_CACHE := justfile_directory() / "target/npm-cache"
 
 # Format check, lint, licence check, tests, build, and the attribution check
-verify: ui-verify fmt-check lint licences test bindings-current build notices-current attribution
-    @echo "verify passed: format, clippy, typos, licences, tests, bindings, build, ui, notices, attribution"
+verify: ui-verify fmt-check lint licences test bindings-current build notices-current version-current attribution
+    @echo "verify passed: format, clippy, typos, licences, tests, bindings, build, ui, notices, version, attribution"
 
 fmt-check:
     cargo fmt --all --check
@@ -74,6 +74,17 @@ scan folder data_folder="target/dev/data":
 # A made-up library for measuring at scale. Serve it with `just serve target/dev/synthetic`.
 synthetic-library count="100000":
     cargo run --quiet --package resonance-fixtures --bin synthetic-library -- target/dev/synthetic {{ count }}
+
+# Set the version in the Cargo workspace, tauri.conf.json and package.json at once
+version new:
+    node ui/dev/version.ts "{{ new }}"
+
+version-current:
+    node ui/dev/version.ts
+
+# CHANGELOG.md from the commit history. Pass the tag about to be made, such as v0.2.0, to head the newest changes with it.
+changelog tag="":
+    git cliff {{ if tag == "" { "" } else { "--tag " + tag } }} --output CHANGELOG.md
 
 # Clean and incremental build times for the dev profile, recorded in docs/benchmarks/build-times.md
 build-times:

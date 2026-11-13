@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # git-cliff reads the history back to the previous tag.
+          fetch-depth: 0
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just@1.59.0,cargo-deny@0.20.2,typos@1.52.2,git-cliff@2.14.2
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci --prefix ui
+      - name: Check the tag matches the version
+        id: version
+        shell: bash
+        run: echo "version=$(node ui/dev/version.ts --tag "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"
+      - run: just verify
+      - run: just installer
+      - name: Write the release notes
+        shell: bash
+        run: git cliff --current --strip header --output target/release-notes.md
+      - name: Draft the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        # 0.x releases are pre-releases. The draft is edited for a human reader before it is published.
+        run: >
+          gh release create "$GITHUB_REF_NAME" --draft --prerelease --verify-tag
+          --title "Resonance $VERSION"
+          --notes-file target/release-notes.md
+          "target/release/bundle/nsis/Resonance_${VERSION}_x64-setup.exe"
