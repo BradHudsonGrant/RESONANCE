@@ -18,7 +18,7 @@ Repo and pipeline:
 - [x] Cargo workspace with the `core` and `cli` crates ([#6](https://github.com/BradHudsonGrant/RESONANCE/issues/6)). Evidence: merged in [#29](https://github.com/BradHudsonGrant/RESONANCE/pull/29); 11 tests pass.
 - [x] One verify command, `just verify` ([#7](https://github.com/BradHudsonGrant/RESONANCE/issues/7)). Evidence: merged in [#30](https://github.com/BradHudsonGrant/RESONANCE/pull/30); `just verify` exits 0 on a clean branch and 1 on a commit message with a co-author trailer.
 - [ ] CI on pull requests ([#8](https://github.com/BradHudsonGrant/RESONANCE/issues/8))
-- [ ] Issue and pull-request templates ([#9](https://github.com/BradHudsonGrant/RESONANCE/issues/9))
+- [x] Issue and pull-request templates ([#9](https://github.com/BradHudsonGrant/RESONANCE/issues/9)). Evidence: merged in [#31](https://github.com/BradHudsonGrant/RESONANCE/pull/31); GitHub lists the three issue templates and the PR template.
 - [ ] Version script, changelog and release workflow ([#10](https://github.com/BradHudsonGrant/RESONANCE/issues/10))
 
 Development loop:
