@@ -19,7 +19,7 @@ Repo and pipeline:
 - [x] One verify command, `just verify` ([#7](https://github.com/BradHudsonGrant/RESONANCE/issues/7)). Evidence: merged in [#30](https://github.com/BradHudsonGrant/RESONANCE/pull/30); `just verify` exits 0 on a clean branch and 1 on a commit message with a co-author trailer.
 - [x] CI on pull requests ([#8](https://github.com/BradHudsonGrant/RESONANCE/issues/8)). Evidence: merged in [#32](https://github.com/BradHudsonGrant/RESONANCE/pull/32); the PR's own check passed, and `just verify` exits 1 on a badly formatted tree.
 - [x] Issue and pull-request templates ([#9](https://github.com/BradHudsonGrant/RESONANCE/issues/9)). Evidence: merged in [#31](https://github.com/BradHudsonGrant/RESONANCE/pull/31); GitHub lists the three issue templates and the PR template.
-- [ ] Version script, changelog and release workflow ([#10](https://github.com/BradHudsonGrant/RESONANCE/issues/10)). Merged in [#41](https://github.com/BradHudsonGrant/RESONANCE/pull/41); ticked once a test tag has drafted a release with the installer attached.
+- [x] Version script, changelog and release workflow ([#10](https://github.com/BradHudsonGrant/RESONANCE/issues/10)). Evidence: merged in [#41](https://github.com/BradHudsonGrant/RESONANCE/pull/41); the `v0.1.0-rc.1` tag drafted an unpublished pre-release with the 3.35 MiB installer attached and the changelog as its notes.
 
 Development loop:
 
@@ -38,7 +38,7 @@ Design and shell:
 - [x] App shell showing real data from a scan of the fixture folder ([#16](https://github.com/BradHudsonGrant/RESONANCE/issues/16)). Evidence: merged in [#39](https://github.com/BradHudsonGrant/RESONANCE/pull/39); the browser page and the installed app each showed the 50 fixture tracks, and the scroll measurements at 100,000 rows are in [benchmarks/library-table.md](benchmarks/library-table.md). The frame budget stays open in [#40](https://github.com/BradHudsonGrant/RESONANCE/issues/40).
 - [x] The wave component ported, with its frame cost measured ([#17](https://github.com/BradHudsonGrant/RESONANCE/issues/17)). Evidence: merged in [#42](https://github.com/BradHudsonGrant/RESONANCE/pull/42); the empty library shows it, and its longest frame over 3,000 was 0.4 ms of UI-thread time against a 1 ms budget ([benchmarks/wave.md](benchmarks/wave.md)).
 - [x] Tauri shell, `just app` and Windows installer ([#20](https://github.com/BradHudsonGrant/RESONANCE/issues/20)). Evidence: merged in [#39](https://github.com/BradHudsonGrant/RESONANCE/pull/39); `just installer` built a 3.35 MiB setup, and the installed app scanned the 50 fixture tracks and kept them after a restart ([benchmarks/native-shell.md](benchmarks/native-shell.md)).
-- [ ] Playwright suite against the real core ([#21](https://github.com/BradHudsonGrant/RESONANCE/issues/21))
+- [x] Playwright suite against the real core ([#21](https://github.com/BradHudsonGrant/RESONANCE/issues/21)). Evidence: merged in [#45](https://github.com/BradHudsonGrant/RESONANCE/pull/45); two tests scan a generated folder through the page, select a track, see the inspector fill and see a missing folder reported, locally and in CI.
 
 Docs:
 

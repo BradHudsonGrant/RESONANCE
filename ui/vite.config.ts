@@ -7,7 +7,10 @@ import { defineConfig } from 'vite';
 import { coreProxy } from './dev/core-proxy.ts';
 import { bundleNotices } from './dev/bundle-notices.ts';
 
-const connectionFile = fileURLToPath(new URL('../target/dev/connection.json', import.meta.url));
+// The browser tests point this at their own core, so they never touch a dev core's connection.
+const connectionFile =
+  process.env.RESONANCE_CONNECTION_FILE ??
+  fileURLToPath(new URL('../target/dev/connection.json', import.meta.url));
 
 export default defineConfig({
   // `svelteTesting` only acts under Vitest, where it makes Svelte load its browser build.

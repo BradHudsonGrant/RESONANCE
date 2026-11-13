@@ -24,7 +24,7 @@ How work gets into this repo. Everything below is a requirement.
 - File operations: integration tests in temporary folders, covering undo and a crash halfway through an operation.
 - Database: a migration test from every earlier version.
 - Integrations: small synthetic libraries committed as fixtures.
-- UI: component tests with Vitest, a short Playwright suite for the main flows against mocked IPC, and one smoke test against the real app before each release.
+- UI: component tests with Vitest, a short Playwright suite for the main flows against a real core (`just e2e`, also part of `just verify`), and one smoke test against the real app before each release. The suite runs in the installed Edge on its own port, core and library, so it never touches a dev server or `just serve`.
 - `resonance bench` writes hardware, versions and timings to `docs/benchmarks/`.
 
 ## Docs
