@@ -83,7 +83,7 @@ The history should read like one careful developer working through a roadmap. Do
 
 SemVer, 0.x until 1.0. One minor version per milestone, patch versions for fixes. A script keeps the version in step across the Cargo workspace, `tauri.conf.json` and `package.json`.
 
-To release: open `chore/release-vX.Y.Z`, bump versions, generate `CHANGELOG.md` with git-cliff, merge the PR, tag `vX.Y.Z` on `master`. The tag triggers a workflow that builds the Windows installer and drafts a GitHub Release. Edit the notes for a human reader, then publish. Mark 0.x releases as pre-releases.
+To release: open `chore/release-vX.Y.Z`, set the version with `just version X.Y.Z`, write `CHANGELOG.md` with `just changelog vX.Y.Z`, merge the PR, tag `vX.Y.Z` on `master`. `just verify` fails if the version files disagree, and the release workflow fails if the tag does not match them. The tag triggers a workflow that builds the Windows installer and drafts a GitHub Release. Edit the notes for a human reader, then publish. Mark 0.x releases as pre-releases.
 
 ## CI
 
