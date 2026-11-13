@@ -23,4 +23,10 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just@1.59.0,cargo-deny@0.20.2,typos@1.52.2
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci --prefix ui
       - run: just verify

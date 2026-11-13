@@ -23,7 +23,7 @@ Repo and pipeline:
 
 Development loop:
 
-- [ ] Typed command layer and `resonance serve` ([#11](https://github.com/BradHudsonGrant/RESONANCE/issues/11))
+- [x] Typed command layer and `resonance serve` ([#11](https://github.com/BradHudsonGrant/RESONANCE/issues/11)). Evidence: merged in [#33](https://github.com/BradHudsonGrant/RESONANCE/pull/33) and [#34](https://github.com/BradHudsonGrant/RESONANCE/pull/34); the page in a browser shows the core's version through the generated client, and a connection without the token gets a 401.
 - [ ] `just ui`, `just serve` and `just app`, with build times recorded ([#12](https://github.com/BradHudsonGrant/RESONANCE/issues/12))
 - [ ] Test fixtures: generated audio, and a local set of real tracks ([#18](https://github.com/BradHudsonGrant/RESONANCE/issues/18))
 

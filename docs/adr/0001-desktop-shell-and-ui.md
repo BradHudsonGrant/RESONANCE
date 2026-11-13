@@ -11,7 +11,7 @@ The old app was Tauri 2 with Svelte 5, the same shell proposed here. So the shel
 ## Decision
 
 - Desktop shell: Tauri 2. The current release is 2.12.5.
-- UI: Svelte 5 (5.57.3), TypeScript in strict mode (7.0.2), Vite (8.3.8).
+- UI: Svelte 5 (5.57.3), TypeScript in strict mode (6.0.3, because `svelte-check` and `typescript-eslint` do not support 7 yet), Vite (8.3.8).
 - Real-time views draw with WebGL2 through a small hand-written renderer. This one is a default.
 - The shell holds no logic. Commands are plain typed functions in the `api` crate, called over Tauri IPC in the packaged app and over a localhost WebSocket in development.
 
