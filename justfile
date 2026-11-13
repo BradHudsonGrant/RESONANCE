@@ -47,13 +47,15 @@ app-bench:
     npm --prefix ui run build -- --mode benchmark
     cargo run --release --package resonance-app --features custom-protocol -- --data-folder target/dev/synthetic
 
-# The Windows installer, with bundled assets and project-local packaging tools.
+# The Windows installer, with bundled assets and project-local packaging tools. Paths in the program
+# are remapped so it never names the folders of the machine that built it.
 [windows]
 [working-directory: 'app']
 installer:
     npm --prefix ../ui run build
     node ../ui/dev/notices.ts --check
-    ../ui/node_modules/.bin/tauri.cmd build --bundles nsis
+    $env:CARGO_ENCODED_RUSTFLAGS = @('--remap-path-prefix={{ justfile_directory() }}=resonance', '--remap-path-prefix={{ CARGO_HOME }}=cargo') -join [char]0x1f; ../ui/node_modules/.bin/tauri.cmd build --bundles nsis
+    node ../ui/dev/machine-paths.ts ../target/release/resonance-app.exe
 
 # Licence texts from the exact Rust dependencies and the frontend's bundled modules.
 notices:
