@@ -16,7 +16,7 @@ Repo and pipeline:
 - [x] Local hooks: `commit-msg` rejects co-author trailers and generator footers, `pre-push` blocks direct pushes to `master`. Evidence: both tested by hand on 12 November 2026, each rejecting a bad input and passing a good one.
 - [x] Labels, milestones and the M0 issues. Evidence: 28 labels, 13 milestones, issues [#1](https://github.com/BradHudsonGrant/RESONANCE/issues/1) to [#23](https://github.com/BradHudsonGrant/RESONANCE/issues/23).
 - [x] Cargo workspace with the `core` and `cli` crates ([#6](https://github.com/BradHudsonGrant/RESONANCE/issues/6)). Evidence: merged in [#29](https://github.com/BradHudsonGrant/RESONANCE/pull/29); 11 tests pass.
-- [ ] One verify command, `just verify` ([#7](https://github.com/BradHudsonGrant/RESONANCE/issues/7))
+- [x] One verify command, `just verify` ([#7](https://github.com/BradHudsonGrant/RESONANCE/issues/7)). Evidence: merged in [#30](https://github.com/BradHudsonGrant/RESONANCE/pull/30); `just verify` exits 0 on a clean branch and 1 on a commit message with a co-author trailer.
 - [ ] CI on pull requests ([#8](https://github.com/BradHudsonGrant/RESONANCE/issues/8))
 - [ ] Issue and pull-request templates ([#9](https://github.com/BradHudsonGrant/RESONANCE/issues/9))
 - [ ] Version script, changelog and release workflow ([#10](https://github.com/BradHudsonGrant/RESONANCE/issues/10))
