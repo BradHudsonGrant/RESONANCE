@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Resonance">
+  <g fill="currentColor">
+    <rect x="6" y="28" width="4" height="8" rx="2"/>
+    <rect x="14" y="25" width="4" height="14" rx="2"/>
+    <rect x="22" y="17" width="4" height="30" rx="2"/>
+    <rect x="38" y="17" width="4" height="30" rx="2"/>
+    <rect x="46" y="25" width="4" height="14" rx="2"/>
+    <rect x="54" y="28" width="4" height="8" rx="2"/>
+  </g>
+  <rect x="30" y="8" width="4" height="48" rx="2" fill="#E4553D"/>
+</svg>

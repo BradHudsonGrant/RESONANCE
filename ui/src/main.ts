@@ -1,3 +1,5 @@
+import './lib/design/design.css';
+
 import { mount } from 'svelte';
 
 import App from './App.svelte';

@@ -1,0 +1,80 @@
+/*
+ * Every colour is written once as light-dark(light, dark). The page follows the system theme,
+ * and data-theme on any element overrides it for that element and everything inside it.
+ */
+:root {
+  color-scheme: dark light;
+
+  --color-background: light-dark(#f8f7f5, #0b0b0c);
+  --color-surface: light-dark(#ffffff, #141415);
+  --color-surface-2: light-dark(#eceae7, #1e1e1f);
+  --color-raised: light-dark(#ffffff, #252527);
+  --color-border: light-dark(#d8d4cf, #343437);
+  --color-border-control: light-dark(#8a8681, #6e6e71);
+  --color-text: light-dark(#171717, #f2f1ef);
+  --color-text-2: light-dark(#595754, #a9a8a6);
+  --color-muted: light-dark(#6c6965, #8c8c8c);
+  --color-accent: light-dark(#d94f3b, #e4553d);
+  --color-on-accent: light-dark(#0b0b0c, #0b0b0c);
+
+  --font-heading: 'Space Grotesk Variable', sans-serif;
+  --font-ui: 'Inter Variable', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', monospace;
+
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 15px;
+  --text-xl: 20px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --radius-control: 4px;
+  --radius-panel: 6px;
+
+  --control-height: 28px;
+  --row-height: 30px;
+
+  --motion-fast: 120ms;
+  --motion-slow: 180ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-slow: 0ms;
+  }
+}
+
+/* More contrast asked for: dividers take the control border's tone and muted text takes Text 2's. */
+@media (prefers-contrast: more) {
+  :root {
+    --color-border: light-dark(#8a8681, #6e6e71);
+    --color-muted: light-dark(#595754, #a9a8a6);
+  }
+}
+
+/* Windows high contrast replaces the palette, so the accent follows the system highlight. */
+@media (forced-colors: active) {
+  :root {
+    --color-accent: Highlight;
+    --color-on-accent: HighlightText;
+    --color-border: CanvasText;
+    --color-border-control: CanvasText;
+  }
+}

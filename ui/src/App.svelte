@@ -1,4 +1,6 @@
 <script lang="ts">
+  import Button from './lib/design/Button.svelte';
+  import Wordmark from './lib/design/Wordmark.svelte';
   import { core } from './lib/ipc/core';
 
   type State =
@@ -20,13 +22,36 @@
 </script>
 
 <main>
-  <h1>Resonance</h1>
+  <h1><Wordmark /></h1>
   {#if state.kind === 'loading'}
-    <p>Connecting to the core…</p>
+    <p class="status">Connecting to the core…</p>
   {:else if state.kind === 'ready'}
-    <p>Core <span data-testid="core-version">{state.version}</span></p>
+    <p class="status">
+      Core <span class="numeric" data-testid="core-version">{state.version}</span>
+    </p>
   {:else}
     <p role="alert">{state.message}</p>
-    <button onclick={load}>Try again</button>
+    <Button onclick={load}>Try again</Button>
   {/if}
 </main>
+
+<style>
+  main {
+    display: grid;
+    justify-items: start;
+    gap: var(--space-3);
+    padding: var(--space-6);
+  }
+
+  h1 {
+    font-size: var(--text-lg);
+  }
+
+  p {
+    margin: 0;
+  }
+
+  .status {
+    color: var(--color-text-2);
+  }
+</style>
