@@ -1,0 +1,19 @@
+[package]
+name = "resonance-library"
+description = "Sources and the scan that reads files into the library. It never writes to the music."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+resonance-core.workspace = true
+resonance-db.workspace = true
+dunce.workspace = true
+lofty.workspace = true
+
+[dev-dependencies]
+resonance-fixtures.workspace = true
+
+[lints]
+workspace = true

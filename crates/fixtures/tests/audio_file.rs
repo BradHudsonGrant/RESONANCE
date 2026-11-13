@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use resonance_fixtures::audio_file::pcm16;
 use resonance_fixtures::signal::{ClickTrack, Signal};
+use resonance_fixtures::silence::{self, write_silent_m4a, write_silent_mp3};
 use symphonia::core::codecs::audio::AudioDecoderOptions;
 use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::{FormatOptions, TrackType};
@@ -108,4 +109,62 @@ fn the_same_signal_decodes_alike_from_wav_and_aiff_and_a_delay_shifts_it_by_its_
 
     assert!(shifted[..1_000].iter().all(|&sample| sample == 0));
     assert_eq!(shifted[1_000..], original[..]);
+}
+
+#[test]
+fn a_click_track_written_as_flac_decodes_to_the_same_samples_across_many_blocks() {
+    // Long enough for the frame numbers to need two bytes, with a short block at the end.
+    let clicks = ClickTrack::at_tempo(174.0, 36, 44_100);
+    let path = fixture_path("clicks-174.flac");
+    clicks.signal.write_flac(&path).expect("the FLAC writes");
+
+    let decoded = decode(&path);
+
+    assert!(clicks.signal.frames() > 128 * 4096);
+    assert_ne!(clicks.signal.frames() % 4096, 0);
+    assert_eq!(decoded.sample_rate, 44_100);
+    assert_eq!(decoded.samples, as_written(&clicks.signal));
+}
+
+#[test]
+fn a_stereo_tone_decodes_alike_from_flac_wav_and_aiff() {
+    let tone = Signal::tone_at_loudness(-14.0, 0.5, 48_000);
+    let flac = fixture_path("stereo.flac");
+    let wav = fixture_path("stereo.wav");
+    let aiff = fixture_path("stereo.aiff");
+    tone.write_flac(&flac).expect("the FLAC writes");
+    tone.write_wav(&wav).expect("the WAV writes");
+    tone.write_aiff(&aiff).expect("the AIFF writes");
+
+    let from_flac = decode(&flac).samples;
+
+    assert_eq!(from_flac, as_written(&tone));
+    assert_eq!(from_flac, decode(&wav).samples);
+    assert_eq!(from_flac, decode(&aiff).samples);
+}
+
+#[test]
+fn a_silent_mp3_decodes_to_silence_of_about_the_length_asked_for() {
+    let path = fixture_path("silence.mp3");
+    write_silent_mp3(&path, 2.0).expect("the MP3 writes");
+
+    let decoded = decode(&path);
+
+    let seconds = decoded.samples.len() as f64 / 2.0 / f64::from(silence::SAMPLE_RATE);
+    assert_eq!(decoded.sample_rate, silence::SAMPLE_RATE);
+    assert!((seconds - 2.0).abs() < 0.1, "decoded {seconds} s");
+    assert!(decoded.samples.iter().all(|&sample| sample == 0));
+}
+
+#[test]
+fn a_silent_m4a_decodes_to_silence_of_about_the_length_asked_for() {
+    let path = fixture_path("silence.m4a");
+    write_silent_m4a(&path, 2.0).expect("the M4A writes");
+
+    let decoded = decode(&path);
+
+    let seconds = decoded.samples.len() as f64 / 2.0 / f64::from(silence::SAMPLE_RATE);
+    assert_eq!(decoded.sample_rate, silence::SAMPLE_RATE);
+    assert!((seconds - 2.0).abs() < 0.1, "decoded {seconds} s");
+    assert!(decoded.samples.iter().all(|&sample| sample == 0));
 }

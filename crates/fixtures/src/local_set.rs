@@ -7,44 +7,19 @@ use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
+use resonance_core::library::AudioFormat;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Format {
-    Mp3,
-    Flac,
-    Aiff,
-    Wav,
-    M4a,
-}
-
-impl Format {
-    const ALL: [Self; 5] = [Self::Mp3, Self::Flac, Self::Aiff, Self::Wav, Self::M4a];
-
-    pub fn of(path: &Path) -> Option<Self> {
-        let extension = path.extension()?.to_str()?.to_ascii_lowercase();
-        match extension.as_str() {
-            "mp3" => Some(Self::Mp3),
-            "flac" => Some(Self::Flac),
-            "aif" | "aiff" => Some(Self::Aiff),
-            "wav" => Some(Self::Wav),
-            "m4a" => Some(Self::M4a),
-            _ => None,
-        }
-    }
-
-    /// How many of the set's 50 tracks are in this format. MP3 is most of a real library, and
-    /// the lossless formats are where decoding and hashing have the most to get wrong.
-    fn share(self) -> usize {
-        match self {
-            Self::Mp3 => 20,
-            Self::Flac => 10,
-            Self::Aiff => 8,
-            Self::Wav => 7,
-            Self::M4a => 5,
-        }
+/// How many of the set's 50 tracks are in a format. MP3 is most of a real library, and the
+/// lossless formats are where decoding and hashing have the most to get wrong.
+fn share(format: AudioFormat) -> usize {
+    match format {
+        AudioFormat::Mp3 => 20,
+        AudioFormat::Flac => 10,
+        AudioFormat::Aiff => 8,
+        AudioFormat::Wav => 7,
+        AudioFormat::M4a => 5,
     }
 }
 
@@ -86,10 +61,10 @@ fn scatter(path: &Path) -> u64 {
 /// large folder cannot fill the set.
 pub fn choose(source: &Path, candidates: &[Candidate]) -> Vec<Candidate> {
     let mut chosen = Vec::new();
-    for format in Format::ALL {
+    for format in AudioFormat::ALL {
         let mut by_folder: BTreeMap<String, Vec<&Candidate>> = BTreeMap::new();
         for candidate in candidates.iter().filter(|candidate| {
-            Format::of(&candidate.path) == Some(format)
+            AudioFormat::of(&candidate.path) == Some(format)
                 && (SMALLEST_BYTES..=LARGEST_BYTES).contains(&candidate.bytes)
         }) {
             by_folder
@@ -109,7 +84,7 @@ pub fn choose(source: &Path, candidates: &[Candidate]) -> Vec<Candidate> {
                 .values()
                 .filter_map(move |tracks| tracks.get(turn))
         });
-        chosen.extend(in_turn.take(format.share()).map(|&track| track.clone()));
+        chosen.extend(in_turn.take(share(format)).map(|&track| track.clone()));
     }
     chosen
 }
@@ -169,7 +144,7 @@ fn audio_files(
             if path != skipping {
                 audio_files(&path, skipping, found)?;
             }
-        } else if kind.is_file() && Format::of(&path).is_some() {
+        } else if kind.is_file() && AudioFormat::of(&path).is_some() {
             let bytes = entry.metadata().map_err(read_error(&path))?.len();
             found.push(Candidate { path, bytes });
         }
@@ -217,7 +192,7 @@ fn copy_bytes(from: &Path, to: &Path) -> Result<(), LocalSetError> {
 pub struct CopiedTrack {
     pub from: String,
     pub to: String,
-    pub format: Format,
+    pub format: &'static str,
     pub bytes: u64,
     pub sha256: String,
 }
@@ -245,7 +220,7 @@ pub fn copy(source: &Path, destination: &Path, skipping: &Path) -> Result<Manife
     let mut used = HashSet::new();
     let mut tracks = Vec::new();
     for track in choose(&root, &candidates) {
-        let Some(format) = Format::of(&track.path) else {
+        let Some(format) = AudioFormat::of(&track.path) else {
             continue;
         };
         let name = track
@@ -282,7 +257,7 @@ pub fn copy(source: &Path, destination: &Path, skipping: &Path) -> Result<Manife
                 .to_string_lossy()
                 .into_owned(),
             to: to.to_string_lossy().replace('\\', "/"),
-            format,
+            format: format.name(),
             bytes: track.bytes,
             sha256,
         });
