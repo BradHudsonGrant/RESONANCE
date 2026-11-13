@@ -4,8 +4,8 @@ base := "origin/master"
 attribution_pattern := "co-authored-by|generated with"
 
 # Format check, lint, licence check, tests, build, and the attribution check
-verify: fmt-check lint licences test bindings-current build attribution
-    @echo "verify passed: format, clippy, typos, licences, tests, bindings, build, attribution"
+verify: fmt-check lint licences test bindings-current build ui-verify attribution
+    @echo "verify passed: format, clippy, typos, licences, tests, bindings, build, ui, attribution"
 
 fmt-check:
     cargo fmt --all --check
@@ -22,6 +22,13 @@ test:
 
 build:
     cargo build --workspace
+
+# Type check, lint, format check, tests and build for the UI. Needs `npm ci --prefix ui` once.
+ui-verify:
+    npm --prefix ui run check
+    npm --prefix ui run lint
+    npm --prefix ui run test
+    npm --prefix ui run build
 
 # The tests regenerate the TypeScript types, so any change here means the committed ones are stale
 [unix]
