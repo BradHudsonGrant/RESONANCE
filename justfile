@@ -7,8 +7,8 @@ export CARGO_HOME := justfile_directory() / "target/cargo-home"
 export NPM_CONFIG_CACHE := justfile_directory() / "target/npm-cache"
 
 # Format check, lint, licence check, tests, build, and the attribution check
-verify: ui-verify fmt-check lint licences test bindings-current build notices-current version-current attribution
-    @echo "verify passed: format, clippy, typos, licences, tests, bindings, build, ui, notices, version, attribution"
+verify: ui-verify fmt-check lint licences test bindings-current build e2e notices-current version-current attribution
+    @echo "verify passed: format, clippy, typos, licences, tests, bindings, build, browser tests, ui, notices, version, attribution"
 
 fmt-check:
     cargo fmt --all --check
@@ -32,6 +32,10 @@ ui-verify:
     npm --prefix ui run lint
     npm --prefix ui run test
     npm --prefix ui run build
+
+# Browser tests against a real core, on their own port and library, using the installed Edge
+e2e:
+    npm --prefix ui run e2e
 
 # The UI in a browser with hot reload, talking to the core that `just serve` runs
 ui:
