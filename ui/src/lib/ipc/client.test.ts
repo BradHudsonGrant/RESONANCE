@@ -17,6 +17,10 @@ class FakeSocket extends EventTarget {
     this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(reply) }));
   }
 
+  receivesFrame(frame: ArrayBuffer) {
+    this.dispatchEvent(new MessageEvent('message', { data: frame }));
+  }
+
   closes() {
     this.dispatchEvent(new Event('close'));
   }
@@ -109,6 +113,27 @@ describe('Core', () => {
     sockets[0]!.closes();
 
     await expect(info).rejects.toMatchObject({ code: 'disconnected' });
+  });
+
+  it('hands binary frames to frame listeners and leaves waiting calls alone', async () => {
+    const { core, sockets } = coreWithSockets();
+    const frames: number[] = [];
+    const stop = core.onFrame((frame) => frames.push(new Uint8Array(frame)[0]!));
+
+    const info = core.call('app_info');
+    sockets[0]!.opens();
+    await settled();
+    sockets[0]!.receivesFrame(new Uint8Array([1, 0, 0, 0]).buffer);
+    stop();
+    sockets[0]!.receivesFrame(new Uint8Array([2, 0, 0, 0]).buffer);
+    sockets[0]!.receives({
+      id: 1,
+      response: { command: 'app_info', result: { version: '0.1.0' } },
+      error: null,
+    });
+
+    expect(frames).toEqual([1]);
+    await expect(info).resolves.toEqual({ version: '0.1.0' });
   });
 
   it('opens a new socket for the next call after a drop', async () => {

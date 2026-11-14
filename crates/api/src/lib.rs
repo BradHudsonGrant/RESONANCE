@@ -1,18 +1,20 @@
 pub mod command;
 pub mod data_folder;
 pub mod error;
+pub mod mix_frame;
 pub mod serve;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
 use command::{
-    AppInfo, LibraryTrack, Request, Response, ScanReport, TrackAudio, TrackKey, TrackPage,
-    UnreadableFile,
+    AppInfo, LibraryTrack, MixDeck, MixDeckState, MixDevice, MixState, Request, Response,
+    ScanReport, TrackAudio, TrackKey, TrackPage, UnreadableFile,
 };
 use error::ApiError;
 use resonance_core::library::TagField;
 use resonance_db::{Database, TrackRow};
+use resonance_engine::{DeckId, Mix, MixStatus};
 
 const REPORTED_UNREADABLE_FILES: usize = 100;
 
@@ -20,6 +22,7 @@ const REPORTED_UNREADABLE_FILES: usize = 100;
 pub struct Api {
     library: Mutex<Database>,
     own_files: Vec<PathBuf>,
+    mix: Mix,
 }
 
 impl Api {
@@ -27,7 +30,13 @@ impl Api {
         Self {
             library: Mutex::new(library),
             own_files: std::env::current_exe().into_iter().collect(),
+            mix: Mix::new(),
         }
+    }
+
+    /// The decks, for a transport that streams their telemetry and waveforms.
+    pub fn mix(&self) -> &Mix {
+        &self.mix
     }
 
     /// Keeps a source scan out of the folder holding the app's data.
@@ -43,6 +52,17 @@ impl Api {
             })),
             Request::Tracks { offset, limit } => self.tracks(offset, limit).map(Response::Tracks),
             Request::Scan { folder } => self.scan(Path::new(&folder)).map(Response::Scan),
+            Request::MixLoad { deck, path } => self
+                .mix
+                .load(deck_id(deck), Path::new(&path))
+                .map(|status| Response::MixLoad(mix_state(status)))
+                .map_err(ApiError::audio_failed),
+            Request::MixPlay { deck, playing } => self
+                .mix
+                .play(deck_id(deck), playing)
+                .map(|status| Response::MixPlay(mix_state(status)))
+                .map_err(ApiError::audio_failed),
+            Request::MixStatus => Ok(Response::MixStatus(mix_state(self.mix.status()))),
         }
     }
 
@@ -84,6 +104,39 @@ impl Api {
                 })
                 .collect(),
         })
+    }
+}
+
+fn deck_id(deck: MixDeck) -> DeckId {
+    match deck {
+        MixDeck::A => DeckId::A,
+        MixDeck::B => DeckId::B,
+    }
+}
+
+fn mix_state(status: MixStatus) -> MixState {
+    MixState {
+        device: status.device.map(|device| MixDevice {
+            name: device.name,
+            sample_rate: device.sample_rate,
+            channels: device.channels,
+            requested_buffer_frames: device.requested_buffer_frames,
+            period_frames: device.period_frames,
+        }),
+        decks: status
+            .decks
+            .into_iter()
+            .map(|deck| MixDeckState {
+                deck: match deck.deck {
+                    DeckId::A => MixDeck::A,
+                    DeckId::B => MixDeck::B,
+                },
+                generation: deck.generation,
+                path: deck.path.map(|path| path.to_string_lossy().into_owned()),
+                duration_seconds: deck.duration_seconds,
+                playing: deck.playing,
+            })
+            .collect(),
     }
 }
 

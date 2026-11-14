@@ -16,6 +16,9 @@ if (import.meta.env.DEV) {
   void import('./lib/wave/measure-wave').then(({ measureWave }) => {
     Object.assign(window, { measureWave });
   });
+  void import('./lib/mix/measure-mix').then(({ measureMix }) => {
+    Object.assign(window, { measureMix });
+  });
 }
 
 if (import.meta.env.MODE === 'benchmark') {

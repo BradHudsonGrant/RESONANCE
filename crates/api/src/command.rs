@@ -15,6 +15,18 @@ pub enum Request {
     Scan {
         folder: String,
     },
+    /// Puts a file on a deck, stopped at its start. The first load opens the audio device.
+    MixLoad {
+        deck: MixDeck,
+        path: String,
+    },
+    /// Starts or stops a deck.
+    MixPlay {
+        deck: MixDeck,
+        playing: bool,
+    },
+    /// The audio device and what each deck holds. Positions and meters come as binary frames.
+    MixStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -24,6 +36,9 @@ pub enum Response {
     AppInfo(AppInfo),
     Tracks(TrackPage),
     Scan(ScanReport),
+    MixLoad(MixState),
+    MixPlay(MixState),
+    MixStatus(MixState),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -106,4 +121,43 @@ pub struct TrackAudio {
     pub channels: Option<u8>,
     pub bit_depth: Option<u8>,
     pub bitrate_kbps: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum MixDeck {
+    A,
+    B,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct MixState {
+    /// Missing until the first load opens the device.
+    pub device: Option<MixDevice>,
+    pub decks: Vec<MixDeckState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct MixDevice {
+    pub name: String,
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub requested_buffer_frames: u32,
+    /// The period the device runs its callback at, whatever was asked for.
+    pub period_frames: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct MixDeckState {
+    pub deck: MixDeck,
+    /// Changes with every load and matches the waveform frame for the same track. Zero while the
+    /// deck is empty.
+    pub generation: u32,
+    pub path: Option<String>,
+    pub duration_seconds: f64,
+    pub playing: bool,
 }

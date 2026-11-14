@@ -29,7 +29,7 @@ Development loop:
 
 The spike:
 
-- [ ] Mix view: two decks playing real files, scrolling waveforms locked to the audio clock, meters over the binary channel, measured ([#13](https://github.com/BradHudsonGrant/RESONANCE/issues/13))
+- [x] Mix view: two decks playing real files, scrolling waveforms locked to the audio clock, meters over the binary channel, measured ([#13](https://github.com/BradHudsonGrant/RESONANCE/issues/13)). Evidence: merged in [#48](https://github.com/BradHudsonGrant/RESONANCE/pull/48); two decks played fixture tracks for about 14 minutes with no underruns, and the view held a 6.4 ms refresh with no missed frames up to a 2335 by 1128 canvas ([benchmarks/mix-view.md](benchmarks/mix-view.md)). Larger canvases miss frames, open in [#46](https://github.com/BradHudsonGrant/RESONANCE/issues/46), and the 256-sample buffer is open in [#47](https://github.com/BradHudsonGrant/RESONANCE/issues/47).
 
 Design and shell:
 
