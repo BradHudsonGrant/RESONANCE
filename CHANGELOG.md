@@ -30,6 +30,7 @@ Every release, newest first. Made from the commit history with git-cliff.
 - Add product overview and roadmap ([#28](https://github.com/BradHudsonGrant/RESONANCE/pull/28))
 - Add the Design milestone before Library ([#54](https://github.com/BradHudsonGrant/RESONANCE/pull/54))
 - Add screenshot, install and build steps ([#57](https://github.com/BradHudsonGrant/RESONANCE/pull/57))
+- Specify UI from concept boards and record ADR 0012 ([#58](https://github.com/BradHudsonGrant/RESONANCE/pull/58))
 
 ### Tests
 

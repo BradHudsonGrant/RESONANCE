@@ -51,6 +51,20 @@ on-accent on accent: 5.31, needs 4.5.
 
 on-accent on accent: 4.81, needs 4.5.
 
+## Additional pairs from the concept boards
+
+The concept boards add inverted pills (an active filter pill, an active curve toggle pill, an active segmented tab and solid monochrome action buttons) that draw surface or background text over a `--color-text` fill, plus accent-highlighted badges and sidebar items. Every text pair keeps at least 4.5 to 1; non-text marks keep at least 3 to 1.
+
+| Pair | Dark | Light | Needs | Where it appears |
+| --- | --- | --- | --- | --- |
+| `background` on `text` | 17.43 | 16.74 | 4.5 | Active filter pills (`All Tracks`), active `Energy` pill, solid monochrome `Play` button |
+| `surface` on `text` | 16.31 | 17.93 | 4.5 | Active segmented tab (`All`) when placed inside a surface container |
+| `text` on `surface-2` with `accent` 1 px border | 14.76 (text), 4.49 (border) | 14.93 (text), 3.41 (border) | 4.5 (text), 3 (border) | Accent-flagged data tags (such as `AI` or active model flags) |
+| `accent` on `surface-2` | 4.49 | 3.41 | 3 | Non-text marks only (selection bars, icons, focus brackets); never text |
+| `accent` on `raised` | 4.13 | 4.09 | 3 | Non-text marks only (`2px` selection bar on active sidebar or table row); never text |
+
+On the brand board, the `AI` tag and the active `Listen` sidebar label draw orange text on dark or light surfaces. Because `--color-accent` sits at 4.49 on dark `surface-2`, 4.13 on dark `raised`, and between 3.41 and 4.09 across all four light backgrounds, it fails the 4.5 text threshold. Resonance keeps active labels in `--color-text` and puts `--color-accent` on the border, left selection bar, focus bracket or icon, or uses `--color-on-accent` (`#0B0B0C`) text on a solid `--color-accent` fill (5.31 dark, 4.81 light).
+
 ## More contrast and high contrast
 
 When the system asks for more contrast, dividers take the control border's tone and Muted takes Text 2's. In Windows high contrast mode the system's colours replace the palette, and the accent follows the system highlight colour.
