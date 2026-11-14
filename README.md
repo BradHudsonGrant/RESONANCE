@@ -10,7 +10,7 @@ Today the app scans a music folder into a local SQLite library without changing 
 
 ## Status
 
-M0 Foundations (v0.1.0) is nearly done: the Cargo workspace, the local core and browser development loop, folder scanning, the library table and inspector, the Mix audio and waveform spike, the Tauri desktop shell and the Windows installer are in place. M1 Design (v0.2.0) comes next and rebuilds the shell, Library and Mix views to the design spec. [docs/roadmap.md](docs/roadmap.md) shows what is done and what is next.
+M0 Foundations (v0.1.0) is nearly done: the Cargo workspace, the local core and browser development loop, folder scanning, the library table and inspector, the Mix audio and waveform spike, the Tauri desktop shell, the Windows installer and the performance budget benchmarks are in place. M1 Design (v0.2.0) comes next and rebuilds the shell, Library and Mix views to the design spec. [docs/roadmap.md](docs/roadmap.md) shows what is done and what is next.
 
 ## Install
 
@@ -85,6 +85,11 @@ That writes `target/release/bundle/nsis/Resonance_0.1.0_x64-setup.exe`. Running 
    just verify
    ```
 
+   To measure the performance budgets in [docs/architecture.md](docs/architecture.md#performance-budgets) and write the results to `docs/benchmarks/` (this opens the desktop window and a headed Edge window and plays audio through the output device):
+   ```powershell
+   just bench
+   ```
+
 ## Docs
 
 | File | What is in it |
@@ -94,6 +99,7 @@ That writes `target/release/bundle/nsis/Resonance_0.1.0_x64-setup.exe`. Running 
 | [docs/architecture.md](docs/architecture.md) | The stack, the repository layout, the rules, the data model and the performance budgets |
 | [docs/adr/](docs/adr/) | The decisions and the reasons for them |
 | [docs/design/](docs/design/) | Structure, layout, interaction, the visual language and the wave |
+| [docs/benchmarks/](docs/benchmarks/) | Build times and performance budget measurements |
 | [docs/v3-notes.md](docs/v3-notes.md) | What the previous app taught us |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How work gets into the repo |
 
