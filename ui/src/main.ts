@@ -9,7 +9,8 @@ if (!target) throw new Error('index.html has no #app element');
 
 mount(App, { target });
 
-if (import.meta.env.DEV) {
+// `resonance bench` calls these in the desktop app, which runs the benchmark build.
+if (import.meta.env.DEV || import.meta.env.MODE === 'benchmark') {
   void import('./lib/library/measure-scroll').then(({ measureTableScroll }) => {
     Object.assign(window, { measureTableScroll });
   });

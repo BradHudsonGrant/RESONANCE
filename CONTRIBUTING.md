@@ -25,7 +25,7 @@ How work gets into this repo. Everything below is a requirement.
 - Database: a migration test from every earlier version.
 - Integrations: small synthetic libraries committed as fixtures.
 - UI: component tests with Vitest, a short Playwright suite for the main flows against a real core (`just e2e`, also part of `just verify`), and one smoke test against the real app before each release. The suite runs in the installed Edge on its own port, core and library, so it never touches a dev server or `just serve`.
-- `resonance bench` writes hardware, versions and timings to `docs/benchmarks/`.
+- Budgets: `just bench` measures every budget in `docs/architecture.md` and writes the result to `docs/benchmarks/budgets-vX.Y.Z.md`, with the machine and versions. It opens the desktop app and an Edge window and plays audio for about four minutes, so it is run by hand at the end of a milestone and not in `just verify`. [ADR 0011](docs/adr/0011-bench-in-the-page-and-the-cli.md) says how each figure is taken.
 
 ## Docs
 
