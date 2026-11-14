@@ -1,43 +1,66 @@
-# Mix and later spaces
+# Mix Workspace
 
-Issue [#52](https://github.com/BradHudsonGrant/RESONANCE/issues/52) rebuilds the Mix view (`ui/src/lib/mix/Mix.svelte`) to match the tokens, rounded deck pods and micro elements of both concept boards using today's two-deck audio spike. Elements from the boards that belong to `Sets`, `Coach` and `Replay` wait for their milestones.
+The Mix workspace (`ui/src/lib/mix/Mix.svelte`, `Deck.svelte`, `Waveform.svelte` and `renderer.ts`) is the live two-deck performance screen selected from `Sidebar` (`Mix`, shortcut `4`).
 
-## Mix view in M1 (`#52`)
+It reuses the same `Deck` and `Waveform` components that power `TransitionDock` in the shell ([components.md](components.md)):
 
-The view fills the shell's workspace area as a CSS grid (`grid-template-rows: auto auto 1fr auto`, `height: 100%`, `--color-background`).
+- In `Library`, `Prep`, `Sets` and `Replay`, `TransitionDock` shows `Deck variant="dock"` (`340 x 87 px`) and `Waveform mode="crossfade"` (`844 x 101 px`).
+- When `Mix` is active, the centre workspace expands into two full `Deck variant="full"` strips and a central mixer column, while `TransitionDock` collapses so the scrolling waveforms are not duplicated.
 
-### Deck A and Deck B header pods
+Issue [#52](https://github.com/BradHudsonGrant/RESONANCE/issues/52) restyles `Mix.svelte` to the component and token system; `M7` (`v0.8.0`), `M8` (`v0.9.0`) and `M12` (`v0.13.0`) add the full mixer controls, live coaching strip, and stem controls.
 
-A two-column bar (`grid-template-columns: 1fr 1fr`, `gap: 16px`, `padding: 12px 16px`, `--color-surface`, `1px solid var(--color-border)` bottom border) holds one framed pod for each deck, matching the Deck A / B card anatomy at the bottom of `concept-dark.png`:
+## Layout and regions (`Mix.svelte`)
 
-- **Pod container:** `--color-surface-2` (`#1E1E1F` dark) or `--color-background` (`#F8F7F5` light), `1px solid var(--color-border)`, `--radius-panel` (`8px`), `padding: 10px 12px`, `display: flex`, `align-items: center`, `gap: 12px`.
-- **Deck badge (`A` / `B`):** `28 x 28 px` square (`--radius-control: 6px`, `--color-raised`, `1px solid var(--color-border)`, `Space Grotesk` `14px` weight `600`, `--color-text`).
-- **Deck thumbnail (`40 x 40 px` `WaveThumb`):** `--radius-control` (`6px`), `1px solid var(--color-border)`, seeded from the loaded track's facts (or showing the Grid Dots motif when empty).
-- **Track selector and facts:** `<select>` (`height: 28px`, `--radius-control: 6px`, `--color-surface`, `1px solid var(--color-border-control)`, `Inter` `13px` `--color-text`) above a mono subline (`BPM · Key`, `JetBrains Mono` `11px` `--color-text-2`, `tabular-nums`) when a track is loaded.
-- **Transport and clock:** Play/Stop `Button` (`28px` height, `--radius-control: 6px`; active playing deck takes a `1px solid var(--color-accent)` left or border highlight without moving layout) and tabular time readout (`0:00 / 0:00`, `JetBrains Mono` `12px` `--color-text`).
+```
++-------------------------------------------------------------------------+
+| Mix Header: Audio Output Selector | Latency Readout | Record Indicator  |
++-------------------------------------------------------------------------+
+| Deck AScrolling Waveform (Waveform mode="deck", WebGL2 1px bars, 120Hz) |
+| Deck BScrolling Waveform (Waveform mode="deck", WebGL2 1px bars, 120Hz) |
++-------------------------------------------------------------------------+
+| Coach Strip (M8: drift, phrase alignment, level & key guidance)         |
++-----------------------------------+-------------------------------------+
+| Deck A (Deck variant="full")      | Deck B (Deck variant="full")        |
+| [A] 60px Thumb | Title / Artist   | [B] 60px Thumb | Title / Artist     |
+| 128.0 BPM | 8A | -7.4 LUFS | Time | 126.5 BPM | 7A | -7.8 LUFS | Time   |
+| Play | Cue | Sync | Keylock       | Play | Cue | Sync | Keylock         |
+| Stem LevelDots (M12)              | Stem LevelDots (M12)                |
++-----------------------------------+-------------------------------------+
+```
 
-### Stacked waveform viewport (`#52`)
+## 1. Mix header bar (`#52`)
 
-- **Canvas:** WebGL2 `<canvas>` filling `1fr` on `--color-background` (`#0B0B0C` dark / `#F8F7F5` light), drawing Deck A (top) and Deck B (bottom) with 1 px whole-pixel bars (`--color-text-2` peak, `--color-text` RMS, no anti-aliasing, no gradient fills), playheads in `--color-accent`, and stereo meters on the right (`--color-surface-2` track, `--color-text-2` level, `--color-text` hot).
-- **Focus brackets:** Passive `6 x 6 px` corner brackets (`--color-border-control`, `1.5px` stroke) frame the canvas viewport as a CSS overlay outside the per-frame render loop, with an `--color-accent` playhead tick at the alignment line.
-- **Budget:** Re-measured in `#52` against [#46](https://github.com/BradHudsonGrant/RESONANCE/issues/46) (99th-percentile frame under 8 ms at 120 Hz) with zero DOM updates per frame.
+- Height: `--control-height-lg` (`42px`), `padding: 0 var(--space-5)` (`20px`), `border-bottom: 1px solid var(--color-border)`.
+- Left: Workspace title `Mix` (`--font-display`, `font-weight: 500`, `--text-xl: 20px`, `--color-text`) and audio device selector (`Button variant="select" size="sm"`, `--radius-sm: 6px`).
+- Right: Buffer size and callback telemetry (`DataTag variant="rect"`, `--font-mono`, `--text-xs: 11px`, `tabular-nums`, e.g. `48.0 kHz · 480 frames · 0.34 ms max`), plus the session record indicator (`M7`, using `--color-accent` when recording is armed/active).
 
-### Status bar and states (`#52`)
+## 2. Stacked scrolling waveforms (`Waveform.svelte` `mode="deck"`, `#52`)
 
-- **Footer (`32px` height, `padding: 0 16px`, `--color-surface`, `1px solid var(--color-border)` top border):** `JetBrains Mono` `12px` `--color-text-2` displaying the active device (`device.name`, sample rate in kHz, period frames and requested buffer frames), or the prompt `"Choose a track for a deck. The audio device opens with the first one."`.
-- **Empty / notice / error states:**
-  - When opened without the binary WebSocket channel (for example in the packaged app before M7 adds native binary transport), a flat bordered notice above the canvas states `"The Mix view runs against the development core for now. Start it with just serve and open the page from just ui."`
-  - When WebGL2 is absent or a command fails, a `role="alert"` banner names what failed in `--color-text` inside `--color-surface-2` with a `1px solid var(--color-accent)` border.
+- **Container:** `Card variant="surface" radius="lg"` (`--radius-lg: 10px`, `1px solid var(--color-border)`, `--color-background` canvas bed) containing two stacked `110px`-tall WebGL2 waveform lanes separated by a `1px` `--color-border` centre line.
+- **1 px bar rendering (`ui/src/lib/mix/renderer.ts`):**
+  - Draws `1px` CSS vertical peak bars (`Math.max(1, Math.round(devicePixelRatio))` device pixels wide, `1px` gap) locked to the audio clock (`ui/src/lib/mix/clock.ts`).
+  - Unplayed bars ahead of the playhead use `--color-text-2` (`#9A9892` dark / `#595853` light); played bars behind the playhead use `--color-text` (`#F2F1EF` dark / `#141413` light).
+  - Beat-grid ticks render as `1px` vertical hairlines (`--color-border` on beats, `--color-border-control` on 4-bar downbeats).
+  - Playhead: stationary `1px` vertical line in `--color-accent` (`#E4553D` dark / `#D94F3B` light) topped with a `5 x 5 px` square cap (`--color-accent`), matching the playhead in `TransitionDock`.
+- **Performance budget:** Zero DOM writes per frame. Meter and playhead data arrive over the binary channel (`ui/src/lib/mix/frames.ts`) at `<= 60 Hz` and are extrapolated at the display refresh rate (`<= 8 ms` 99th-percentile frame time at `120 Hz`, [#46](https://github.com/BradHudsonGrant/RESONANCE/issues/46)). While `Mix` is playing, background `Wave.svelte` canvases pause automatically.
 
-## Later deck, coach, replay and set views
+## 3. Deck strips (`Deck.svelte` `variant="full"`, `#52`, `M7`, `M12`)
 
-Both concept boards contain components designed for later milestones. None appear in `#52` with made-up values; each waits for the milestone that brings its data.
+Each deck panel is built from `Deck.svelte` (`variant="full"`) inside a `Card variant="surface" radius="lg"` (`--radius-lg: 10px`) wrapped in `FocusBrackets.svelte` (highlighting the keyboard-targeted deck):
 
-| Board element | Design and tokens | Where it goes in Resonance | Milestone |
-| --- | --- | --- | --- |
-| Full deck controls, 3-band EQ, filter, faders, cues, loops | Dense `--color-surface` mixer strips, `28px` controls (`--radius-control: 6px`), tabular mono readouts | `Mix` view central mixer and deck strips | **M7** Decks |
-| `Next in Mix` track rows (`[08]`/`[09]`) | `36 x 36 px` `WaveThumb`, title/artist, 1 px inline mini waveform, mono duration, load/preview buttons on `--color-surface` | Collapsible `Next` panel in `Mix`, plus `Matches` in `Inspector` | **M6** Discovery / **M7** Decks |
-| Coach strip & bracketed score cards (`[07]` `Taste Profile`) | `--color-surface` strip between waveforms and mixer; bracketed `StatCard` (`--radius-panel: 8px`, `--color-accent` corner brackets, 1 px metric bars, `Space Grotesk` `20px` score) | `Mix` coach strip (Off / Hints / Full) and post-transition score cards | **M8** Coach |
-| `Listening Insight` card (`[08]`/`[09]`) | `--color-surface` panel (`--radius-panel: 8px`, `1px solid var(--color-border)`), bar glyph, `Inter` `13px` takeaway note | `Replay` transition notes (up to 3 timestamped notes per transition) and session summary | **M9** Review |
-| Hero dot-wave header, 5-column mono strip (`[08]`/`[09]`) & `WaveCard` grid (`concept-dark.png`, `[07]`) | `Wave` canvas behind `Space Grotesk` `24px` title, `--color-accent` primary `Generate` button, `default` `Refine` button, 5-column mono stats (`SET INDEX`, `TRACKS`, `DURATION`, `BPM RANGE`, `ENERGY` 5-dot meter), and `--radius-lg` (`10px`) `WaveCard` tiles | `Sets` workspace (saved and generated sets above the real-overlap timeline) | **M10** Sets and transitions |
-| Index marks (`[05]`) & A to B crossfade waveform (`concept-dark.png`) | `001 \| 002 \| 003` bar/phrase ruler and aligned dual-waveform crossfade preview in the bottom dock | `Sets` transition previewer and `Replay` aligned mix timeline | **M9** Review / **M10** Sets |
+- **Header row (shared structure with `Deck variant="dock"`):**
+  - Deck badge (`A` or `B`, `35 x 34 px`, `--radius-sm: 6px`, `--color-surface-2`, `1px solid var(--color-border)`, `--font-display` 600 `--text-lg: 16px`).
+  - Artwork `Thumb size="md"` (`60 x 60 px`, `--radius-md: 8px`).
+  - Track title (`--font-display`, `font-weight: 600`, `--text-xl: 20px`, `--color-text`) and artist (`--font-sans`, `--text-base: 14px`, `--color-text-2`).
+- **Technical data tag strip (`DataTag variant="pill"`, Board 2 `[05]` and `[07]`):**
+  - Four `22px`-tall `DataTag variant="pill"` badges (`--font-mono`, `--text-xs: 11px`, `tabular-nums`):
+    - Tempo: `128.0 BPM` (`+0.0%`)
+    - Key: `8A · A min`
+    - Loudness: `-7.4 LUFS` (`M5`)
+    - Remaining / elapsed time: `-02:47 / 07:02`
+- **Transport and pitch row (`#52` / `M7`):**
+  - `Play / Pause` (`Button variant="primary" size="md"` when playing, `variant="default"` when paused, `34px` height, `--radius-sm: 6px`), `Cue`, `Sync` and `Keylock` buttons (`Button variant="default" size="md"`).
+  - Overview scrub bar (`ScrubBar size="md"`, `4px` track, `12 x 12 px` thumb).
+- **Channel mixer and stem controls (`M7` and `M12`):**
+  - 3-band EQ (`HI`, `MID`, `LOW`), channel filter, crossfader assignment, and twin vertical level meters (`2px` segments in `--color-text-2` / `--color-text`, with only the `0 dBFS` clip indicator in `--color-accent`) arrive in `M7`.
+  - Four `LevelDots.svelte` indicators (`DRUMS`, `BASS`, `VOCALS`, `OTHER`, four `4px` dots each from Board 2 `[07]`) and stem mute toggles arrive in `M12`.

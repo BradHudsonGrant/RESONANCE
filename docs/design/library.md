@@ -1,95 +1,123 @@
-# Library and inspector
+# Library Workspace and Inspector
 
-`concept-dark.png` shows the Library screen and right-hand Inspector. Issue [#52](https://github.com/BradHudsonGrant/RESONANCE/issues/52) rebuilds `ui/src/lib/library/` (`Library.svelte`, `TrackTable.svelte`, `columns.ts`, `Inspector.svelte`) to this design using the fields already returned by `LibraryTrack`.
+The Library workspace (`ui/src/lib/library/Library.svelte`, `TrackTable.svelte` and `Inspector.svelte`) occupies the centre column (`x = 257..1164`, width `908px` at the `1586 x 992` reference viewport) below `CommandBar` (`y = 153..752`) and pairs with the `420px` right-hand `Inspector` column (`x = 1166..1585, y = 51..752`).
 
-## Workspace header and filters
+Every dimension below is measured from `concept-dark.png` (`1586 x 992` at device pixel ratio `1`) and uses the tokens and components defined in [visual-language.md](visual-language.md) and [components.md](components.md). Issue [#52](https://github.com/BradHudsonGrant/RESONANCE/issues/52) updates `Library.svelte`, `TrackTable.svelte` and `Inspector.svelte` to this specification.
 
-The header sits directly below the shell's command block on `--color-background` (`#0B0B0C` dark / `#F8F7F5` light).
+## 1. Workspace header and filter pills (`Library.svelte`)
 
-- **Title row (`#52`):** `padding: 16px 16px 10px`, flex row with `justify-content: space-between` and `align-items: center`.
-  - Left: `Library` (`Space Grotesk` `20px` `--text-xl`, weight `500`, `--color-text`) beside the track count (`12,846 tracks` or `50 tracks` in `JetBrains Mono` `13px` `--color-text-2`, `tabular-nums`, `12px` gap).
-  - Right: Filter/columns icon button (`28 x 28 px`, `--radius-control: 6px`, `--color-surface`, `1px solid var(--color-border-control)`, Lucide `SlidersHorizontal` `15px`), disabled until M2 column/filter configuration lands.
-  - **Left out:** The list/grid segmented toggle next to the sliders icon in `concept-dark.png`. `Library` stays a dense table and never switches to decorative cards.
-- **Filter pills row (`#52`):** `padding: 0 16px 12px`, `display: flex`, `gap: 8px`, `border-bottom: 1px solid var(--color-border)`.
-  - `All Tracks` (`28px` height, `padding: 0 14px`, `--radius-pill`, active inverted fill `--color-text` with `--color-background` label, `Inter` `12px` weight `500`). Active in `#52`.
-  - `✓ Analysed`, `○ Unanalysed` (British spelling; replaces board's `Analyzed` / `Unanalyzed`) — scheduled for **M5 Analysis**.
-  - `★ Favourites` (British spelling; replaces board's `Favorites`), `◷ Recent` — scheduled for **M2 Library**.
-  - Until their milestone lands, inactive pills render in `--color-muted` (`#8C8C8C` dark / `#6C6965` light) with a tooltip naming the milestone (`"Arrives in M2"` or `"Arrives in M5"`).
-- **No collection cards above the table:** `concept-dark.png` places four dot-wave collection cards (`Peak Time`, `Warm Up`, `Afterhours`, `Deep / Hypnotic`) and a `+ New Collection` card above the table. Resonance keeps those cards out of `Library` so the track table owns the full workspace height. Collections list under `Library` in the sidebar (M2), and `WaveCard` grids live in `Sets` (M10).
+Measured across `x = 276..1130, y = 178..245`:
 
-## Track table
+- **Title row (`y = 178..214`):**
+  - Left: `Library` heading (`x = 278..363, y = 178..204`, `--font-display`, `font-weight: 500`, `--text-2xl: 27px`, cap height `20px`, `letter-spacing: -0.02em`, `--color-text`), followed `22px` to the right by the tabular track count `12,846 tracks` (`x = 385..464, y = 187..199`, `--font-mono`, `--text-md: 13px`, `--color-text-2`).
+  - Right: Filter sliders button (`Button variant="icon" size="md"`, `x = 1096..1130, y = 181..214`, `34 x 34 px`, `--control-height-md: 34px`, `--radius-sm: 6px`, `1px solid var(--color-border)`, `--color-surface-2`, `16px` `Icon name="sliders"`), plus the `ScanFolder` trigger in M1/M2.
+  - **Left out from `concept-dark.png`:** The two-segment Table / Card view switcher (`x = 998..1075, y = 181..214`, `78 x 34 px`) is omitted per Issue [#49](https://github.com/BradHudsonGrant/RESONANCE/issues/49); the library is always a virtualised table.
+- **Filter pill strip (`y = 220..245`, `16px` below the title row):**
+  - Built from `FilterPill.svelte` (`height: var(--control-height-sm)` `26px`, `border-radius: var(--radius-pill)`):
+    1. `All Tracks` (`x = 278..360, y = 220..244`, `83 x 25 px`): active state with inverted monochrome fill (`background: var(--color-text)` `#F2F1EF` dark / `#141413` light, `color: var(--color-background)` `#0B0B0C` dark / `#FAF9F7` light, `--font-sans`, `font-weight: 500`, `--text-sm: 12px`).
+    2. `✓ Analysed` (`x = 385..465`): inactive pill (`13px` `Icon name="check"`, `--font-sans`, `--text-sm: 12px`, `--color-text-2`).
+    3. `○ Unanalysed` (`x = 493..587`): inactive pill (`13px` `Icon name="unanalysed"`, `--color-text-2`).
+    4. `★ Favourites` (`x = 615..702`): inactive pill (`13px` `Icon name="star"`, `--color-text-2`).
+    5. `◷ Recent` (`x = 730..792`): inactive pill (`13px` `Icon name="recent"`, `--color-text-2`).
+  - In `#52` clicking a `FilterPill` toggles its active visual state; `M2` and `M5` wire the SQLite filter queries behind each pill.
 
-`TrackTable.svelte` remains virtualised (`role="grid"`, `aria-label="Tracks"`, overscan `8` rows, `contain: strict` on the scrolling body, `contain: layout paint` on rows) with `--row-height: 30px`.
+### Collection cards (`Sets` overview in `M10`, not in `Library`)
 
-- **Sticky column header (`#52`):** `30px` height on `--color-surface` (`#141415` dark / `#FFFFFF` light), `1px solid var(--color-border)` bottom divider, `Inter` `11px` weight `500` `--color-text-2`, right-aligned on numeric columns. Sort chevrons (`^` / `v`) arrive with server-side sort in **M2 Library**.
-- **Data rows (`#52`):** `30px` height, `--color-background` default, `--color-surface-2` hover (`#1E1E1F` dark / `#ECEAE7` light), `1px solid var(--color-border)` hairline bottom border.
-- **Selected row (`#52`):** `aria-selected="true"` draws a rounded selection frame (`--radius-control: 6px`, `1px solid var(--color-border-control)`, `border-left: 2px solid var(--color-accent)`), on `--color-raised` in dark (`#252527`) and `--color-surface-2` in light (`#ECEAE7`). Text stays `--color-text` in `Title` (weight `500`) and `Artist`.
+`concept-dark.png` draws a horizontal strip of four collection cards (`181 x 82 px` each at `y = 262..343, x = 276, 468, 659, 849`, `11px` gap, `--radius-lg: 10px`, `Card variant="interactive" waveArt={true}`) plus a dashed `+ New Collection` card (`101 x 81 px` at `x = 1045..1145`, `Card variant="dashed"`) between the filter pills and the track table.
 
-### Columns in `#52` and later milestones
+Per Issue [#49](https://github.com/BradHudsonGrant/RESONANCE/issues/49):
 
-Columns whose data does not exist in `LibraryTrack` today stay out of the table until the milestone that brings their data (per [#52](https://github.com/BradHudsonGrant/RESONANCE/issues/52)).
+- Those collection cards move to the top of the **`Sets`** workspace (`M10`) so `Library` opens directly into `TrackTable` (`16px` below the filter pills), giving four additional visible track rows without scrolling.
+- In the `Library` workspace, collections are navigated from the collapsible `Collections` sub-tree in `Sidebar.svelte` (`M2`).
 
-| Column / cell | Contents and style | Width | Milestone |
-| --- | --- | --- | --- |
-| Selection checkbox | `16 x 16 px` rounded check box (`--radius-sm: 4px`, `--color-border-control`) | `2rem` | M3 Identify and tag (batch edit) |
-| Row status / play icon | `▶` play indicator (M2 preview), `★` favourite (M2), `✓` analysed mark (M5) | `2rem` | M2 Library / M5 Analysis |
-| `#` | 1-based row index, `JetBrains Mono` `12px` `--color-muted`, `tabular-nums`, right-aligned | `3rem` | `#52` |
-| `Title` | `track.title`, `Inter` `13px` `--color-text` | `minmax(12rem, 3fr)` | `#52` |
-| Inline waveform | 1 px whole-pixel peak/RMS bars (`18px` tall, `--color-text-2` / `--color-text`) | `7.5rem` | M5 Analysis (cached Tier 1 waveform) |
-| `Artist` | `track.artist`, `Inter` `13px` `--color-text-2` (`--color-text` when selected) | `minmax(9rem, 2fr)` | `#52` |
-| `BPM` | `tempo(track.bpm)` via `Provenance`, `JetBrains Mono` `12px` `--color-text`, right-aligned | `4.5rem` | `#52` (sort caret M2) |
-| `Key` | `track.key?.camelot ?? track.key_tag` via `Provenance`, `JetBrains Mono` `12px` `--color-text`, right-aligned | `4rem` | `#52` (sort caret M2) |
-| `Energy` | 5-bar micro meter (`18 x 12 px`, `--color-text` / `--color-border`) | `4.5rem` | `#50` primitive; M5 Analysis |
-| `Tension` | Shown on `concept-dark.png` | — | **Left out:** tension is a pairwise transition score (M8/M10), not a single-track property |
-| `Time` | `duration(track.audio?.duration_ms)`, `JetBrains Mono` `12px` `--color-text-2`, right-aligned | `4.5rem` | `#52` |
-| `Genre` | `track.genre`, `Inter` `12px` `--color-text-2` | `minmax(7rem, 1fr)` | `#52` |
-| `Format` | `track.format.toUpperCase()`, `JetBrains Mono` `11px` `--color-text-2` | `4.5rem` | `#52` |
-| Row actions `...` | Quiet `24 x 24 px` overflow trigger opening track actions | `2.5rem` | M2 Library / M3 Tags / M4 Replace |
+## 2. Virtualised track table (`TrackTable.svelte`)
 
-### Empty, loading and error states (`#52`)
+Measured across `x = 267..1150` (`884px` wide inside the `908px` centre column) and `y = 393..752`:
 
-- **Empty (`pages.total === 0`):** `240px` tall `Wave` WebGL2 canvas above a `Space Grotesk` `15px` heading `"No tracks yet"`, `Inter` `13px` `--color-text-2` note `"Add a music folder to see its tracks here. Nothing in the folder is changed."`, and one primary `--color-accent` button `"Add a music folder"`.
-- **Loading:** 12 horizontal skeleton rows (`8px` tall, `--radius-sm: 4px`, `--color-surface-2`) with visually hidden `role="status"` text `"Reading the library"`.
-- **Error:** `role="alert"` heading `"The library could not be shown"`, message in `--color-text-2`, and `"Try again"` button.
+- **Row heights (`--table-header-height: 31px`, `--row-height: 33px`):**
+  - Header row: `y = 393..424` (`31px` tall, `1px` top and bottom `--color-border` lines, `--font-sans`, `font-weight: 500`, `--text-sm: 12px`, `--color-text-2`).
+  - Data rows: 10 visible rows between `y = 424` and `y = 753` (`329px / 10 = 32.9px` -> `--row-height: 33px`), separated by `1px` `--color-border` hairlines. **Table rows keep their `33px` height at every window size.**
+- **Columns (`ui/src/lib/library/columns.ts`):**
 
-## Inspector
+| Column | Header | Measured `x` in `concept-dark.png` | Width / Grid track | Alignment | Typography & component | Drop tier (`@container`) | Milestone |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Select | `☐` | `x = 277..293` | `30px` fixed | Centre | `16 x 16 px` checkbox (`--radius-xs: 3px`, `1px solid var(--color-border-control)`) | Never drops | `#52` |
+| Status | (none) | `x = 304..318` | `22px` fixed | Centre | `14 x 14 px` `Icon`: `▶` (`play` filled) on playing/selected row, `★` (`star`) on favourite (`M2`), `✓` (`check`) on analysed (`M5`) | Never drops | `#52` (`▶`), `M2`/`M5` |
+| Index | `#` | `x = 325..340` | `36px` fixed | Right | `--font-mono`, `--text-sm: 12px`, `tabular-nums`, `--color-muted` (`--color-text` when selected) | Never drops | `#52` |
+| Title | `Title` | `x = 376..485` | `minmax(150px, 1.8fr)` | Left | `--font-sans`, `font-weight: 500`, `--text-md: 13px`, `--color-text`, `text-overflow: ellipsis` | Never drops | `#52` |
+| Waveform | (inline) | `x = 502..641` | `140px` (`88px` `<740px`) | Centre | `Waveform.svelte` `mode="inline"` (`140 x 17 px`, `1px` bars, `1px` gap) | Narrows `<740px`, hides `<640px` | `#52` (seeded), `M5` (real peaks) |
+| Artist | `Artist` | `x = 674..750` | `minmax(120px, 1.3fr)` | Left | `--font-sans`, `font-weight: 400`, `--text-md: 13px`, `--color-text-2` (`--color-text` when selected) | Never drops | `#52` |
+| BPM | `BPM` | `x = 767..805` | `58px` fixed | Right | `--font-mono`, `--text-md: 13px`, `tabular-nums`, `--color-text` (`128.0`) | Never drops | `#52` (fixture), `M5` (analysed) |
+| Key | `Key` | `x = 837..875` | `52px` fixed | Left | `--font-mono`, `--text-md: 13px`, `--color-text` (`A min` / `8A`) | Never drops | `#52` (fixture), `M5` (analysed) |
+| Energy | `Energy` | `x = 908..934` | `54px` fixed | Centre | `MeterBar.svelte` (`27 x 12 px`, 5 vertical bars of `3px` width + `3px` gap) | Hides `<820px` container width | `#52` (fixture), `M5` (analysed) |
+| Time | `Time` | `x = 1055..1085` | `56px` fixed | Right | `--font-mono`, `--text-md: 13px`, `tabular-nums`, `--color-text-2` (`07:02`) | Never drops | `#52` |
+| Actions | (none) | `x = 1120..1144` | `32px` fixed | Centre | `Button variant="icon" size="sm"` (`24 x 24 px`, `Icon name="more"`) | Never drops | `#52` |
 
-`<aside aria-label="Inspector">` is `320px` wide on `--color-surface` (`#141415` dark / `#FFFFFF` light) with a `1px solid var(--color-border)` left border and `padding: 16px` sections separated by `1px solid var(--color-border)` horizontal dividers.
+- **Left out from `concept-dark.png`:** The `Tension` column (`x = 981..1007`, `27 x 12 px` 5-bar meter) is omitted per Issue [#49](https://github.com/BradHudsonGrant/RESONANCE/issues/49) because `Tension` is not a planned analysis output in `M5`.
+- **Selected row state (`TableRow.svelte` `selected={true}`, Row 4 `Echo Chamber — Kaden` at `y = 491..524, x = 267..1150`):**
+  - Matches `concept-dark.png` while keeping orange strictly to the `2px` selection mark:
+    - Rounded container frame: `884 x 34 px`, `border-radius: var(--radius-sm)` (`6px`), `background: var(--color-raised)` (`#252527` dark / `#ECEAE7` light), `outline: 1px solid var(--color-border-control)` (`#6E6D6A` / `#abaaa5` light control border).
+    - Left selection mark: `2px` wide vertical bar in `--color-accent` (`#E4553D` dark / `#D94F3B` light) inside the left edge of the rounded frame.
+    - Ticked checkbox (`x = 277..293`): `16 x 16 px` (`--radius-xs: 3px`) filled with `--color-text` (`#F2F1EF` dark / `#141413` light) and a dark checkmark (`--color-background`).
+    - Status cell (`x = 304..314`): filled `▶` play triangle (`8 x 10 px`, `--color-text`) beside the row index `4`.
+- **Performance budget:** `TrackTable` renders only the visible row slice plus a small overscan buffer (`ui/src/lib/library/track-pages.svelte.ts`) and sets `performance.mark('tracks-filled')` when the first rows populate, holding fast scroll over 100,000 rows under `16 ms` per frame ([#40](https://github.com/BradHudsonGrant/RESONANCE/issues/40)).
 
-### Track header and audio facts (`#52`)
+## 3. Right-hand track inspector (`Inspector.svelte`)
 
-1. **Header bar (`40px` height):** `INSPECTOR` mono uppercase label on the left (`11px` `--color-muted`), favourite `★` toggle (M2), `...` actions button (M2/M3) and close button `X` (`28 x 28 px` quiet button, shortcut `I`, `#52`) on the right.
-2. **Track identity row (`display: grid`, `grid-template-columns: 64px 1fr`, `gap: 12px`, `align-items: start`):**
-   - `64 x 64 px` `WaveThumb` (`--radius-panel: 8px`, `1px solid var(--color-border)`): deterministic monochrome dot-wave still seeded from the track's facts in `#52`; replaced by embedded artwork when available in **M3 Identify and tag**.
-   - Title in `Space Grotesk` `16px` weight `600` `--color-text` (`overflow-wrap: anywhere`), artist in `Inter` `13px` `--color-text-2` (`"No artist tag"` in `--color-muted` when null).
-   - Badge strip below artist (`margin-top: 8px`, `display: flex`, `flex-wrap: wrap`, `gap: 8px`, `align-items: center`):
-     - Status `DataTag`: `"Read"` (`#52` when `track.audio` decoded) or `"Unreadable"` (`1px solid var(--color-accent)` border when `!track.audio`); becomes `"✓ Analysed"` once M5 analysis runs.
-     - Audio format strip (`JetBrains Mono` `11px` `--color-text-2`, `tabular-nums`): `WAV · 44.1 kHz · 24-bit` (or `MP3 · 320 kbps · 44.1 kHz`), channels and file size.
+Measured at `x = 1166..1585` (`420px` wide at the reference viewport, `--inspector-width: 420px`, with a `1px` left border at `x = 1165`) and `y = 51..752` (`702px` tall):
 
-### Metadata grid (`#52`)
+- **No `"INSPECTOR"` top bar:** In `concept-dark.png`, the inspector column has no title bar; it opens directly with the track artwork and title (`padding: 14px 20px 16px`).
+- **Horizontal section dividers (`ModularDivider inset="md"`):** Five `1px` `--color-border` lines at `y = 169`, `y = 257`, `y = 321`, `y = 436` and `y = 589` (`x = 1180..1570`, `390px` wide, inset `15–20px` from the column edges).
 
-Every label uses the **mono uppercase label** style (`JetBrains Mono` `11px` `--color-muted`, `letter-spacing: 0.08em`). Every missing tag displays `—` in `--color-muted` instead of hiding the grid structure.
+### Section A — Track header (`y = 65..168`)
 
-- **Row 1 (4 columns, `grid-template-columns: repeat(4, minmax(0, 1fr))`, `gap: 12px`):**
-  - `BPM` (`JetBrains Mono` `13px` `--color-text`, `Provenance`)
-  - `KEY` (`track.key` as Camelot + musical name, or `track.key_tag`, `JetBrains Mono` `13px` `--color-text`)
-  - `TIME` (`duration`, `JetBrains Mono` `13px` `--color-text`)
-  - `YEAR` (`track.year`, `JetBrains Mono` `13px` `--color-text`; replaces board's `RELEASE` label to match `LibraryTrack.year`)
-- **Row 2 (3 columns, `grid-template-columns: repeat(3, minmax(0, 1fr))`, `gap: 12px`, `margin-top: 12px`):**
-  - `GENRE` (`track.genre`, `Inter` `13px` `--color-text`)
-  - `ALBUM` (`track.album`, `Inter` `13px` `--color-text`; replaces board's `SUBGENRE` since `LibraryTrack` carries `album`, not a subgenre field)
-  - `LABEL` (`track.label`, `Inter` `13px` `--color-text`)
-- **Row 3 (full width, `margin-top: 12px`):**
-  - `LOCATION` (`track.location`, `JetBrains Mono` `11px` `--color-text-2`, `user-select: text`, `overflow-wrap: anywhere`), plus `COMMENT` and `ALBUM ARTIST` when present.
+- **Artwork (`Thumb.svelte` `size="lg"`, `x = 1175..1271, y = 65..160`):** `96 x 96 px` (`--thumb-lg: 96px`), `border-radius: var(--radius-lg)` (`10px`), `1px solid var(--color-border)`. Shows album artwork (`M3`) or a deterministic `Wave variant="thumb"` fallback (`#52`).
+- **Title and artist (`x = 1289..1510`):**
+  - Track title (`Echo Chamber` at `y = 79..93`): `--font-display`, `font-weight: 600`, `--text-xl: 20px` (cap height `15px`), `letter-spacing: -0.02em`, `--color-text`.
+  - Artist (`Kaden` at `y = 104..116`): `--font-sans`, `font-weight: 400`, `--text-base: 14px` (cap height `10px`), `--color-text-2`.
+- **Top-right action buttons (`y = 76..104`):** Favourite star `Button variant="icon"` (`x = 1516`, `28 x 28 px`, `18px` `Icon name="star"`) and overflow `Button variant="icon"` (`x = 1548`, `28 x 28 px`, `18px` `Icon name="more"`).
+- **Status pill and audio specs (`y = 131..152`):**
+  - `✓ Analysed` (`DataTag variant="pill" leadingIcon="check"`, `x = 1290..1367, y = 131..152`, `78 x 22 px`, `--control-height-xs: 22px`, `--radius-pill`, `--color-surface-2`, `1px solid var(--color-border)`, `--font-mono`, `--text-xs: 11px`, `--color-text`; monochrome checkmark replacing the green icon on the board).
+  - Audio format string (`x = 1390..1520, y = 136..147`): `WAV  44.1 kHz  24-bit` in `--font-mono`, `--text-sm: 12px`, `--color-text-2`.
 
-### Sections waiting for later milestones
+### Section B — 2-row metadata grid (`y = 170..256`)
 
-In `#52`, unbuilt sections below the metadata grid either remain hidden or appear as one quiet placeholder line naming the milestone they wait on. They never display made-up tags, trait scores, curves or matches.
+- **Row 1 (`y = 181..204`, 4 columns at `x = 1180, 1284, 1386, 1482`):**
+  - `BPM` (`MonoLabel size="xs"`, `11px` mono `--color-muted`) -> `128.0` (`--font-mono`, `--text-md: 13px`, `--color-text`)
+  - `KEY` -> `A Minor (8A)` (`--font-mono`, `--text-md: 13px`, `--color-text`)
+  - `TIME` -> `07:02` (`--font-mono`, `--text-md: 13px`, `--color-text`)
+  - `RELEASE` -> `2026` (`--font-mono`, `--text-md: 13px`, `--color-text`)
+- **Row 2 (`y = 221..244`, 3 columns at `x = 1180, 1284, 1386`):**
+  - `GENRE` (`MonoLabel size="xs"`) -> `Techno` (`--font-sans`, `--text-md: 13px`, `--color-text`)
+  - `SUBGENRE` -> `Hypnotic` (`--font-sans`, `--text-md: 13px`, `--color-text`)
+  - `LABEL` -> `Ostgut Ton` (`--font-sans`, `--text-md: 13px`, `--color-text`)
 
-| Inspector section | Design from `concept-dark.png` | What Resonance draws | Milestone |
-| --- | --- | --- | --- |
-| `TAGS` | Mono header, removable tag pills (`24px`, `--surface-2`, `1px solid --border`, `×`), `+` button | Editable track tags and soft search descriptors | **M3** Identify and tag / **M6** Discovery |
-| `AUDIO TRAITS` | Mono header + `ⓘ`, horizontal trait bars (`Energy`, `Loudness`, `Vocal activity`, `Brightness`) | Measured Tier 1 and Tier 2 traits. (`Tension`, `Danceability` and `Atmosphere` are left out unless an analyser produces them.) | **M5** Analysis |
-| Energy curve plot | Segmented `Energy` pill (`inverted` active style) + flat 1 px monochrome curve with mono axis ticks `0:00` .. end | Monochrome bar/line plot of the energy curve. **No gradient fill** under the line. (`Tension` tab is left out.) | **M5** Analysis |
-| `TRANSITION SUGGESTIONS` (`Matches`) | Mono header + `ⓘ` + `View All ->`, 3 rows (`▶` `24 x 24 px`, title/artist, mono `BPM · Key · ΔBPM · Key relation`, `%` `DataTag`, `...`) | Embedding neighbours and transition compatibility with reasons | **M6** Discovery / **M10** Sets and transitions |
-| Empty state | Centered prompt when `track` is undefined | `"Select a track to see its details here."` in `Inter` `13px` `--color-text-2` | `#52` |
+### Section C — `TAGS` (`y = 258..320`)
+
+- Header (`y = 270..277`): `MonoLabel` `TAGS` (`--text-xs: 11px`, `--color-text-2`).
+- Chip row (`y = 290..316`): flex-wrap row (`6px` gap) of `DataTag variant="removable"` (`height: var(--control-height-sm)` `26px`, `border-radius: var(--radius-sm)` `6px`, `--font-sans`, `--text-sm: 12px`: `Hypnotic ×`, `Peak Time ×`, `Industrial ×`, `Rolling Bass ×`) followed by a circular `+` button (`Button variant="circle" size="sm"`, `26 x 26 px` at `x = 1541..1567`, `--radius-pill`). Wired to tag staging and file writes in `M3`.
+
+### Section D — `AUDIO TRAITS` (`y = 322..435`)
+
+- Header (`y = 332..340`): `MonoLabel` `AUDIO TRAITS` with `infoTooltip` (`13px` `ⓘ` icon).
+- Five `TraitBar.svelte` rows (`y = 350, 367, 383, 400, 416`, `17px` vertical row pitch):
+  - Left label at `x = 1180` (`135px` wide, `--font-sans`, `--text-sm: 12px`, `--color-text-2`): `Danceability`, `Energy`, `Warmth`, `Vocal Presence`, `Groove`.
+  - Numeric readout at `x = 1319..1339` (`--font-mono`, `--text-sm: 12px`, `tabular-nums`, `--color-text`: `0.82`, `0.78`, `0.64`, `0.12`, `0.91`).
+  - Bar track at `x = 1351..1568` (`218 x 5 px`, `--radius-xs: 3px`, `background: var(--color-surface-2)`, fill in `--color-text`). Populated by `M5` analysis and `M6` embeddings.
+
+### Section E — Energy curve (`y = 437..588`)
+
+- Header pill (`y = 446..468`): `FilterPill label="Energy" active={true}` (`x = 1180..1249`, `70 x 23 px`, `--radius-pill`, inverted `--color-text` fill). The adjacent `Tension` pill shown in `concept-dark.png` (`x = 1258..1325`) is omitted per Issue [#49](https://github.com/BradHudsonGrant/RESONANCE/issues/49).
+- Curve plot (`Waveform.svelte` `mode="curve"`, `x = 1185..1569, y = 486..552`, `385 x 67 px`):
+  - Per Issue [#49](https://github.com/BradHudsonGrant/RESONANCE/issues/49), renders as a flat `1px` monochrome bar/step plot (`--color-text`) over a `1px` `--color-border` axis line at `y = 552`, with no gradient area fill under the curve.
+  - Five evenly spaced timestamps below the baseline (`y = 565..572`, `x = 1185..1569`): `0:00`, `1:45`, `3:30`, `5:15`, `7:02` (`--font-mono`, `--text-xs: 11px`, `--color-muted`). Wired to real phrase and loudness analysis in `M5`.
+
+### Section F — `TRANSITION SUGGESTIONS` (`y = 590..752`)
+
+- Header (`y = 604..611`): `MonoLabel` `TRANSITION SUGGESTIONS` with `infoTooltip` (`ⓘ`) and right-aligned `actionLabel="View All ->"` (`x = 1500..1568`).
+- Three compact suggestion rows (`y = 626..653`, `663..689`, `700..726`, `28px` height, `37px` vertical pitch):
+  1. Left preview play button (`Button variant="icon" size="sm"`, `x = 1184..1208`, `24 x 24 px`, `--radius-xs: 3px`, `--color-surface-2`, `1px solid var(--color-border)`, `10px` `Icon name="play"`).
+  2. Centre two-line stack (`x = 1218..1490`):
+     - Line 1: `Title — Artist` (`Luminous — Vera Holt`, `Subzero — Ben Klock`, `Pulse Width — Surgeon`, `--font-sans`, `font-weight: 500`, `--text-md: 13px`, `--color-text`).
+     - Line 2: compatibility reason (`126.5 BPM · D min · Key + Energy match`, `--font-mono`, `--text-xs: 11px`, `--color-text-2`).
+  3. Right match score badge (`DataTag variant="score"`, `x = 1501..1543`, `43 x 21 px`, `--radius-sm: 6px`, `--font-mono`, `--text-xs: 11px`, `--color-text`: `95%`, `92%`, `89%`) and overflow `...` button (`x = 1550`). Wired to `M6` similarity and `M10` transition scoring.
