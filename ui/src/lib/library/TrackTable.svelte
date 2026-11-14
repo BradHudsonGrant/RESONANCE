@@ -40,6 +40,14 @@
 
   $effect(() => pages.want(first, first + shown));
 
+  // The cold-start budget runs from launch to this mark.
+  let filledOnce = false;
+  $effect(() => {
+    if (filledOnce || shown === 0 || !pages.track(first)) return;
+    filledOnce = true;
+    performance.mark('tracks-filled');
+  });
+
   $effect(() => {
     if (selected !== null) reveal(selected);
   });

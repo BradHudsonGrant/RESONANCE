@@ -51,6 +51,16 @@ app-bench:
     npm --prefix ui run build -- --mode benchmark
     cargo run --release --package resonance-app --features custom-protocol -- --data-folder target/dev/synthetic
 
+# Every performance budget measured and written to docs/benchmarks. The desktop app and a headed
+# Edge window open on screen, and both decks play through the audio device.
+[windows]
+bench audio_seconds="180":
+    cargo build --release --package resonance-cli
+    npm --prefix ui run build -- --mode benchmark
+    cargo build --release --package resonance-app --features custom-protocol
+    node ui/dev/bench.ts
+    target/release/resonance.exe bench --page target/bench/page.json --audio-seconds {{ audio_seconds }}
+
 # The Windows installer, with bundled assets and project-local packaging tools. Paths in the program
 # are remapped so it never names the folders of the machine that built it.
 [windows]
