@@ -76,11 +76,11 @@
     padding: 0 var(--space-4);
   }
 
-  .button:hover:not(:disabled) {
+  .button:hover:not(:disabled, [aria-disabled='true']) {
     background: var(--color-raised);
   }
 
-  .button:active:not(:disabled),
+  .button:active:not(:disabled, [aria-disabled='true']),
   .active {
     border-color: var(--color-border-control);
     background: var(--color-raised);
@@ -93,8 +93,8 @@
     color: var(--color-background);
   }
 
-  .primary:hover:not(:disabled),
-  .primary:active:not(:disabled) {
+  .primary:hover:not(:disabled, [aria-disabled='true']),
+  .primary:active:not(:disabled, [aria-disabled='true']) {
     background: color-mix(in srgb, var(--color-text) 88%, var(--color-background));
     color: var(--color-background);
   }
@@ -105,8 +105,8 @@
     color: var(--color-text-2);
   }
 
-  .quiet:hover:not(:disabled),
-  .quiet:focus-visible:not(:disabled) {
+  .quiet:hover:not(:disabled, [aria-disabled='true']),
+  .quiet:focus-visible:not(:disabled, [aria-disabled='true']) {
     background: var(--color-raised);
     color: var(--color-text);
   }
@@ -146,7 +146,7 @@
     background: var(--color-surface-2);
   }
 
-  .icon:hover:not(:disabled),
+  .icon:hover:not(:disabled, [aria-disabled='true']),
   .icon.active {
     background: var(--color-raised);
     color: var(--color-text);
@@ -175,7 +175,7 @@
     color: var(--color-background);
   }
 
-  .circle.size-lg:hover:not(:disabled) {
+  .circle.size-lg:hover:not(:disabled, [aria-disabled='true']) {
     background: color-mix(in srgb, var(--color-text) 88%, var(--color-background));
     color: var(--color-background);
   }
@@ -194,5 +194,16 @@
     background: transparent;
     color: var(--color-muted);
     cursor: default;
+  }
+
+  /* Not built yet: it stays focusable so its tooltip can say which milestone brings it. */
+  .button[aria-disabled='true'] {
+    color: var(--color-muted);
+    cursor: default;
+  }
+
+  .circle.size-lg[aria-disabled='true'] {
+    border-color: var(--color-border);
+    background: var(--color-surface-2);
   }
 </style>

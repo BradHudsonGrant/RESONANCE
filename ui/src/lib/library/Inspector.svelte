@@ -96,7 +96,7 @@
   .inspector {
     display: grid;
     grid-template-rows: auto 1fr;
-    width: 20rem;
+    width: 100%;
     min-height: 0;
     border-left: 1px solid var(--color-border);
     background: var(--color-surface);

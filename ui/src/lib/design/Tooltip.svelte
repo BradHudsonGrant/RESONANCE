@@ -6,7 +6,7 @@
     /** The keys that do the same thing, shown after the text. */
     shortcut?: string;
     /** Where it opens. Beside the anchor for controls at the edge of the window. */
-    side?: 'above' | 'right' | 'left';
+    side?: 'above' | 'below' | 'right' | 'left';
     children: Snippet;
   }
 
@@ -63,6 +63,11 @@
     transform: translateX(-50%);
     transition: opacity var(--duration-fast) var(--ease-out);
     pointer-events: none;
+  }
+
+  .below {
+    top: calc(100% + var(--space-1));
+    bottom: auto;
   }
 
   .right,
