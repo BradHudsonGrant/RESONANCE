@@ -51,12 +51,12 @@ Docs:
 
 Measure and release:
 
-- [ ] `resonance bench` and the first budget measurements ([#19](https://github.com/BradHudsonGrant/RESONANCE/issues/19))
+- [x] `resonance bench` and the first budget measurements ([#19](https://github.com/BradHudsonGrant/RESONANCE/issues/19)). Evidence: merged in [#56](https://github.com/BradHudsonGrant/RESONANCE/pull/56); `just bench` measured every budget on 13 November 2026 and wrote [benchmarks/budgets-v0.1.0.md](benchmarks/budgets-v0.1.0.md). Cold start (0.41 s), idle memory (101 MB) and the wave (0.2 ms) are met. The table, the Mix view and audio stay open in [#40](https://github.com/BradHudsonGrant/RESONANCE/issues/40), [#46](https://github.com/BradHudsonGrant/RESONANCE/issues/46) and [#47](https://github.com/BradHudsonGrant/RESONANCE/issues/47), and the UI thread at startup (22.0 ms) in [#55](https://github.com/BradHudsonGrant/RESONANCE/issues/55).
 - [ ] Release v0.1.0 ([#23](https://github.com/BradHudsonGrant/RESONANCE/issues/23))
 
 Accept:
 
-- [ ] Every budget that can be measured at this stage has a number recorded in `docs/benchmarks/`.
+- [x] Every budget that can be measured at this stage has a number recorded in `docs/benchmarks/`. Evidence: [benchmarks/budgets-v0.1.0.md](benchmarks/budgets-v0.1.0.md) has a number for seven of the eight budgets and lists text search as not measurable until M2.
 - [ ] The Mix spike meets its budget.
 - [x] A UI change shows up in the browser without a Rust build. Evidence: on 13 November 2026, with `just ui` and `just serve` running, an edit to `App.svelte` showed in the open page without a reload, and `just serve` built nothing.
 - [ ] A tagged build installs and runs on the laptop, scans the fixture folder and shows the tracks.

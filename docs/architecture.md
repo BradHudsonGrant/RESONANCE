@@ -143,7 +143,7 @@ On the development laptop the repo sits inside the music library. These limits a
 
 ## Performance budgets
 
-These are requirements. Measure them on the development laptop in M0, record the numbers in `docs/benchmarks/`, and measure again at the end of every milestone.
+These are requirements. Measure them on the development laptop in M0, record the numbers in `docs/benchmarks/`, and measure again at the end of every milestone. `just bench` takes every measurement and writes the record; [ADR 0011](adr/0011-bench-in-the-page-and-the-cli.md) says how.
 
 | What | Budget |
 | --- | --- |
