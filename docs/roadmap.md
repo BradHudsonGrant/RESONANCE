@@ -47,7 +47,7 @@ Docs:
 - [x] Notes from the previous app ([#4](https://github.com/BradHudsonGrant/RESONANCE/issues/4)). Evidence: merged in [#26](https://github.com/BradHudsonGrant/RESONANCE/pull/26).
 - [x] README and contributing guide ([#5](https://github.com/BradHudsonGrant/RESONANCE/issues/5)). Evidence: merged in [#27](https://github.com/BradHudsonGrant/RESONANCE/pull/27).
 - [x] Product overview and this roadmap ([#1](https://github.com/BradHudsonGrant/RESONANCE/issues/1)). Evidence: merged in [#28](https://github.com/BradHudsonGrant/RESONANCE/pull/28).
-- [ ] README finished with a screenshot, install and build steps ([#22](https://github.com/BradHudsonGrant/RESONANCE/issues/22))
+- [x] README finished with a screenshot, install and build steps ([#22](https://github.com/BradHudsonGrant/RESONANCE/issues/22)). Evidence: merged in [#57](https://github.com/BradHudsonGrant/RESONANCE/pull/57); `docs/images/library.png` (112 KiB) shows the 100,000-track synthetic library and inspector, and a fresh worktree followed the install and build steps through `just verify`.
 
 Measure and release:
 
