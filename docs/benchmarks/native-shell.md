@@ -19,3 +19,11 @@ The installed process was closed, then the registered app `com.resonance.app` wa
 That interval was **714 ms**, including automation overhead. This was one observation with a new process, a warm filesystem cache and the 50 fixture tracks.
 
 The [cold-start budget](../architecture.md#performance-budgets) remains open. A disk-cold run and a 100,000-track library still need to be measured.
+
+## 13 November 2026, v0.1.0 release installer
+
+`Resonance_0.1.0_x64-setup.exe` (3.76 MiB, `sha256:83f5ccbf9a4e48ecbc6f78052a52f539e152dd842e97856b9761597b6d0a9007`) was downloaded from the published [`v0.1.0` pre-release](https://github.com/BradHudsonGrant/RESONANCE/releases/tag/v0.1.0) into `target/release-check` and installed in current-user mode at `%LOCALAPPDATA%\Resonance\resonance-app.exe` (13.44 MiB).
+
+- Launched against a fresh data folder, the window showed the empty library state (`No tracks yet`).
+- Scanning `D:\Music\RESONANCE\fixtures-local` through the scan form filled the track table with all 50 tracks (`50 tracks`, `aria-rowcount=51`).
+- Closing and reopening the installed app kept all 50 tracks in the table.
