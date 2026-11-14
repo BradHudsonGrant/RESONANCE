@@ -30,7 +30,7 @@ The rules about migrations come from the old app. It described its schema as a t
 - Tags are kept in three layers: what is in the file, what providers proposed, and what the user set. A view gives the effective value.
 - The journal for file operations is its own table with steps, inverse steps and state. It is written before the file is touched.
 - Waveform peaks and other large binary results are BLOBs in the database until measurement says they should be files.
-- Text search has a budget of 50 ms and idle memory a budget of 400 MB. Both are measured on a synthetic 100,000-row library in M1.
+- Text search has a budget of 50 ms and idle memory a budget of 400 MB. Both are measured on a synthetic 100,000-row library in M2.
 
 ## What would change it
 

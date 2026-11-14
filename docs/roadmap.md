@@ -62,7 +62,24 @@ Accept:
 - [ ] A tagged build installs and runs on the laptop, scans the fixture folder and shows the tracks.
 - [ ] The release page exists with an installer.
 
-## M1 Library, v0.2.0
+## M1 Design, v0.2.0
+
+[Milestone on GitHub](https://github.com/BradHudsonGrant/RESONANCE/milestone/14)
+
+The two concept boards in `handoff/` become the design target, with `concept-dark.png` leading. The shell and the existing views are rebuilt to them before the library work, so the library screen is built once.
+
+- [ ] The design spec from both boards, with an ADR for the change ([#49](https://github.com/BradHudsonGrant/RESONANCE/issues/49))
+- [ ] The primitives and micro elements to the spec, shown in `/design.html` ([#50](https://github.com/BradHudsonGrant/RESONANCE/issues/50))
+- [ ] The app shell to the spec ([#51](https://github.com/BradHudsonGrant/RESONANCE/issues/51))
+- [ ] The Library and Mix views to the spec ([#52](https://github.com/BradHudsonGrant/RESONANCE/issues/52))
+
+Accept:
+
+- [ ] Each built screen, set beside the boards, matches the spec in both themes.
+- [ ] Every element on the boards is built, scheduled for a named later milestone, or left out with the reason.
+- [ ] The frame budgets for the library table ([#40](https://github.com/BradHudsonGrant/RESONANCE/issues/40)) and the Mix view ([#46](https://github.com/BradHudsonGrant/RESONANCE/issues/46)) are measured again.
+
+## M2 Library, v0.3.0
 
 - [ ] Sources with subfolder toggles and watching
 - [ ] Identity by audio hash and fingerprint
@@ -78,7 +95,7 @@ Accept:
 - [ ] Renaming or moving a file outside the app keeps its identity.
 - [ ] A synthetic 100,000-row library scrolls and searches smoothly, with numbers recorded.
 
-## M2 Identify and tag, v0.3.0
+## M3 Identify and tag, v0.4.0
 
 - [ ] The identification pipeline with free providers
 - [ ] Staging with per-field diff
@@ -94,7 +111,7 @@ Accept:
 - [ ] Hit rates per pipeline step are measured on the local fixtures.
 - [ ] User edits survive a re-run.
 
-## M3 Quality and replace, v0.4.0
+## M4 Quality and replace, v0.5.0
 
 - [ ] Integrity and transcode checks
 - [ ] Duplicates and versions
@@ -110,7 +127,7 @@ Accept:
 - [ ] Undo restores everything.
 - [ ] A crash mid-operation recovers cleanly.
 
-## M4 Analysis, v0.5.0
+## M5 Analysis, v0.6.0
 
 - [ ] ONNX runtime and model registry
 - [ ] Beats, downbeats and tempo
@@ -127,7 +144,7 @@ Accept:
 - [ ] Analysis throughput and VRAM recorded.
 - [ ] Corrections survive re-analysis.
 
-## M5 Discovery, v0.6.0
+## M6 Discovery, v0.7.0
 
 - [ ] Embeddings and "similar"
 - [ ] Matches in the inspector
@@ -139,7 +156,7 @@ Accept:
 - [ ] Across twenty real searches from everyday use, the understood query is right or fixable in one edit.
 - [ ] Search over the full library returns in under a second.
 
-## M6 Decks, v0.7.0
+## M7 Decks, v0.8.0
 
 - [ ] The audio engine, two decks and mixer
 - [ ] The action layer
@@ -157,7 +174,7 @@ Accept:
 - [ ] A full mix can be played from the keyboard alone and from a gamepad alone.
 - [ ] A session records and plays back.
 
-## M7 Coach, v0.8.0
+## M8 Coach, v0.9.0
 
 - [ ] Live measurements
 - [ ] The guidance engine
@@ -170,7 +187,7 @@ Accept:
 - [ ] On synthetic pairs with known offsets, level differences and key clashes, the coach reports each within tolerance and gives the right prompt.
 - [ ] With Coach off there is no measurable cost.
 
-## M8 Review, v0.9.0
+## M9 Review, v0.10.0
 
 - [ ] Analysis of Resonance sessions
 - [ ] Analysis of imported recordings
@@ -183,7 +200,7 @@ Accept:
 - [ ] On a mix rendered from known tracks with known errors, the review finds the transitions and the errors.
 - [ ] Exact and estimated figures are labelled.
 
-## M9 Sets and transitions, v0.10.0
+## M10 Sets and transitions, v0.11.0
 
 - [ ] The set timeline with real durations
 - [ ] Suggestions with reasons
@@ -194,7 +211,7 @@ Accept:
 
 - [ ] A generated 90-minute set's stated length is within a minute of its rendered length.
 
-## M10 Other libraries and Organise, v0.11.0
+## M11 Other libraries and Organise, v0.12.0
 
 - [ ] rekordbox adapter, read then write
 - [ ] Engine DJ adapter, read then write
@@ -206,7 +223,7 @@ Accept:
 - [ ] Round trips on sandbox copies lose nothing.
 - [ ] Every write is backed up and verified.
 
-## M11 Stems and more hardware, v0.12.0
+## M12 Stems and more hardware, v0.13.0
 
 - [ ] Stems on demand
 - [ ] Stem controls on the decks

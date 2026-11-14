@@ -1,6 +1,6 @@
 # 0004: Identity model
 
-Date: 12 November 2026. Status: accepted. The details marked "to settle" are decided with measurements in M1.
+Date: 12 November 2026. Status: accepted. The details marked "to settle" are decided with measurements in M2.
 
 ## Context
 
@@ -38,7 +38,7 @@ A fingerprint is needed as well because two encodes of the same master decode to
 - Duplicates sort into byte-identical, audio-identical, same recording in a different encode, and different versions. Radio edits, extended mixes, dubs and remixes are versions and are never called duplicates.
 - The fingerprint comes from `rusty-chromaprint` (0.3.0, MIT), a pure-Rust port. Check its output against `fpcalc` on the fixtures before trusting AcoustID lookups made with it.
 
-## To settle in M1
+## To settle in M2
 
 - The exact form that gets hashed. Lossless files decode to the same integers everywhere, so FLAC, WAV and AIFF copies of one master should hash the same once sample format and bit depth are normalised. That needs proving on real files.
 - Lossy decoders can differ by a rounding step between versions. The hash record carries the decoder and its version. When the decoder is upgraded, lossy assets are hashed again in the background and keep their identity through the fingerprint.

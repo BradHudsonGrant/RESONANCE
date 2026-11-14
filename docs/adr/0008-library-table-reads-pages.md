@@ -27,7 +27,7 @@ Rebuilding the cells when a row waited for its page made a scrollbar drag cost 9
 ## What follows from it
 
 - An offset into the library means something only until the library changes. Tracks added by a scan while the table is open can make pages overlap or skip rows until the next reload.
-- Search and sort in M1 change what defines the order. They will most likely hand the table a list of track ids, and the table will read rows by id the same way it reads pages now.
+- Search and sort in M2 change what defines the order. They will most likely hand the table a list of track ids, and the table will read rows by id the same way it reads pages now.
 - The walk to a deep offset grows with the library: 13 ms at 100,000 rows. A list of ids removes that cost too.
 
 ## What would change it

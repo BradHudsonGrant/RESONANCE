@@ -86,7 +86,7 @@ Keys and grids:
 - A grid is a list of beat and downbeat times. One tempo plus one anchor drifts: 0.1 BPM of error is about 0.28 s over six minutes.
 - Kick energy cannot find the downbeat in four-on-the-floor music, because the kick is on every beat.
 - Folding tempo into 90 to 180 BPM mishandles drum and bass and half-time.
-- Stock Krumhansl-Schmuckler key profiles do badly on dance music. The audit recommends dance-music profiles, log magnitude, whitening, a high-pass near 200 Hz and a tuning estimate. Check this against real keys in M4 before relying on it.
+- Stock Krumhansl-Schmuckler key profiles do badly on dance music. The audit recommends dance-music profiles, log magnitude, whitening, a high-pass near 200 Hz and a tuning estimate. Check this against real keys in M5 before relying on it.
 - Cues are stored in the track's own time, never in stretched time.
 
 rekordbox XML:

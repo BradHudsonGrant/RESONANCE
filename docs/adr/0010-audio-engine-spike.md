@@ -23,7 +23,7 @@ cpal is the default named in the architecture and is the only maintained Rust cr
 
 `rtrb` is a single-producer, single-consumer ring buffer that does not allocate or block after it is made, which is the shape both queues need. A sequence lock lets the callback publish several values together without waiting; a reader that lands on a write reads again.
 
-Linear resampling is enough for a spike on 44.1 and 48 kHz material and costs almost nothing. The architecture already names Signalsmith Stretch for keylock and plain resampling otherwise; a better resampler comes with the decks in M6.
+Linear resampling is enough for a spike on 44.1 and 48 kHz material and costs almost nothing. The architecture already names Signalsmith Stretch for keylock and plain resampling otherwise; a better resampler comes with the decks in M7.
 
 ## What this does not reach
 
@@ -41,8 +41,8 @@ Checked on 13 November 2026:
 
 ## What follows from it
 
-The installed app has no binary channel yet, so its Mix view says it needs the development core. The native transport gets one when the decks are built in M6.
+The installed app has no binary channel yet, so its Mix view says it needs the development core. The native transport gets one when the decks are built in M7.
 
-The waveform is decoded twice per load, once for playback and once for the summary. Analysis caches waveforms in M4.
+The waveform is decoded twice per load, once for playback and once for the summary. Analysis caches waveforms in M5.
 
 The measurements are in [benchmarks/mix-view.md](../benchmarks/mix-view.md).
