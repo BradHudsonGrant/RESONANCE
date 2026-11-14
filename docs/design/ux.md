@@ -1,174 +1,140 @@
-# UX, Responsive Layout and Board Inventory
+# Structure, layout and interaction
 
-Resonance follows the layout, pixel proportions and density of `concept-dark.png` (`1586 x 992` CSS pixels at device pixel ratio `1`) and the brand mark, micro elements, component patterns and light theme of `concept are and design 2.png` (`1448 x 1086` CSS pixels) ([ADR 0012](../adr/0012-concept-boards-as-design-target.md)).
+The two concept boards in `handoff/` are the design target, with `concept-dark.png` leading ([ADR 0012](../adr/0012-concept-boards-as-design-target.md)). This page says where each job lives, how the window is laid out at every size and how the app behaves. The look is in [visual-language.md](visual-language.md), the components in [components.md](components.md), and each region in [shell.md](shell.md), [library.md](library.md) and [mix.md](mix.md).
 
-The specification is organised in five layers (`Tokens -> Primitives -> Composed domain components -> Regions -> Screens`):
+## Structure
 
-- [visual-language.md](visual-language.md) — colour, typography, spacing, corner radius and dimension tokens (`ui/src/lib/design/tokens.css`).
-- [components.md](components.md) — every Svelte 5 component, its file path, props, variants and tokens.
-- [shell.md](shell.md) — `TopBar`, `Sidebar`, `CommandBar`, `TransitionDock` and `PlayerBar`.
-- [library.md](library.md) — `Library`, `TrackTable` and `Inspector`.
-- [mix.md](mix.md) — `Mix`, `Deck` and `Waveform`.
-- [contrast.md](contrast.md) and [wave.md](wave.md) — WCAG AA contrast ratios and the WebGL2 dot-wave field.
+Five spaces in the sidebar: Library, Prep, Sets, Mix and Replay. Activity and Settings sit at the top right of the top bar.
 
-## 1. Navigation and five workspaces
+Each space is a job with a beginning and an end. Analysis, history and "intelligence" are properties of tracks and sessions, so they are shown where the track or session is shown and have no page of their own.
 
-The left `Sidebar` (`ui/src/lib/shell/Sidebar.svelte`) switches the centre workspace between five task spaces while `TopBar`, `CommandBar`, `TransitionDock` and `PlayerBar` remain mounted:
-
-| Space | Shortcut | Purpose | Built in |
+| Space | Key | What it is for | Built in |
 | --- | --- | --- | --- |
-| **Library** | `1` / `Ctrl+1` | Browse, search, filter and inspect tracks; manage sources and collections (`Collections` sub-tree in `Sidebar`) | Shell in `#51`/`#52`; sources, search, collections and preview in `M2`; analysis in `M5`; similarity in `M6` |
-| **Prep** | `2` / `Ctrl+2` | Triage incoming files (`Inbox`), resolve `Duplicates`, and inspect file `Quality` and replacements using `SegmentedTabs` | Placeholder route in `#51`; `Inbox` and tagging in `M3`; `Quality`, `Duplicates` and `Replace` in `M4` |
-| **Sets** | `3` / `Ctrl+3` | Collection overview cards (`181 x 82 px` with `Wave` art, moved from the top of `Library`), set timeline with real durations, and transition builder | Placeholder route in `#51`; full timeline, suggestions and generation in `M10` |
-| **Mix** | `4` / `Ctrl+4` | Two-deck live performance (`Deck variant="full"`), 120 Hz scrolling `1px`-bar waveforms (`Waveform mode="deck"`), mixer and live `Coach` strip | Restyled spike in `#52`; full decks, mixer and controller mappings in `M7`; `Coach` in `M8`; stems in `M12` |
-| **Replay** | `5` / `Ctrl+5` | Post-session timeline review, transition error scoring, and *"Practise this transition"* | Placeholder route in `#51`; session review in `M9` |
+| Library | 1 | Every track, search and filters, with collections listed under it in the sidebar | #51 and #52 for the shell and table, M2 for sources, search, collections and preview |
+| Prep | 2 | Getting tracks ready to play: new tracks, identification, tags, quality checks, duplicates and missing files | M3 and M4 |
+| Sets | 3 | Building and generating sets | M10 |
+| Mix | 4 | The decks, the coach and recording | #52 restyles the spike, then M7, M8 and M12 |
+| Replay | 5 | Recorded mixes, their scores and progress over time | M9 |
 
-`Activity` (job queue) and `Settings` (theme, library sources, provider keys, audio/MIDI devices) sit in the top-right corner of `TopBar` (`x = 1502` and `x = 1549` in `concept-dark.png`) and open as slide-over `Sheet` drawers without leaving the current workspace.
+Until its milestone, a space shows a placeholder.
 
-## 2. Keyboard-first interaction and focus
+| Job | Where it lives |
+| --- | --- |
+| Add folders, choose subfolders | Settings > Sources, and the Library sidebar |
+| Browse, search, filter, collections | Library |
+| New tracks, identify, fix tags, quality flags, duplicates, missing files | Prep (the same tools are also on any track in Library) |
+| Track details, grid and cue editing, replace | Inspector, expandable to a full track view |
+| Similar tracks, what mixes next | Inspector > Transition suggestions, and the Next panel in Mix |
+| Build and generate sets | Sets |
+| Decks, coach, recording | Mix |
+| Recorded mixes, scores, progress | Replay |
+| Background work and undo history | Activity |
+| Organise folders | Library > Organise (a tool that opens a plan) |
+| Other DJ libraries, controllers, models, audio device | Settings |
 
-Every workflow in Resonance operates from the keyboard without touching the mouse:
+Always present: the command bar (Ctrl+K: search, commands, natural language), the inspector on the right (I toggles it), the A to B dock and the player bar at the bottom, and Activity in the top bar. Activity and Settings open as sheets over the current space.
 
-- **Global shortcuts:**
-  - `Ctrl+K` (or `/` when not typing in an input): focus `CommandBar` search and command box.
-  - `1`–`5` (or `Ctrl+1`–`Ctrl+5`): switch workspace (`Library`, `Prep`, `Sets`, `Mix`, `Replay`).
-  - `[`: collapse or expand `Sidebar` (`256px` <-> `52px`).
-  - `I`: toggle `Inspector` column.
-  - `D`: collapse or expand `TransitionDock` (`160px` <-> `52px` header strip).
-  - `Space`: play or pause active preview (`Library`) or focused deck (`Mix`).
-- **Table navigation (`TrackTable`):** `Up` / `Down` (`33px` row step), `PageUp` / `PageDown`, `Home` / `End`, `X` to toggle the `16 x 16 px` row checkbox, `Shift+Up` / `Shift+Down` for range selection, `Enter` to load into the active deck or preview.
-- **Visible focus:** Keyboard focus draws a `2px` solid `--color-border-control` outline (`--color-text` in forced high contrast) with `--focus-ring-offset: -2px`. Active decks and drop zones frame their corners with `FocusBrackets.svelte`.
+Selecting one track fills the inspector. Selecting two offers the A to B preview in the dock. Selecting many shows batch actions.
 
-## 3. Responsive window size and DPI scaling rules
+## Layout
 
-`concept-dark.png` is the reference window at **`1586 x 992` CSS pixels** (`devicePixelRatio = 1`). The application supports every window size from **`1280 x 720` CSS pixels** up to **`2560 x 1440` (QHD)** and **`5120 x 2160` (5K2K ultrawide)** at device pixel ratios **`1`, `1.25`, `1.5` and `2`**.
+```
++--------------------------------------------------------------------------+
+| mark  RESONANCE                                 audio  Activity  Settings |
++-------------+----------------------------------------+-------------------+
+| sidebar     | command bar and slash chips            | inspector         |
+|             +----------------------------------------+                   |
+| Library     |                                        | artwork, title    |
+|  collections|  workspace                             | details, tags     |
+| Prep        |  table / set timeline / decks / replay | audio traits      |
+| Sets        |                                        | energy            |
+| Mix         |                                        | suggestions       |
+| Replay      |                                        |                   |
+| dot wave    |                                        |                   |
++-------------+----------------------------------------+-------------------+
+| A to B dock: deck A | crossfade waveform | deck B                         |
+|  player bar                                                              |
++--------------------------------------------------------------------------+
+```
 
-### Why `1280 x 720` CSS pixels is the minimum window size
+At the reference size the top bar is 50 px, the sidebar 256 px, the inspector 420 px and the dock 160 px, and the player bar is a 60 px card inset 20 px at the sides and 17 px at the bottom. The tokens are in [visual-language.md](visual-language.md#sizes).
 
-A standard `1920 x 1080` 15-inch DJ laptop running Windows at `150%` display scaling (`devicePixelRatio = 1.5`) exposes exactly `1280 x 720` CSS pixels (`1366 x 768` at `100%` is slightly larger). Below `1280 x 720`, two-deck crossfade waveforms, a multi-column DJ track table (Title, Artist, BPM, Key, Time), and transport controls cannot coexist without clipping essential mixing figures. The Tauri window sets `minWidth: 1280` and `minHeight: 720`.
+## Window sizes
 
-### Invariants across all window sizes and DPRs
+The reference is `concept-dark.png`: 1586 by 992 CSS pixels at a device pixel ratio of 1. The full layout is designed from 1280 by 720 up to 5120 by 2160, at ratios 1, 1.25, 1.5 and 2. A 1920 by 1080 laptop at 150 % scaling gives exactly 1280 by 720. Below that, two waveforms, a table with title, artist, BPM, key and time, and the transport can't all fit without clipping. The desktop window can still be made as small as 760 by 480 (`app/src/main.rs`), and the narrow rules below cover it.
 
-1. **Text never scales with window width.** Every font size remains at its token value (`--text-2xs: 10px` through `--text-2xl: 27px`) regardless of whether the window is `1280 px` or `5120 px` wide.
-2. **Table rows keep their `33 px` height (`--row-height: 33px`).** Taller windows display more rows in the virtualised viewport (`~8` rows at `720px` height, `~10` rows at `992px`, `~24` rows at `1440px`, `~46` rows at `2160px`); row height never stretches.
-3. **Device pixel ratio (`1`, `1.25`, `1.5`, `2`):**
-   - CSS layout works in CSS pixels; Chromium scales text, borders and SVG icons by `window.devicePixelRatio`.
-   - Hairline borders (`1px solid var(--color-border)`) stay `1px` CSS (`1`, `1.25`, `1.5` or `2` physical pixels).
-   - WebGL2 canvases (`Wave.svelte` and `Waveform.svelte`) size their drawing buffer to `Math.round(clientWidth * devicePixelRatio)` by `Math.round(clientHeight * devicePixelRatio)` via a `ResizeObserver`.
-   - `1px` waveform bars in `Waveform.svelte` compute `barPx = Math.max(1, Math.round(devicePixelRatio))` and `gapPx = Math.max(1, Math.round(devicePixelRatio))` in device pixels and snap bar `x` coordinates to integer device pixels so bars never shimmer or blur at `1.25x` or `1.5x` scaling.
+At every size:
 
-### Region sizing: fixed vs flexible (`minmax()`, `clamp()`, and `@container`)
+- Text never scales with the window. Font sizes stay at their tokens.
+- Table rows stay 33 px. A taller window shows more rows.
+- Layout works in CSS pixels, and a hairline stays 1 CSS pixel at every ratio.
+- A canvas sizes its drawing buffer to its CSS size times `devicePixelRatio`, rounded, and puts waveform bars on whole device pixels so they don't shimmer at 1.25 or 1.5.
 
-| Region | Component | Sizing rule (CSS Grid / Container Query) | Min | Reference (`1586 x 992`) | Max | Adaptive behaviour as window changes |
-| --- | --- | --- | --- | --- | --- | --- |
-| **Top bar** | `TopBar.svelte` | Fixed height `var(--topbar-height)`, width `100%` | `50px` tall | `1586 x 50 px` | `50px` tall | Left `Wordmark` and right `Audio`/`Activity`/`Settings` buttons stay pinned `20px` from left/right window edges at all widths. |
-| **Left sidebar** | `Sidebar.svelte` | Fixed width `var(--sidebar-width)` (`>= 1360px`) or `var(--sidebar-collapsed-width)` (`< 1360px`) | `52px` wide | `256 x 702 px` | `256px` wide | **Auto-collapses from `256px` to `52px` icon rail below `1360px` window width** (reclaiming `204px` for the table). Can be toggled manually with `[` at any width. Never grows wider than `256px` on ultrawide screens. |
-| **Right inspector** | `Inspector.svelte` | Flexible width `clamp(340px, 26.5vw, 440px)` | `340px` docked (`Sheet` `< 1280px`) | `420 x 702 px` | `440px` wide | Narrowed to `340px` on `1280..1439px` windows; hits `420px` at `1586px`; caps at `440px` on `2560px` and `5120px` monitors so `TraitBar` and metadata rows stay compact. If window width is forced `< 1280px` or user presses `I`, detaches into a slide-over `Sheet` (`380px` wide). |
-| **Command bar** | `CommandBar.svelte` | Flexible width `100%` inside centre column, `max-width: 1120px` | `520px` wide | `855 x 42 px` input (`908px` col) | `1120px` wide | Input box stays `42px` tall. On `2560px` and `5120px` monitors, `max-width: 1120px` prevents the search bar from stretching across the whole monitor. Inside the `SlashChip` strip (`@container`), chips hide right-to-left (`#4`, then `#3`) when column width `< 760px`, keeping the `...` overflow button. |
-| **Centre workspace & table** | `Library.svelte`, `TrackTable.svelte` | Grid column `minmax(520px, 1fr)`, height `minmax(280px, 1fr)`, `container-type: inline-size` | `520px` wide (`888px` at `1280px` with `52px` sidebar) | `908 x 600 px` (`884px` table) | `1fr` (capped table max-width `2400px`) | Absorbs horizontal and vertical window growth. Numeric columns (`#`, `BPM`, `Key`, `Energy`, `Time`) stay fixed width; `Title` (`minmax(150px, 1.8fr)`), `Artist` (`minmax(120px, 1.3fr)`), and inline `Waveform` (`clamp(140px, 14cqi, 260px)`) grow smoothly. |
-| **Transition dock** | `TransitionDock.svelte` | `grid-template-columns: clamp(260px, 21.5vw, 340px) minmax(420px, 1fr) clamp(260px, 21.5vw, 340px)` | `52px` tall (collapsed `< 820px` height) / `160px` open | `1586 x 160 px` (`340px` pods, `844px` wave) | `160px` tall (`360px` max pods, `1fr` wave) | At `1280px` width, Deck A/B pods narrow to `260px` (truncating long titles with ellipsis while keeping the `60px` `Thumb` and `35 x 34 px` badge) and the crossfade `Waveform` is `700px` wide. **On windows shorter than `820px` (`1280 x 720`), the dock body collapses by default into its `52px` header strip** (`A -> B Transition · Echo Chamber -> Luminous · Mix Point 4:15`) so `TrackTable` keeps 8–9 visible rows; clicking the header or pressing `D` expands it. |
-| **Bottom player card** | `PlayerBar.svelte` | Fixed height `60px`, inset `20px` left/right and `17px` bottom | `1240 x 60 px` (at `1280px` window) | `1548 x 60 px` | `calc(100vw - 40px) x 60px` | Main `ScrubBar` flexes (`minmax(180px, 1fr)`). Below `1360px` window width, `A Vol` and `B Vol` slider tracks compress from `86px` to `64px` and hide their inline `100%` text readout (shown in tooltip while dragging). On `2560px+` screens, the main `ScrubBar` expands for fine timeline scrubbing. |
+The layout responds with CSS media queries and container queries. Script only holds the user's own choices: `[` for the sidebar, I for the inspector and D for the dock.
 
-### `TrackTable` container-query column drop order
+| Region | Rule |
+| --- | --- |
+| Sidebar | 256 px. Below 1360 px wide it collapses to a 52 px icon rail. `[` collapses or expands it at any width. It never grows past 256 px. |
+| Inspector | `clamp(340px, 26.5vw, 440px)`: 340 px at 1280 wide, 420 at 1586, 440 from 1660. Below 1280 px wide it becomes a sheet over the workspace, closed until a track is selected or I is pressed. |
+| Dock | 160 px: a 52 px header and the deck cards and crossfade waveform under it. Below 820 px high it collapses to its 52 px header. D or a click on the header opens it. The deck cards are `clamp(260px, 21.5vw, 340px)` and the waveform takes the rest. |
+| Command bar | A 42 px search box as wide as the workspace, up to 1120 px. Slash chips hide from the right when the bar is narrower than 760 px, keeping the overflow button. |
+| Workspace | Takes every pixel the other regions leave, so it is the part that grows on large screens. The table drops columns with container queries ([library.md](library.md#track-table)) and stops growing at 2400 px. |
+| Player bar | The scrub bar flexes. When the bar narrows, the A and B volume sliders shrink from 86 to 64 px and hide their percentage, which shows in a tooltip while dragging. |
 
-`TrackTable.svelte` declares `container-type: inline-size; container-name: track-table` so it adapts to its own available width (whether narrowed by the window, an expanded sidebar, or a docked inspector):
+What that gives at common sizes:
 
-1. **Container width `>= 820 px` (includes `1280 x 720` with collapsed `52px` sidebar, where the centre column is `888 px`, and `1586 x 992` reference where it is `908 px`):** All 11 columns visible (`Checkbox`, `Status`, `#`, `Title`, `Waveform 140px`, `Artist`, `BPM`, `Key`, `Energy`, `Time`, `...`).
-2. **Container width `740 px .. 819 px`:** `Energy` (`MeterBar`) column hides (`54px` saved); energy remains visible in `Inspector`.
-3. **Container width `640 px .. 739 px` (e.g. `1280 px` window with the user manually expanding the `256px` sidebar, leaving `684px` for the centre column):** Inline `Waveform` column narrows from `140px` to `88px`.
-4. **Container width `< 640 px`:** Inline `Waveform` column hides (`88px` saved); the track's waveform remains visible in `TransitionDock`.
-5. **Never dropped at any supported window size:** `Checkbox`, `Status`, `#`, `Title`, `Artist`, `BPM`, `Key`, `Time`, and row `...` actions.
+| Window | Sidebar | Inspector | Dock |
+| --- | --- | --- | --- |
+| 1100 by 700 | 52 | sheet, closed | header only |
+| 1280 by 720 | 52 | 340 | header only |
+| 1400 by 900 | 256 | 371 | open |
+| 1586 by 992 | 256 | 420 | open |
+| 1920 by 1080 | 256 | 440 | open |
+| 2560 by 1440 and wider | 256 | 440 | open |
 
-### Window breakpoint summary (`1280 x 720` to `5120 x 2160`)
+## Keyboard
 
-| Window size (CSS px) | Typical display & DPR | Sidebar | Centre column | Inspector | Visible table rows | Transition dock |
-| --- | --- | --- | --- | --- | --- | --- |
-| `1280 x 720` | 720p or 1080p @ `150%` (`DPR 1.5`) | `52px` (auto-collapsed) | `888px` (all columns visible) | `340px` docked | `8–9 rows` (`33px` each) | Collapsed to `52px` header by default (`D` expands) |
-| `1586 x 992` | **Reference (`concept-dark.png`, `DPR 1`)** | `256px` open | `908px` (`884px` table) | `420px` docked | `10 rows` (`33px` each) | Open (`160px`: `52px` header + `87px`/`101px` body) |
-| `1920 x 1080` | 1080p @ `100%` (`DPR 1`) or 4K @ `200%` (`DPR 2`) | `256px` open | `1224px` | `440px` docked | `13 rows` (`33px` each) | Open (`160px`, crossfade wave `1180px` wide) |
-| `2560 x 1440` | 27" QHD @ `100%`/`125%` (`DPR 1` / `1.25`) | `256px` open | `1864px` (`CommandBar` capped at `1120px`) | `440px` docked | `24 rows` (`33px` each) | Open (`160px`, Deck pods `360px`, wave `1774px`) |
-| `5120 x 2160` | 40" 5K2K ultrawide (`DPR 1.25` / `1.5`) | `256px` open | `4424px` (`TrackTable` capped at `2400px`, left-aligned with `CommandBar`) | `440px` docked | `46 rows` (`33px` each) | Open (`160px`, Deck pods `360px`, wave expands across centre) |
+Everything is reachable from the keyboard. Shortcuts appear in menus and tooltips.
 
----
+| Key | Does |
+| --- | --- |
+| Ctrl+K, or / outside a text field | Focus the command bar |
+| 1 to 5, or Ctrl+1 to Ctrl+5 | Switch space |
+| `[` | Collapse or expand the sidebar |
+| I | Show or hide the inspector |
+| D | Collapse or expand the dock |
+| Space | Play or pause the preview in Library, or the focused deck in Mix |
+| Up, Down, Page Up, Page Down, Home, End | Move through the table |
+| Shift with Up or Down | Extend the selection |
+| X | Tick or untick the row |
+| Enter | Load the row into the preview or the active deck |
 
-## 4. Complete board inventory and PIL measurement verification
+Focus shows as a 2 px outline in the control border colour, and in the system text colour under Windows high contrast. Active decks and drop targets also get focus brackets.
 
-Every element on `concept-dark.png` (`1586 x 992`, Board 1) and `concept are and design 2.png` (`1448 x 1086`, Board 2) is listed below with:
+## Interaction rules
 
-- Its **exact PIL pixel measurement** from the image (`x..x, y..y`, `w x h`, corner radius `r`, cap height and font size, RGB hex).
-- The **one Svelte component and variant prop** it is built from ([components.md](components.md)).
-- The **spec token and value** in both dark and light themes ([visual-language.md](visual-language.md)).
-- Its **milestone disposition**:
-  - `#50` — Primitives and micro elements in `ui/src/lib/design/` and `/design.html`
-  - `#51` — Application shell (`TopBar`, `Sidebar`, `CommandBar`, `TransitionDock`, `PlayerBar`)
-  - `#52` — `Library`, `TrackTable`, `Inspector` and `Mix` views
-  - `M2`–`M12` — Later milestone that brings live backend data
-  - `Left out` — Omitted with the reason
-- **Difference & reason:** Where the spec value differs from the raw image pixel, the only permitted reasons are the decisions in Issue [#49](https://github.com/BradHudsonGrant/RESONANCE/issues/49) and the standing architectural rules (one orange accent `#E4553D`/`#D94F3B`, `1px` waveform bars, reduced motion, forced high contrast, WCAG AA `>= 4.5:1` text contrast). Everything else matches the image.
+- No chains of modals. Anything that changes files uses one confirm sheet that shows the diff.
+- Ctrl+Z works for every journaled operation. Activity lists past operations with an undo on each.
+- Background work never blocks. A job that needs the user becomes a Prep item.
+- Every view has designed empty, loading and error states. An error says what happened and what to do next.
+- Dense by default: 33 px rows and tabular numerals. Don't swap tables for decorative cards.
+- Honour the OS settings for reduced motion, more contrast and Windows high contrast.
 
-### Part A — `concept-dark.png` (`1586 x 992` CSS pixels, DPR `1`)
+## Showing where a value came from
 
-| # | Element | Image coordinates (`concept-dark.png`) | Component & variant | Image measurement (PIL) | Spec token & value (dark / light) | Target | Difference & reason |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Top header bar container | `x = 0..1585, y = 0..50` | `TopBar.svelte` | `1586 x 50 px`, fill `#141415`, `1px` bottom border at `y = 50` (`#2a2a2a`) | `--topbar-height: 50px`, `--color-surface` (`#141415` / `#FAF9F7`), `1px solid var(--color-border)` (`#242426` / `#DCDAD6`) | `#51` | Matches image |
-| 2 | Top-left 7-bar signal mark | `x = 97..115, y = 15..35` | `Mark.svelte` (`size="md"`) | `19 x 21 px`, 7 vertical bars (`2px` bar, `2px` gap), monochrome off-white `#f2f1ef` | `Mark size="md"` (`19 x 21 px`), `color: var(--color-text)` (`#F2F1EF` / `#141413`) | `#50`, `#51` | Matches image |
-| 3 | Top-left `RESONANCE` wordmark | `x = 133..265, y = 19..31` | `Wordmark.svelte` (`size="md"`) | `133 x 13 px` glyph box, cap height `12 px` -> `16 px` `Space Grotesk` 500, tracking `0.32em`, `#f2f1ef` | `--font-display` 500, `--text-lg: 16px`, `letter-spacing: 0.32em`, `--color-text` | `#50`, `#51` | Matches image |
-| 4 | Top-right audio status icon button | `x = 1454..1470, y = 16..33` | `Button.svelte` (`variant="icon"`, `Icon name="audio" size="md"`) | `17 x 18 px` glyph inside `28 x 28 px` quiet target, `#9a9892` | `--control-height: 28px`, `--radius-sm: 6px`, `18px` `Icon`, `--color-text-2` | `#51` (shell), `M7` (live audio popover) | Matches image |
-| 5 | Top-right `Activity` icon button | `x = 1502..1519, y = 16..33` | `Button.svelte` (`variant="icon"`, `Icon name="activity" size="md"`) | `18 x 18 px` target-ring glyph (`30 px` centre-to-centre from audio icon), `#9a9892` | `--control-height: 28px`, `--radius-sm: 6px`, `18px` `Icon`, `--color-text-2` | `#51` (shell), `M2` (job queue drawer) | Matches image (kept in top-right header) |
-| 6 | Top-right `Settings` gear icon button | `x = 1549..1565, y = 16..33` | `Button.svelte` (`variant="icon"`, `Icon name="settings" size="md"`) | `17 x 18 px` gear glyph (`30 px` centre-to-centre from Activity), `#9a9892` | `--control-height: 28px`, `--radius-sm: 6px`, `18px` `Icon`, `--color-text-2` | `#51` (theme drawer), `M2`/`M3`/`M7` | Matches image (kept in top-right header) |
-| 7 | Left sidebar container | `x = 0..256, y = 51..752` | `Sidebar.svelte` | `256 x 702 px`, fill `#141415`, `1px` right border at `x = 256` (`#242426`) | `--sidebar-width: 256px` (`--sidebar-collapsed-width: 52px`), `--color-surface`, `1px solid var(--color-border)` | `#51` | Matches image (`256 px` open, collapsible to `52 px`) |
-| 8 | Sidebar subtitle `MUSIC INTELLIGENCE / FOR DJS` | `x = 25..195, y = 75..97` | `MonoLabel.svelte` (`size="xs" tone="secondary"`) | Two lines (`y = 75..83` and `y = 90..97`, `15 px` line pitch), cap height `8 px` -> `11 px` `JetBrains Mono` uppercase, `#9a9892` | `--font-mono` 500, `--text-xs: 11px`, `letter-spacing: 0.08em`, `line-height: 15px`, `--color-text-2` | `#50`, `#51` | Matches image |
-| 9 | Active sidebar item (`Library 12,846`) | `x = 15..246, y = 125..162` | `Sidebar.svelte` nav item (`active={true}`) | `232 x 38 px`, `r = 8 px`, fill `#1e1e20`/`#252527`, `1px` border `#2d2d2f`, `16 px` icon at `x = 31`, `14 px` `Inter` 500 label at `x = 66`, `12 px` mono count at `x = 198..232` | `--control-height-nav: 38px`, `--radius-md: 8px`, `--color-raised`, `1px solid var(--color-border)`, `2px` `--color-accent` left mark, `--text-base: 14px` label, `--text-sm: 12px` mono count | `#51`, `#52` | Matches image + `2px` `--color-accent` selection mark |
-| 10 | Sidebar `Collections` header and `+` button | `x = 31..236, y = 180..195` | `Sidebar.svelte` collection tree + `Button variant="icon" size="sm"` | `16 px` icon at `x = 31`, `14 px` `Inter` label at `x = 66`, `13 x 13 px` `+` glyph at `x = 224..236` | `--font-sans` `--text-base: 14px` `--color-text-2`, `24 x 24 px` `+` button | `#51` (UI), `M2` (CRUD) | Matches image |
-| 11 | Sidebar collection sub-items (`Peak Time 248`, `Warm Up 176`, `Afterhours 312`, `Deep / Hypnotic 409`) | `x = 80..232, y = 219, 246, 273, 300` | `Sidebar.svelte` collection item rows | `27 px` vertical pitch, indented to `x = 80`, cap height `8.5 px` -> `12 px` `Inter` label (`#9a9892`) + `12 px` mono count (`#87857f`) | `--font-sans` `--text-sm: 12px` `--color-text-2`, `--font-mono` `--text-sm: 12px` `--color-muted`, `27px` row pitch | `#51` (fixture), `M2` (collections) | Matches image |
-| 12 | Sidebar primary space buttons (`Prep`, `Sets`, `Mix`, `Replay`) | `x = 15..246, y = 340, 383, 423, 465, 506` | `Sidebar.svelte` space buttons | `232 x 38 px` hit boxes, `41–42 px` pitch, `16 px` icon at `x = 31`, `14 px` `Inter` label at `x = 66` (`Discover`, `Transitions`, `Set Builder`, `Practice` in image) | `--control-height-nav: 38px`, `--radius-md: 8px`, `16px` `Icon`, `--font-sans` `--text-base: 14px` `--color-text-2` | `#51` (shell), `M3`/`M4` (`Prep`), `M10` (`Sets`), `#52`/`M7` (`Mix`), `M9` (`Replay`) | Space names set to `Library`, `Prep`, `Sets`, `Mix`, `Replay` per Issue `#49` |
-| 13 | Sidebar `ACTIVE SET` divider, header and row (`Fri 23:00 — Warehouse`) | `x = 20..240, y = 562..615` | `ModularDivider.svelte`, `MonoLabel.svelte` (`size="xs"`), `Sidebar.svelte` | `1px` line at `y = 562`, `11 px` mono `ACTIVE SET` at `y = 580`, `6 x 6 px` green dot at `x = 28`, `13 px` `Inter` title at `x = 46`, `...` at `x = 225` | `1px` `--color-border`, `MonoLabel` `--text-xs: 11px`, `6px` monochrome dot (`--color-text-2`), `--text-md: 13px` `--color-text` | `#51` (static placeholder), `M10` (live set) | Green dot becomes monochrome `--color-text-2` per single-accent rule (`#49`) |
-| 14 | Sidebar bottom dot-wave mesh | `x = 1..254, y = 655..732` | `Wave.svelte` (`variant="sidebar"`) | `254 x 78 px` particle wave mesh at the bottom of the sidebar (`#f2f1ef` dots fading into `#141415`) | `--sidebar-wave-height: 78px`, `Wave variant="sidebar"`, `--color-text` particles | `#50`, `#51` | Matches image |
-| 15 | Search & command box | `x = 276..1130, y = 63..104` | `CommandBar.svelte` -> `TextInput.svelte` (`size="lg"`) | `855 x 42 px` (`12 px` below `TopBar`), `r = 10 px`, fill `#141415`, `1px` border `#38383a`, `16 px` search icon at `x = 298`, `14 px` `Inter` placeholder at `x = 332` | `--control-height-lg: 42px`, `--radius-lg: 10px`, `--color-surface`, `1px solid var(--color-border-control)`, `--font-sans` `--text-base: 14px` | `#51` (UI & focus), `M2` (FTS5 search), `M6` (NL search) | Matches image |
-| 16 | Search shortcut badge (`⌘ K` / `Ctrl K`) | `x = 1070..1115, y = 72..95` | `DataTag.svelte` (`variant="keybadge"`) | `46 x 24 px`, `r = 6 px`, fill `#1c1c1e`, `1px` border `#2c2c2e`, `11 px` `JetBrains Mono` | `height: 24px`, `--radius-sm: 6px`, `--color-surface-2`, `1px solid var(--color-border)`, `--font-mono` `--text-xs: 11px` | `#50`, `#51` | Matches image (`Ctrl K` on Windows/Linux, `⌘ K` on macOS) |
-| 17 | Slash-command chip strip (`/ bpm 125-132`, `/ key 8A`, `/ similar`, `/ build set`, `...`) | `x = 291..1125, y = 116..138` (divider at `y = 152`) | `SlashChip.svelte` + `Button variant="icon" size="sm"` | Four chips (`x = 291, 512, 756, 924`): `22 px` tall code pill (`r = 6 px`, `#1c1c1e`, `11 px` mono) + `10 px` gap + `12 px` `Inter` description (`#9a9892`), `1px` bottom border at `y = 152` | `--control-height-xs: 22px`, `--radius-sm: 6px`, `--font-mono` `--text-xs: 11px` pill + `--font-sans` `--text-sm: 12px` description, `1px` `--color-border` at `y = 152` | `#50`, `#51` (chips), `M2`/`M5`/`M6`/`M10` (parsers) | Matches image |
-| 18 | Workspace title `Library` and count `12,846 tracks` | `x = 278..464, y = 178..204` | `Library.svelte` header | `Library`: `86 x 27 px` box, cap height `20 px` on `L` -> `27 px` `Space Grotesk` 500 (`#f2f1ef`); `12,846 tracks`: `x = 385..464, y = 187..199`, cap height `9.5 px` -> `13 px` `JetBrains Mono` (`#9a9892`) | `--font-display` 500 `--text-2xl: 27px` (`--color-text`), `--font-mono` `--text-md: 13px` (`--color-text-2`) | `#52` | Matches image |
-| 19 | Workspace view-mode toggle (Table vs Grid/Card) | `x = 998..1075, y = 181..214` | — | `78 x 34 px` 2-button segmented control (`r = 6 px`) | — | `Left out` | Left out per Issue `#49`: the library is always a virtualised table; card grids are not used for tracks |
-| 20 | Workspace filter sliders button | `x = 1096..1130, y = 181..214` | `Button.svelte` (`variant="icon" size="md"`, `Icon name="sliders"`) | `34 x 34 px`, `r = 6 px`, fill `#1c1c1e`, `1px` border `#2c2c2e`, `16 px` sliders icon | `--control-height-md: 34px`, `--radius-sm: 6px`, `--color-surface-2`, `1px solid var(--color-border)` | `#52` (button), `M2` (filter drawer) | Matches image |
-| 21 | Filter pills (`All Tracks`, `✓ Analysed`, `○ Unanalysed`, `★ Favourites`, `◷ Recent`) | `x = 278..792, y = 220..245` | `FilterPill.svelte` | `25–26 px` tall, `r = 9999 px`. Active `All Tracks` (`83 x 25 px`): fill `#f2f1ef`, text `#0b0b0c`, `12 px` `Inter` 500. Inactive pills spaced `24 px` apart, `13 px` icon + `12 px` `Inter` `#9a9892` | `--control-height-sm: 26px`, `--radius-pill`, active: `--color-text` fill / `--color-background` text; inactive: `--color-text-2`, `--font-sans` `--text-sm: 12px` | `#50`, `#52` (pills), `M2`/`M5` (queries) | Matches image (`Analysed` / `Unanalysed` / `Favourites` British spelling per `VOICE.md`) |
-| 22 | Collection cards with dot-wave art (`Peak Time`, `Warm Up`, `Afterhours`, `Deep / Hypnotic`, `+ New Collection`) | `x = 276..1145, y = 262..343` | `Card.svelte` (`variant="interactive" waveArt={true}` and `variant="dashed"`) | Four `181 x 82 px` cards (`11 px` gap, `r = 10 px`, `14 px` `Space Grotesk` title, `12 px` mono count, `Wave` art) + one `101 x 81 px` dashed card (`r = 10 px`) | `Card radius="lg"` (`--radius-lg: 10px`), `Wave variant="card"`, `--font-display` `--text-base: 14px`, `--font-mono` `--text-sm: 12px` | `M10` (moved to `Sets` space) | Moved from `Library` to `Sets` (`M10`) per Issue `#49` so `TrackTable` starts directly under filter pills |
-| 23 | Track table header row (`☐`, `#`, `Title`, `Artist`, `BPM`, `Key`, `Energy`, `Time`) | `x = 267..1150, y = 393..424` | `TrackTable.svelte` header | `884 x 31 px` (`1px` borders at `y = 393` and `y = 424`), cap height `8.5 px` -> `12 px` `Inter` 500 (`#9a9892`) | `--table-header-height: 31px`, `1px solid var(--color-border)`, `--font-sans` 500 `--text-sm: 12px` `--color-text-2` | `#52` | Matches image |
-| 24 | Track table data rows (10 rows visible) | `x = 267..1150, y = 424..753` | `TrackTable.svelte` -> `TableRow.svelte` + `TableCell.svelte` | 10 rows across `329 px` (`32.9 px` pitch), row text cap height `9.5–10 px` -> `13 px` (`Inter` for `Title`/`Artist`, `JetBrains Mono` for `#`/`BPM`/`Key`/`Time`), `16 x 16 px` checkbox (`r = 3 px`) at `x = 277..293` | `--row-height: 33px`, `--font-sans` / `--font-mono` `--text-md: 13px`, checkbox `16 x 16 px` `--radius-xs: 3px` | `#50`, `#52` | Matches image (`33 px` row height, `13 px` table text) |
-| 25 | Selected track row (`Row 4: Echo Chamber — Kaden`) | `x = 267..1150, y = 491..524` | `TableRow.svelte` (`selected={true}`) | `884 x 34 px` rounded frame, `r = 6 px`, fill `#1f1e1f`/`#252527`, `1px` light control border (`#abaaa5`), ticked `16 x 16 px` light checkbox (`#f0f0ef`), `▶` play icon at `x = 305..313` | `--radius-sm: 6px`, `--color-raised` fill, `1px solid var(--color-border-control)`, `2px` left `--color-accent` mark, ticked `--color-text` checkbox | `#50`, `#52` | Matches image's rounded light frame and ticked checkbox, keeping orange to the `2px` selection mark (`#49`) |
-| 26 | Table inline waveform cell | `x = 502..641` (inside each `33 px` row) | `Waveform.svelte` (`mode="inline"`) | `140 x 17 px`, `1px` vertical peak bars (`1px` gap), `#9a9892` unplayed / `#f2f1ef` played | `Waveform mode="inline"` (`140 x 17 px`, `1px` bars, `--color-text-2` / `--color-text`) | `#50`, `#52` (seeded), `M5` (real peaks) | Matches image |
-| 27 | Table `Energy` 5-bar meter cell | `x = 908..934` (inside each `33 px` row) | `MeterBar.svelte` | `27 x 12 px`, 5 vertical bars (`3 px` wide, `3 px` gap, ascending heights `4..12 px`) | `MeterBar` (`27 x 12 px`, `--color-text` lit bars, `--color-border-control` unlit) | `#50`, `#52` (fixture), `M5` (analysed) | Matches image |
-| 28 | Table `Tension` 5-bar meter column | `x = 981..1007` | — | `27 x 12 px` 5-bar meter | — | `Left out` | Left out per Issue `#49` (`Tension` is not a planned `M5` analyser output) |
-| 29 | Right-hand inspector column container | `x = 1166..1585, y = 51..752` | `Inspector.svelte` | `420 x 702 px`, fill `#141415`, `1px` left border at `x = 1165` (`#242426`), no `"INSPECTOR"` top bar; five `1px` horizontal dividers at `y = 169, 257, 321, 436, 589` (`x = 1180..1570`) | `--inspector-width: 420px`, `--color-surface`, `1px solid var(--color-border)`, `ModularDivider inset="md"` | `#52` | Matches image (`420 px` wide, no extra header bar) |
-| 30 | Inspector track artwork | `x = 1175..1271, y = 65..160` | `Thumb.svelte` (`size="lg"`) | `96 x 96 px`, `r = 10 px`, `1px` border `#2a2a2c`, monochrome geometric/wave art | `--thumb-lg: 96px`, `--radius-lg: 10px`, `1px solid var(--color-border)` | `#50`, `#52` (Wave fallback), `M3` (cover art) | Matches image (`96 x 96 px`, `10 px` radius) |
-| 31 | Inspector track title (`Echo Chamber`) & artist (`Kaden`) | `x = 1289..1510, y = 79..116` | `Inspector.svelte` header | Title (`y = 79..93`): cap height `15 px` -> `20 px` `Space Grotesk` 600 (`#f2f1ef`); Artist (`y = 104..116`): cap height `10 px` -> `14 px` `Inter` (`#9a9892`); `★` (`x = 1520`) & `...` (`x = 1552`) buttons (`18 px` icons) | Title: `--font-display` 600 `--text-xl: 20px` (`--color-text`); Artist: `--font-sans` `--text-base: 14px` (`--color-text-2`); `Button variant="icon"` | `#52` | Matches image (`20 px` title, `14 px` artist) |
-| 32 | Inspector `✓ Analysed` status pill & `WAV 44.1 kHz 24-bit` specs | `x = 1290..1520, y = 131..152` | `DataTag.svelte` (`variant="pill" leadingIcon="check"`) | Pill: `78 x 22 px`, `r = 9999 px`, fill `#1c1c1e`, `1px` border `#2c2c2e`, `11 px` text; Specs (`x = 1390..1520`): `12 px` `JetBrains Mono` (`#9a9892`) | `--control-height-xs: 22px`, `--radius-pill`, `--font-mono` `--text-xs: 11px` pill; `--font-mono` `--text-sm: 12px` `--color-text-2` specs | `#50`, `#52` (fixture), `M5` (analysis status) | Green check icon becomes monochrome `--color-text` per single-accent rule (`#49`) |
-| 33 | Inspector 2-row metadata grid (`BPM`, `KEY`, `TIME`, `RELEASE` / `GENRE`, `SUBGENRE`, `LABEL`) | `x = 1180..1565, y = 181..244` | `MonoLabel.svelte` (`size="xs"`) + value cells | Row 1 (`y = 181..204`, 4 cols at `x = 1180, 1284, 1386, 1482`); Row 2 (`y = 221..244`, 3 cols at `x = 1180, 1284, 1386`). Keys: cap height `7.5 px` -> `11 px` mono (`#87857f`). Values: cap height `10 px` -> `13 px` (`#f2f1ef`) | Keys: `MonoLabel size="xs"` (`--text-xs: 11px`, `--color-muted`); Values: `--font-mono` / `--font-sans` `--text-md: 13px` (`--color-text`) | `#52` (file facts), `M3` (tags), `M5` (BPM/key) | Matches image |
-| 34 | Inspector `TAGS` section (`Hypnotic ×`, `Peak Time ×`, `Industrial ×`, `Rolling Bass ×`, `+`) | `x = 1180..1567, y = 270..316` | `MonoLabel.svelte` + `DataTag.svelte` (`variant="removable"`) + `Button.svelte` (`variant="circle" size="sm"`) | `TAGS` header (`y = 270..277`, `11 px` mono); chips (`y = 290..316`, `26 px` tall, `r = 6 px`, `12 px` `Inter`); circular `+` button (`26 x 26 px` at `x = 1541..1567`, `r = 9999 px`) | `--control-height-sm: 26px`, `--radius-sm: 6px` chips (`--text-sm: 12px`); `26 x 26 px` `--radius-pill` `+` button | `#50`, `#52` (UI), `M3` (tag editing) | Matches image |
-| 35 | Inspector `AUDIO TRAITS` section (5 trait bars) | `x = 1180..1568, y = 332..422` | `MonoLabel.svelte` + `TraitBar.svelte` | Header at `y = 332..340` (`11 px` mono + `ⓘ`). 5 rows (`y = 350, 367, 383, 400, 416`, `17 px` pitch): `12 px` `Inter` label (`x = 1180`), `12 px` mono value (`x = 1319..1339`), `218 x 5 px` bar (`x = 1351..1568`, `r = 3 px`) | `TraitBar` (`17px` pitch, `--text-sm: 12px` sans label & mono value, `218 x 5 px` track with `--radius-xs: 3px`) | `#50`, `#52` (UI), `M5`/`M6` (trait values) | Matches image |
-| 36 | Inspector `Energy` curve pill & plot (`0:00..7:02`) | `x = 1180..1569, y = 446..572` | `FilterPill.svelte` + `Waveform.svelte` (`mode="curve"`) | `Energy` pill (`x = 1180..1249, y = 446..468`, `70 x 23 px`, `r = 9999 px`, `#f2f1ef` fill); `Tension` pill (`x = 1258..1325`); plot (`x = 1185..1569, y = 486..552`, `385 x 67 px`, baseline at `y = 552`); timestamps at `y = 565..572` (`11 px` mono) | Active `FilterPill` (`Energy`); `Waveform mode="curve"` (`385 x 67 px`, flat `1px` monochrome bars/line, no gradient fill); `--text-xs: 11px` mono timestamps | `#52` (UI), `M5` (energy curve) | `Tension` tab omitted and curve rendered as flat `1px` monochrome bars without gradient fill per Issue `#49` |
-| 37 | Inspector `TRANSITION SUGGESTIONS` section (3 rows) | `x = 1180..1568, y = 604..726` | `MonoLabel.svelte` + `Button.svelte` (`variant="icon" size="sm"`) + `DataTag.svelte` (`variant="score"`) | Header at `y = 604..611` (`11 px` mono + `ⓘ` + `View All ->`). 3 rows (`y = 626..653, 663..689, 700..726`, `28 px` tall, `37 px` pitch): `24 x 24 px` `▶` button (`r = 3 px`), `13 px` title, `11 px` mono reason, `43 x 21 px` `95%` badge (`r = 6 px`), `...` button | `MonoLabel actionLabel="View All ->"`, `24 x 24 px` `▶` button, `--text-md: 13px` title, `--text-xs: 11px` mono reason, `DataTag variant="score"` (`43 x 22 px`, `--radius-sm: 6px`) | `#52` (UI), `M6` (matches), `M10` (transition scoring) | Matches image |
-| 38 | Bottom `A -> B` transition dock header row | `x = 0..1585, y = 753..806` | `TransitionDock.svelte` header | Top `1px` border at `y = 753`, `52 px` tall header: `A -> B` (`x = 28..85`, `17 px` `Space Grotesk` 600), `Transition` + `ⓘ` (`x = 96..180`, `13 px` `Inter`), `Mix Point 4:15 (60%) v` (`x = 622..765`, `12 px`), `Blend Crossfade v` (`x = 860..985`, `12 px`) | `--dock-header-height: 52px`, `1px solid var(--color-border)`, `--font-display` 600 `--text-lg: 16px`, `--text-md: 13px`, `--text-sm: 12px` | `#51` (UI), `M10` (transition controls) | Matches image (`17 px` `A -> B` tokenised to `--text-lg: 16px`) |
-| 39 | Transition dock Deck A & Deck B cards | Deck A: `x = 20..358, y = 807..893` (`339 x 87 px`); Deck B: `x = 1228..1567, y = 807..893` (`340 x 87 px`) | `Deck.svelte` (`variant="dock" deck="A"` and `deck="B"`) | `340 x 87 px`, `r = 10 px`, fill `#141415`, `1px` border `#262628`; `A`/`B` badge (`35 x 34 px`, `r = 6 px`, `#1c1c1e`, `16 px` `Space Grotesk` 600); artwork (`60 x 60 px`, `r = 8 px`); title (`14 px` `Space Grotesk` 500); artist (`12 px` `Inter`); stats (`11 px` mono); `...` button | `--dock-card-width: 340px`, `--dock-card-height: 87px`, `--radius-lg: 10px`, `Thumb size="md"` (`--thumb-md: 60px`, `--radius-md: 8px`), badge `35 x 34 px` (`--radius-sm: 6px`) | `#51` (UI), `M7`/`M10` (live deck state) | Matches image |
-| 40 | Transition dock centre crossfade waveform | `x = 371..1214, y = 801..901` | `Waveform.svelte` (`mode="crossfade"`) | `844 x 101 px` (`13 px` gap from Deck A/B cards), `1px` vertical waveform bars, dual `1.5px` S-curve envelopes, vertical playhead at `x = 856` with top square cap | `--dock-waveform-height: 101px`, `Waveform mode="crossfade"`, `1px` bars (`--color-text` / `--color-text-2`), playhead `--color-accent` when playing | `#50`, `#51` (fixture), `M7`/`M10` (live crossfade) | Matches image |
-| 41 | Bottom player bar card | `x = 20..1567, y = 915..974` | `PlayerBar.svelte` -> `Card.svelte` (`variant="surface" radius="xl"`) | `1548 x 60 px` rounded bordered card (inset `20 px` left, `19 px` right, `17 px` bottom from `y = 992`), `r = 12 px`, fill `#141415`, `1px` border `#2b2b2b` | `--player-height: 60px`, `--player-inset-x: 20px`, `--player-inset-bottom: 17px`, `--radius-xl: 12px`, `--color-surface`, `1px solid var(--color-border)` | `#51` (UI), `M2` (preview playback), `M7` (deck output) | Matches image (inset `60 px` rounded card, not a flat full-width strip) |
-| 42 | Player bar transport, scrub bar, `A Vol`, `B Vol`, `Curve`, `EQ`, headphone cue | `x = 35..1553, y = 924..967` | `Button.svelte`, `ScrubBar.svelte` (`size="md"` & `size="sm"`), `ModularDivider.svelte` | Play circle (`44 x 44 px`, `x = 35..78`), Pause (`28 x 28 px`, `x = 104`), Time `4:15 / 7:02` (`12 px` mono, `x = 160..226`), ScrubBar (`387 x 4 px`, `12 px` thumb, `x = 269..655`), `A Vol` & `B Vol` sliders (`86 x 4 px`, `10 px` thumb), `Curve` (`63 x 26 px`, `r = 6 px`), `EQ Flat v` (`78 x 26 px`, `r = 6 px`), divider (`1 x 33 px` at `x = 1507`), Headphone (`36 x 28 px`, `r = 6 px`) | `--control-circle-lg: 44px`, `ScrubBar size="md"` (`1fr`, `387px` ref) & `size="sm"` (`86px`), `Button variant="select" size="sm"` (`26px`, `--radius-sm: 6px`), `ModularDivider` (`33px`), headphone `Button variant="icon"` | `#50`, `#51` (UI), `M2` (preview scrub/vol), `M7`/`M10` (A/B vol, curve, EQ, cue) | Matches image |
+- Measured: plain.
+- Estimated by an algorithm or model: the value with a small hollow dot. Hover shows the source, version and confidence.
+- Confirmed by the user: a small tick.
+- Low confidence: a muted value, plus a Prep item.
 
-### Part B — Additional elements from `concept are and design 2.png` (`1448 x 1086` CSS pixels)
+One component does this, `Provenance.svelte`. Every data field uses it.
 
-| # | Element | Board 2 panel & coordinates | Component & variant | Image measurement (PIL) | Spec token & value (dark / light) | Target | Difference & reason |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 43 | `[01]` Primary logo & 7-bar mark specimen | `[01]`, `x = 22..443, y = 54..392` | `Mark.svelte` (`size="lg"`), `Wordmark.svelte` (`size="lg"`) | Large 7-bar mark (`32 x 36 px`) + `RESONANCE` wordmark + `MUSIC INTELLIGENCE FOR DJS` caption | `Mark size="lg"`, `Wordmark size="lg"`, `MonoLabel` | `#50` (`/design.html`) | Matches image |
-| 44 | `[02]` Typography specimen (`Space Grotesk`, `Inter`, `JetBrains Mono`) | `[02]`, `x = 460..922, y = 54..392` | `DesignPage.svelte` typography specimen | Display `Space Grotesk`, UI Sans `Inter`, Technical Mono `JetBrains Mono` with tabular numerals | `--font-display`, `--font-sans`, `--font-mono` | `#50` (`/design.html`) | Matches image |
-| 45 | `[03]` App icon specimen | `[03]`, `x = 940..1425, y = 54..392` | `ui/src/lib/design/logo/app-icon.svg` | Rounded square dark icon tile with centered 7-bar mark | `app-icon.svg` (`#0B0B0C` tile, `#F2F1EF` bars) | `#50` | Matches image |
-| 46 | `[04]` Generative dot-wave signature element | `[04]`, `x = 22..354, y = 409..659` | `Wave.svelte` (`variant="ambient"`) | WebGL2 perspective point-sprite wave (`1.5–2.5 px` monochrome particles) | `Wave.svelte` (`< 1 ms` UI thread time per frame; static frame under `prefers-reduced-motion: reduce`) | `#50` | Matches image + reduced-motion rule |
-| 47 | `[05]` Focus brackets | `[05]`, `x = 385..539, y = 475..544` | `FocusBrackets.svelte` | `155 x 70 px` specimen framed by four `8 x 8 px` `1px` corner L-ticks | `FocusBrackets` (`8px` arm length, `1px` stroke in `--color-text` or `--color-accent`) | `#50`, `#52` (`Mix` decks & drop targets) | Matches image |
-| 48 | `[05]` Bracketed index marks (`[01]`, `[02]`, `[03]`) | `[05]`, `x = 555..690, y = 475..544` | `IndexMarks.svelte` | Two-digit zero-padded monospace numbers in square brackets (`10 px` `JetBrains Mono`) | `IndexMarks` (`--font-mono`, `--text-2xs: 10px`, `--color-muted`) | `#50` | Matches image |
-| 49 | `[05]` Technical data tags (`128.0 BPM`, `8A`, `WAV 24-bit`, `-7.4 LUFS`) | `[05]`, `x = 385..690, y = 555..599` | `DataTag.svelte` (`variant="pill"` and `variant="rect"`) | `22 px` tall bordered pills/badges (`r = 9999 px` and `r = 6 px`), `11 px` `JetBrains Mono` | `DataTag` (`--control-height-xs: 22px`, `--font-mono`, `--text-xs: 11px`) | `#50`, `#52` | Matches image |
-| 50 | `[05]` Modular dividers & grid dots | `[05]`, `x = 385..690, y = 605..650` | `ModularDivider.svelte`, `GridDots.svelte` | `1px` hairline rule with `4px` perpendicular end ticks; `1px` dot matrix (`16–24 px` pitch) | `ModularDivider` (`1px` `--color-border`), `GridDots` (`1px` `--color-border`) | `#50`, `#51`, `#52` | Matches image |
-| 51 | `[07]` Compact track card (`485 x 56 px` with `36 px` thumb) | `[07]`, `x = 35..519, y = 714..774` | `Card.svelte` (`variant="surface" radius="md"`) + `Thumb.svelte` (`size="sm"`) | `485 x 56 px` card (`r = 8 px`), `36 x 36 px` artwork thumb (`r = 6 px`), `14 px` title, `12 px` artist, mono BPM/key pill | `Card radius="md"` (`--radius-md: 8px`), `Thumb size="sm"` (`--thumb-sm: 36px`, `--radius-sm: 6px`) | `#50` (`/design.html`), `M3` (`Prep` `Inbox` staging cards) | Matches image (used in `/design.html` `#50` and `Prep` `M3`, not in `Library` table) |
-| 52 | `[07]` 4-dot stem level indicators (`DRUMS`, `BASS`, `VOCALS`, `OTHER`) | `[07]`, `x = 54..249, y = 815..839` | `LevelDots.svelte` | `11 px` mono label + four `4 px` circular dots (`2 px` gap; lit `#f2f1ef`, unlit `#242426`) | `LevelDots` (`--font-mono` `--text-xs: 11px`, four `4px` dots in `--color-text` / `--color-border`) | `#50` (`/design.html`), `M12` (deck stem controls) | Matches image |
-| 53 | `[07]` Waveform scrub bar (`260 px` wide) | `[07]`, `x = 260..519, y = 815..849` | `ScrubBar.svelte` (`size="md"`) | `260 x 4 px` horizontal track (`r = 2 px`) with `12 x 12 px` circular thumb and mono timestamp | `ScrubBar size="md"` (`4px` track, `12 x 12 px` thumb, `--color-text` fill) | `#50`, `#51` (`PlayerBar`), `#52` (`Mix`) | Matches image |
-| 54 | `[07]` Combined Key / BPM pill (`128.0 BPM · 8A`) | `[07]`, `x = 52..299, y = 905..943` | `DataTag.svelte` (`variant="pill"`) | Bordered pill combining tabular BPM and Camelot key code (`11–12 px` `JetBrains Mono`) | `DataTag variant="pill"` (`--radius-pill`, `--font-mono`, `--text-xs: 11px`) | `#50`, `#52` (`Mix` deck header) | Matches image |
-| 55 | `[07]` Segmented tabs (`All / Stems / Cues / Grid`) | `[07]`, `x = 35..519, y = 982..1020` | `SegmentedTabs.svelte` | `485 x 38 px` outer well (`r = 8 px`, `#1c1c1e`, `1px` border `#242426`), `32 px` active tab pill (`r = 6 px`, `#252527`, `1px` border `#6e6d6a`, `12 px` `Inter` 500) | `SegmentedTabs` (`--control-height-nav: 38px`, `--radius-md: 8px`, active segment `32px` `--radius-sm: 6px`) | `#50` (`/design.html`), `M3`/`M4` (`Prep` sub-views) | Matches image |
-| 56 | `[08]` Colour palette swatches (`#0B0B0C`, `#141415`, `#1C1C1E`, `#242426`, `#F2F1EF`, `#9A9892`, `#5C5B57`, `#E4553D`, `#F4F3F1`) | `[08]`, `x = 551..922, y = 673..1064` | `ui/src/lib/design/tokens.css` | Nine hex swatches for dark and light modes | `tokens.css` `light-dark()` tokens (`--color-muted: #8C8C8C` dark / `#6C6965` light; `--color-border-control: #6E6E71` dark / `#8A8681` light; `--color-accent: #E4553D` dark / `#D94F3B` light) | `#50` | Muted text, control border and light accent tuned in `tokens.css` so every text pair passes WCAG AA `>= 4.5:1` and every control mark passes `>= 3:1` ([contrast.md](contrast.md)) |
-| 57 | `[09]` Light mode variant (`#F4F3F1` stone canvas, `#FAF9F7` surface, `#141413` ink) | `[09]`, `x = 940..1425, y = 673..1064` | `:root[data-theme='light']` across all components | Warm stone card (`#f0edeb` / `#f4f3f1`), `#faf9f7` surface, `#141413` text, `#dcdad6` `1px` borders, dark ink dot-wave and waveform bars | `:root[data-theme='light']` in `tokens.css` | `#50`, `#51`, `#52` | Matches image |
+## Names
+
+Use plain words: Library, Prep, Sets, Mix, Replay, Activity, Settings, Collections, Coach, Replace, Organise, Identify.
+
+Prep replaces the brief's Inbox and Replay replaces its Review ([#49](https://github.com/BradHudsonGrant/RESONANCE/issues/49)). The boards' own navigation names, such as Discover, Transitions, Set Builder, Practice, Listen and Explore, are not used.
+
+Inbox and Review are retired as names. So are the names from the old chats: Job Orchestrator, Disk Steward, Sonic Constellations, Anchor, Catalyst, Intelligence.
+
+Interface text uses British spelling, as v3 did. Code uses whatever the language ecosystem expects.

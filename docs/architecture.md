@@ -49,7 +49,7 @@ RESONANCE/
   ui/              Svelte app
     src/lib/design/        tokens and primitives
     src/lib/components/    TrackTable, Waveform, Inspector and other domain parts
-    src/lib/spaces/        library, inbox, sets, mix, review
+    src/lib/spaces/        library, prep, sets, mix, replay
     src/lib/ipc/           generated bindings and a thin client
   tools/models/    Python scripts that export and verify ONNX models (dev only)
   mappings/        controller mapping files
