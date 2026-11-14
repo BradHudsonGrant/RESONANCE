@@ -52,15 +52,15 @@ Docs:
 Measure and release:
 
 - [x] `resonance bench` and the first budget measurements ([#19](https://github.com/BradHudsonGrant/RESONANCE/issues/19)). Evidence: merged in [#56](https://github.com/BradHudsonGrant/RESONANCE/pull/56); `just bench` measured every budget on 13 November 2026 and wrote [benchmarks/budgets-v0.1.0.md](benchmarks/budgets-v0.1.0.md). Cold start (0.41 s), idle memory (101 MB) and the wave (0.2 ms) are met. The table, the Mix view and audio stay open in [#40](https://github.com/BradHudsonGrant/RESONANCE/issues/40), [#46](https://github.com/BradHudsonGrant/RESONANCE/issues/46) and [#47](https://github.com/BradHudsonGrant/RESONANCE/issues/47), and the UI thread at startup (22.0 ms) in [#55](https://github.com/BradHudsonGrant/RESONANCE/issues/55).
-- [ ] Release v0.1.0 ([#23](https://github.com/BradHudsonGrant/RESONANCE/issues/23))
+- [x] Release v0.1.0 ([#23](https://github.com/BradHudsonGrant/RESONANCE/issues/23)). Evidence: merged in [#59](https://github.com/BradHudsonGrant/RESONANCE/pull/59) and [#60](https://github.com/BradHudsonGrant/RESONANCE/pull/60); [`v0.1.0`](https://github.com/BradHudsonGrant/RESONANCE/releases/tag/v0.1.0) is tagged on `master` and published as a pre-release with `Resonance_0.1.0_x64-setup.exe` (3.76 MiB), and the installed build passed the smoke test ([benchmarks/native-shell.md](benchmarks/native-shell.md)).
 
 Accept:
 
 - [x] Every budget that can be measured at this stage has a number recorded in `docs/benchmarks/`. Evidence: [benchmarks/budgets-v0.1.0.md](benchmarks/budgets-v0.1.0.md) has a number for seven of the eight budgets and lists text search as not measurable until M2.
-- [ ] The Mix spike meets its budget.
+- [ ] The Mix spike meets its budget. Carried over to [#46](https://github.com/BradHudsonGrant/RESONANCE/issues/46) (Mix view frame rate on large canvases, M1) and [#47](https://github.com/BradHudsonGrant/RESONANCE/issues/47) (256-sample audio buffer, M2), alongside the table scroll frame budget ([#40](https://github.com/BradHudsonGrant/RESONANCE/issues/40)) and startup UI-thread task ([#55](https://github.com/BradHudsonGrant/RESONANCE/issues/55)).
 - [x] A UI change shows up in the browser without a Rust build. Evidence: on 13 November 2026, with `just ui` and `just serve` running, an edit to `App.svelte` showed in the open page without a reload, and `just serve` built nothing.
-- [ ] A tagged build installs and runs on the laptop, scans the fixture folder and shows the tracks.
-- [ ] The release page exists with an installer.
+- [x] A tagged build installs and runs on the laptop, scans the fixture folder and shows the tracks. Evidence: `Resonance_0.1.0_x64-setup.exe` from the [`v0.1.0`](https://github.com/BradHudsonGrant/RESONANCE/releases/tag/v0.1.0) release installed to `%LOCALAPPDATA%\Resonance\resonance-app.exe`, scanned `fixtures-local` (50 tracks) through the scan form, and kept all 50 tracks after closing and reopening ([benchmarks/native-shell.md](benchmarks/native-shell.md)).
+- [x] The release page exists with an installer. Evidence: [`v0.1.0`](https://github.com/BradHudsonGrant/RESONANCE/releases/tag/v0.1.0) is published with `Resonance_0.1.0_x64-setup.exe` (3.76 MiB) attached.
 
 ## M1 Design, v0.2.0
 
