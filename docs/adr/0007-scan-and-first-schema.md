@@ -25,11 +25,11 @@ Relative paths mean that moving a whole library to another drive changes one `so
 
 Three layers of tags are coming: what is in the file, what providers proposed, and what the user set. A row per field keeps each field's origin apart and lets a view pick the effective value. A wide table would need a column per field per layer.
 
-A file that will not parse is still on disk in the user's folder. Listing it gives the integrity checks in M3 a row to report against, and stops the scan reading it again on every run.
+A file that will not parse is still on disk in the user's folder. Listing it gives the integrity checks in M4 a row to report against, and stops the scan reading it again on every run.
 
 Opening files for reading only makes "never writes" a property of the handle, where care in the code could slip. A test also compares every byte and modified time before and after a scan.
 
-The rule for the app's own folder uses where the program runs from and where its data is. It needs no setting and no path compiled in, and it covers both a checkout inside the music folder and a portable install there. Its cost is an app installed two or more folders deep: the top folder it sits in is skipped, along with any music beside it. The editable ignore list in M1 is the way out of that.
+The rule for the app's own folder uses where the program runs from and where its data is. It needs no setting and no path compiled in, and it covers both a checkout inside the music folder and a portable install there. Its cost is an app installed two or more folders deep: the top folder it sits in is skipped, along with any music beside it. The editable ignore list in M2 is the way out of that.
 
 On Windows the canonical form of a path is the only one that opens a folder whose name ends in a space or a dot. The real library has one.
 
@@ -41,8 +41,8 @@ The dependencies were checked on the day: `rusqlite` 0.42.0 (MIT), `lofty` 0.25.
 
 - Tags inside a stray ID3 block are not read. Only the MP4's own tags are.
 - A decoder needs the same step over the ID3 block, because offsets inside the MP4 count from where the MP4 starts.
-- A deleted file is not noticed yet. M1 flags missing files.
-- A scan writes everything in one transaction at the end. M1 moves scanning onto the job queue and writes in batches, so a long scan shows progress and survives being stopped.
+- A deleted file is not noticed yet. M2 flags missing files.
+- A scan writes everything in one transaction at the end. M2 moves scanning onto the job queue and writes in batches, so a long scan shows progress and survives being stopped.
 - A field holds one value. Several artists in one file come through as the first.
 
 ## What would change it

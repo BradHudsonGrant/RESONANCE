@@ -24,8 +24,8 @@ In-process calls keep tensors on the GPU between steps and avoid a second proces
 ## What follows from it
 
 - On the RTX card, go for the fastest path that stays correct: TensorRT with cached engines, half precision where a parity test shows no loss, I/O binding, batched windows. Benchmark each against plain CUDA and keep what measurably wins.
-- The laptop has the NVIDIA driver (621.14) and no CUDA toolkit or cuDNN. The CUDA and TensorRT providers need those libraries beside the app, and they are large downloads. M4 starts by working out the download size before fetching anything.
-- The old app ran Beat This! through the `beat-this` crate on the pure-Rust `rten` runtime, with no system dependencies. Its database holds per-beat grids for 431 tracks made that way, so that path works on this machine. Keep it in mind as the CPU path for beat tracking if ONNX Runtime's CPU provider turns out slower or heavier to ship. Measure both in M4.
+- The laptop has the NVIDIA driver (621.14) and no CUDA toolkit or cuDNN. The CUDA and TensorRT providers need those libraries beside the app, and they are large downloads. M5 starts by working out the download size before fetching anything.
+- The old app ran Beat This! through the `beat-this` crate on the pure-Rust `rten` runtime, with no system dependencies. Its database holds per-beat grids for 431 tracks made that way, so that path works on this machine. Keep it in mind as the CPU path for beat tracking if ONNX Runtime's CPU provider turns out slower or heavier to ship. Measure both in M5.
 - One heavy GPU job runs at a time. It yields to anything the user is waiting on and backs off while Mix is live.
 - Accuracy is reported with numbers, on the real library and on public datasets, with the hardware recorded.
 
@@ -33,4 +33,4 @@ In-process calls keep tensors on the GPU between steps and avoid a second proces
 
 If a model a milestone depends on can't be exported after a two-day spike, it runs in an optional Python worker behind the same analyser trait. That needs its own ADR, and the default install stays free of Python.
 
-If `ort` 2.0 has not reached a stable release by M4, or an update breaks the pinned API, weigh `rten` for the models it can run.
+If `ort` 2.0 has not reached a stable release by M5, or an update breaks the pinned API, weigh `rten` for the models it can run.
