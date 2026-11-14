@@ -14,12 +14,13 @@
 <style>
   .page {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(520px, 100%), 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(var(--sheet-max-width), 100%), 1fr));
     min-height: 100%;
   }
 
   .theme {
     padding: var(--space-6);
+    border-right: var(--border-width) solid var(--color-border);
     background: var(--color-background);
     color: var(--color-text);
   }

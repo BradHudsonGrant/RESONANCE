@@ -51,7 +51,7 @@ export interface Pair {
   atLeast: number;
 }
 
-/** Every pair the interface draws: each foreground on each background, and text on the accent. */
+/** Every pair the interface draws: each foreground on each background, inverted pills, and text on the accent. */
 export function pairs(palette: Palette): Pair[] {
   const tone = (name: string, theme: keyof Tone) => {
     const found = palette[name];
@@ -66,8 +66,27 @@ export function pairs(palette: Palette): Pair[] {
         all.push({ theme, foreground: name, background, ratio, atLeast });
       }
     }
-    const ratio = contrastRatio(tone('on-accent', theme), tone('accent', theme));
-    all.push({ theme, foreground: 'on-accent', background: 'accent', ratio, atLeast: 4.5 });
+    all.push({
+      theme,
+      foreground: 'on-accent',
+      background: 'accent',
+      ratio: contrastRatio(tone('on-accent', theme), tone('accent', theme)),
+      atLeast: 4.5,
+    });
+    all.push({
+      theme,
+      foreground: 'background',
+      background: 'text',
+      ratio: contrastRatio(tone('background', theme), tone('text', theme)),
+      atLeast: 4.5,
+    });
+    all.push({
+      theme,
+      foreground: 'surface',
+      background: 'text',
+      ratio: contrastRatio(tone('surface', theme), tone('text', theme)),
+      atLeast: 4.5,
+    });
   }
   return all;
 }
@@ -88,7 +107,19 @@ export function contrastTable(palette: Palette): string {
       lines.push(`| ${name} | ${ratios.join(' | ')} | ${atLeast} |`);
     }
     const onAccent = inTheme.find((pair) => pair.foreground === 'on-accent');
-    lines.push('', `on-accent on accent: ${onAccent?.ratio.toFixed(2)}, needs 4.5.`, '');
+    const bgOnText = inTheme.find(
+      (pair) => pair.foreground === 'background' && pair.background === 'text',
+    );
+    const surfaceOnText = inTheme.find(
+      (pair) => pair.foreground === 'surface' && pair.background === 'text',
+    );
+    lines.push(
+      '',
+      `on-accent on accent: ${onAccent?.ratio.toFixed(2)}, needs 4.5.`,
+      `background on text: ${bgOnText?.ratio.toFixed(2)}, needs 4.5.`,
+      `surface on text: ${surfaceOnText?.ratio.toFixed(2)}, needs 4.5.`,
+      '',
+    );
   }
   return lines.join('\n').trimEnd();
 }
