@@ -9,9 +9,10 @@ const SILENCE = 0.03;
 const IDLE_FLOW_RATE = 0.035;
 const IDLE_RIPPLE_RATE = 0.03;
 
-export type Density = 'low' | 'medium' | 'high';
+export type Density = 'thumb' | 'low' | 'medium' | 'high';
 
 export const DENSITY: Record<Density, readonly [columns: number, rows: number]> = {
+  thumb: [38, 16],
   low: [170, 68],
   medium: [260, 104],
   high: [360, 144],

@@ -20,10 +20,7 @@
     --dot-step: var(--grid-dots-sm);
     position: relative;
     min-height: var(--control-circle-lg);
-    padding: var(--space-4);
-    border: var(--border-width) solid var(--color-border);
-    border-radius: var(--radius-md);
-    background-color: var(--color-background);
+    padding: var(--space-3);
     background-image: radial-gradient(
       circle,
       var(--color-border) var(--border-width),

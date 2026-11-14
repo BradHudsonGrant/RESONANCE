@@ -207,9 +207,9 @@ let sharedCanvas: HTMLCanvasElement | null = null;
 let sharedRenderer: WaveRenderer | null | undefined;
 const thumbSettings: WaveSettings = {
   ...presetSettings('still'),
-  density: 'low',
-  zoom: 1.15,
-  pointSize: 1.15,
+  density: 'thumb',
+  zoom: 1.05,
+  pointSize: 0.7,
 };
 
 function smoothstep(edge0: number, edge1: number, x: number): number {
@@ -258,8 +258,8 @@ function drawCanvas2dFallback(
   ctx.fillStyle = `rgb(${bgR} ${bgG} ${bgB})`;
   ctx.fillRect(0, 0, width, height);
 
-  const columns = 52;
-  const rows = 24;
+  const columns = 38;
+  const rows = 16;
   const c = Math.cos(settings.elevation);
   const s = Math.sin(settings.elevation);
   const fit = Math.min(1, aspect / 1.9);

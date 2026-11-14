@@ -34,7 +34,8 @@
   const motion = new WaveMotion(presetSettings('balanced'));
 
   $effect(() => {
-    motion.settings = presetSettings(reducedMotion.matches || paused ? 'still' : preset);
+    const base = presetSettings(reducedMotion.matches || paused ? 'still' : preset);
+    motion.settings = variant === 'sidebar' ? { ...base, density: 'thumb', pointSize: 0.75 } : base;
   });
 
   /** The rgb() a colour token resolves to on this element, as 0 to 1 channels. */
@@ -110,7 +111,9 @@
       drawOnce();
     };
     const onReducedMotion = () => {
-      motion.settings = presetSettings(reducedMotion.matches || paused ? 'still' : preset);
+      const base = presetSettings(reducedMotion.matches || paused ? 'still' : preset);
+      motion.settings =
+        variant === 'sidebar' ? { ...base, density: 'thumb', pointSize: 0.75 } : base;
       drawOnce();
     };
 

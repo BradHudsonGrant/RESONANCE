@@ -118,7 +118,7 @@
 
   .selected {
     border-color: var(--color-border-control);
-    box-shadow: inset var(--selection-bar-width) 0 0 var(--color-accent);
+    background: var(--color-raised);
   }
 
   .card:disabled {

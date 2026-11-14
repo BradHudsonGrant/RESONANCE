@@ -5,14 +5,13 @@
     label: string;
     variant?: 'pill' | 'rect' | 'removable' | 'score' | 'keybadge';
     leadingIcon?: IconName;
-    accent?: boolean;
     onRemove?: () => void;
   }
 
-  let { label, variant = 'pill', leadingIcon, accent = false, onRemove }: Props = $props();
+  let { label, variant = 'pill', leadingIcon, onRemove }: Props = $props();
 </script>
 
-<span class={['tag', variant, { accent }]}>
+<span class={['tag', variant]}>
   {#if leadingIcon}
     <Icon name={leadingIcon} size="xs" />
   {/if}
@@ -67,10 +66,6 @@
     padding: 0 var(--space-2);
     border-radius: var(--radius-sm);
     color: var(--color-text-2);
-  }
-
-  .accent {
-    border-color: var(--color-accent);
   }
 
   .remove {

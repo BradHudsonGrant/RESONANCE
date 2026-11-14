@@ -30,8 +30,6 @@
     align-items: center;
     height: var(--row-height);
     border-bottom: var(--border-width) solid var(--color-border);
-    /* Marks the selected row without moving its cells. */
-    border-left: var(--selection-bar-width) solid transparent;
   }
 
   .header {
@@ -44,7 +42,6 @@
 
   .selected,
   .selected:not(.header):not(.disabled):hover {
-    border-left-color: var(--color-accent);
     border-radius: var(--radius-sm);
     background: var(--color-raised);
     outline: var(--border-width) solid var(--color-border-control);

@@ -140,20 +140,30 @@
       actionLabel="Reset"
     />
 
-    <div class="line">
-      <IndexMarks index={1} />
-      <IndexMarks index={2} />
-      <IndexMarks index={3} />
-      <MonoLabel text="BPM" size="xs" tone="muted" />
-      <MonoLabel text="KEY" size="xs" tone="secondary" />
-      <MonoLabel text="LIVE" size="2xs" tone="primary" />
+    <div class="meta-grid">
+      <div class="meta-cell">
+        <MonoLabel text="BPM" size="xs" tone="muted" />
+        <span class="numeric">128.0</span>
+      </div>
+      <div class="meta-cell">
+        <MonoLabel text="KEY" size="xs" tone="muted" />
+        <span class="numeric">8A</span>
+      </div>
+      <div class="meta-cell">
+        <MonoLabel text="TIME" size="xs" tone="muted" />
+        <span class="numeric">07:02</span>
+      </div>
+      <div class="meta-cell">
+        <IndexMarks index={1} />
+        <span class="numeric">2026</span>
+      </div>
     </div>
 
     <div class="line">
       <DataTag label="Analysed" variant="pill" leadingIcon="check" />
       <DataTag label="128.0 BPM · 8A" variant="pill" />
       <DataTag label="WAV 24-bit" variant="rect" />
-      <DataTag label="-7.4 LUFS" variant="rect" accent />
+      <DataTag label="-7.4 LUFS" variant="rect" />
       <DataTag label="95%" variant="score" />
       <DataTag label="Ctrl K" variant="keybadge" />
     </div>
@@ -164,22 +174,12 @@
       {/each}
     </div>
 
-    <div class="brackets-grid">
-      <FocusBrackets active>
-        <MonoLabel text="Deck A · Echo Chamber" tone="primary" />
-      </FocusBrackets>
-      <FocusBrackets accent>
-        <MonoLabel text="Drop folder to scan" tone="primary" />
-      </FocusBrackets>
-      <FocusBrackets active={false}>
-        <MonoLabel text="Deck B · Empty" tone="muted" />
-      </FocusBrackets>
-    </div>
-
-    <ModularDivider ticks label="ACTIVE SET" />
+    <ModularDivider />
 
     <GridDots spacing={16}>
-      <MonoLabel text="Fri 23:00 · Warehouse" tone="secondary" />
+      <FocusBrackets active>
+        <span class="secondary">Drop folder to scan</span>
+      </FocusBrackets>
     </GridDots>
   </section>
 
@@ -518,7 +518,17 @@
     gap: var(--space-2);
   }
 
-  .brackets-grid,
+  .meta-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+
+  .meta-cell {
+    display: grid;
+    gap: var(--space-0-5);
+  }
+
   .cards-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(var(--card-wave-width), 1fr));
