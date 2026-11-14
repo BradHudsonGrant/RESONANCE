@@ -19,17 +19,24 @@
   .cell {
     overflow: hidden;
     padding: 0 var(--space-2);
+    font-family: var(--font-sans);
+    font-size: var(--text-md);
+    line-height: var(--leading-normal);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .numeric {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
     text-align: right;
   }
 
   .header {
     color: var(--color-text-2);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
-    font-weight: 500;
+    font-weight: var(--weight-medium);
+    line-height: var(--leading-compact);
   }
 </style>

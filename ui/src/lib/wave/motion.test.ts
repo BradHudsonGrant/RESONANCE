@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { type Listening, presetSettings, WaveMotion } from './motion';
+import { type Listening, presetSettings, trackSurface, WaveMotion } from './motion';
 
 const music: Listening = {
   low: 0.6,
@@ -83,5 +83,17 @@ describe('WaveMotion', () => {
 
     expect(Math.abs(firstStep - 0.6)).toBeLessThan(0.01);
     expect(motion.surface.ridge).toBeCloseTo(0.78, 2);
+  });
+});
+
+describe('trackSurface', () => {
+  it('returns the exact same surface for the same track seed and band energy', () => {
+    const first = trackSurface(42, { low: 0.8, mid: 0.5, high: 0.3, tone: 0.6, spread: 0.25 });
+    const second = trackSurface(42, { low: 0.8, mid: 0.5, high: 0.3, tone: 0.6, spread: 0.25 });
+    const other = trackSurface(99);
+
+    expect(first).toEqual(second);
+    expect(first.flow).not.toBe(other.flow);
+    expect(first.gain[0]).toBeGreaterThan(trackSurface(42, { low: 0.1 }).gain[0]);
   });
 });

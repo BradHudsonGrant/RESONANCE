@@ -13,7 +13,7 @@ body {
 body {
   background: var(--color-background);
   color: var(--color-text);
-  font: 400 var(--text-md) / 1.4 var(--font-ui);
+  font: var(--weight-regular) var(--text-md) / var(--leading-normal) var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -21,13 +21,13 @@ h1,
 h2,
 h3 {
   margin: 0;
-  font-family: var(--font-heading);
-  font-weight: 500;
+  font-family: var(--font-display);
+  font-weight: var(--weight-medium);
 }
 
 :focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
+  outline: var(--focus-ring-width) solid var(--color-border-control);
+  outline-offset: var(--focus-ring-offset);
 }
 
 /* BPM, time, key and every other number: fixed-width digits so columns line up. */

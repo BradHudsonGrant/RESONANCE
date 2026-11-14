@@ -8,15 +8,15 @@ In the dev page's console, `await measureWave()` draws the wave on a 960 by 240 
 
 ## 13 November 2026
 
-Machine: ROG Zephyrus G16, Core Ultra 9 285H, 64 GB RAM, Windows 11 Pro. Chromium 156 in a desktop browser pane, device pixel ratio 1.25, medium density (27,040 points).
+Machine: ROG Zephyrus G16, Core Ultra 9 285H, 64 GB RAM, Windows 11 Pro. Edge 157 (Chromium 157), device pixel ratio 1.25, medium density (27,040 points).
 
 | Run | Median | 99th percentile | Longest |
 | --- | --- | --- | --- |
-| 1 | 0.0 ms | 0.3 ms | 0.3 ms |
-| 2 | 0.0 ms | 0.3 ms | 0.4 ms |
-| 3 | 0.0 ms | 0.3 ms | 0.4 ms |
-| 4 | 0.0 ms | 0.3 ms | 0.3 ms |
-| 5 | 0.0 ms | 0.2 ms | 0.3 ms |
+| 1 | 0.0 ms | 0.2 ms | 0.4 ms |
+| 2 | 0.0 ms | 0.1 ms | 0.3 ms |
+| 3 | 0.0 ms | 0.2 ms | 0.3 ms |
+| 4 | 0.0 ms | 0.2 ms | 0.3 ms |
+| 5 | 0.0 ms | 0.1 ms | 0.2 ms |
 
 The page's timer reads in steps of 0.1 ms, so a median of 0.0 means under 0.1 ms. The longest frame in 3,000 was 0.4 ms, inside the budget.
 

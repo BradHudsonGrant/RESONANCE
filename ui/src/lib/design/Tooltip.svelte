@@ -50,17 +50,18 @@
     display: flex;
     gap: var(--space-2);
     padding: var(--space-1) var(--space-2);
-    border: 1px solid var(--color-border-control);
-    border-radius: var(--radius-control);
+    border: var(--border-width) solid var(--color-border-control);
+    border-radius: var(--radius-sm);
     background: var(--color-raised);
     color: var(--color-text);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
-    font-weight: 400;
+    font-weight: var(--weight-regular);
     white-space: nowrap;
     visibility: hidden;
     opacity: 0;
     transform: translateX(-50%);
-    transition: opacity var(--motion-fast) var(--ease-out);
+    transition: opacity var(--duration-fast) var(--ease-out);
     pointer-events: none;
   }
 

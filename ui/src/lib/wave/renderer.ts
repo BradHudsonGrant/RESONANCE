@@ -1,4 +1,12 @@
-import { DENSITY, type Density, type Surface, type WaveSettings } from './motion';
+import {
+  DENSITY,
+  type Density,
+  presetSettings,
+  type Surface,
+  type TrackBands,
+  trackSurface,
+  type WaveSettings,
+} from './motion';
 
 // The surface and camera maths from the reference page, unchanged.
 const VERTEX = `#version 300 es
@@ -83,7 +91,7 @@ const UNIFORMS = [
   'uColor',
 ] as const;
 
-type Rgb = [number, number, number];
+export type Rgb = [number, number, number];
 type Locations = Record<(typeof UNIFORMS)[number], WebGLUniformLocation | null>;
 
 /** Draws the surface as points in one draw call. */
@@ -181,4 +189,209 @@ export class WaveRenderer {
   release() {
     this.#gl.getExtension('WEBGL_lose_context')?.loseContext();
   }
+}
+
+export interface WaveThumbOptions {
+  seed: number;
+  bands?: TrackBands;
+  width: number;
+  height: number;
+  dpr: number;
+  background: Rgb;
+  foreground: Rgb;
+}
+
+const MAX_CACHED_THUMBS = 256;
+const thumbCache = new Map<string, HTMLCanvasElement>();
+let sharedCanvas: HTMLCanvasElement | null = null;
+let sharedRenderer: WaveRenderer | null | undefined;
+const thumbSettings: WaveSettings = {
+  ...presetSettings('still'),
+  density: 'thumb',
+  zoom: 1.05,
+  pointSize: 0.7,
+};
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+function hash2d(x: number, y: number): number {
+  const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+function noise2d(x: number, y: number): number {
+  const gridX = Math.floor(x);
+  const gridY = Math.floor(y);
+  const fx = x - gridX;
+  const fy = y - gridY;
+  const ux = fx * fx * (3 - 2 * fx);
+  const uy = fy * fy * (3 - 2 * fy);
+  const a = hash2d(gridX, gridY) * (1 - ux) + hash2d(gridX + 1, gridY) * ux;
+  const b = hash2d(gridX, gridY + 1) * (1 - ux) + hash2d(gridX + 1, gridY + 1) * ux;
+  return (a * (1 - uy) + b * uy) * 2 - 1;
+}
+
+/** 2D canvas projection when WebGL2 is unavailable. */
+function drawCanvas2dFallback(
+  canvas: HTMLCanvasElement,
+  surface: Surface,
+  settings: WaveSettings,
+  dpr: number,
+  background: Rgb,
+  foreground: Rgb,
+) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const width = canvas.width;
+  const height = canvas.height;
+  const aspect = width / Math.max(1, height);
+  const bgR = Math.round(background[0] * 255);
+  const bgG = Math.round(background[1] * 255);
+  const bgB = Math.round(background[2] * 255);
+  const fgR = Math.round(foreground[0] * 255);
+  const fgG = Math.round(foreground[1] * 255);
+  const fgB = Math.round(foreground[2] * 255);
+
+  ctx.fillStyle = `rgb(${bgR} ${bgG} ${bgB})`;
+  ctx.fillRect(0, 0, width, height);
+
+  const columns = 38;
+  const rows = 16;
+  const c = Math.cos(settings.elevation);
+  const s = Math.sin(settings.elevation);
+  const fit = Math.min(1, aspect / 1.9);
+  const tau = Math.PI * 2;
+
+  for (let row = 0; row < rows; row++) {
+    const gy = row / (rows - 1);
+    const edgeY = smoothstep(0, 0.22, gy) * smoothstep(1, 0.72, gy);
+    for (let col = 0; col < columns; col++) {
+      const gx = col / (columns - 1);
+      const edge = edgeY * smoothstep(0, 0.16, gx) * smoothstep(1, 0.84, gx);
+      if (edge <= 0.01) continue;
+
+      const ridge = Math.exp(-(((gx - surface.ridge) / surface.width) ** 2));
+      const wander = noise2d(gx * 1.6 + surface.flow * 0.11, gy * 1.2 - surface.flow * 0.07);
+      const swell = Math.sin(tau * (1.3 * gx + 0.3 * gy) + surface.flow + 0.5 * wander);
+      const cross =
+        Math.sin(tau * (2.4 * gx - 1.1 * gy) - surface.flow * 1.6) *
+        Math.sin(tau * 0.75 * gy + surface.flow * 0.6);
+      const ripple = Math.sin(tau * (9 * gx + 2.5 * gy) + surface.ripple);
+      const dx = gx - surface.ridge;
+      const dy = (gy - 0.45) * 0.62;
+      const fromCrest = Math.hypot(dx, dy);
+      const ring = Math.exp(-(((fromCrest - surface.ring) / 0.06) ** 2));
+
+      const h =
+        (0.11 + 0.24 * ridge) * swell * surface.gain[0] +
+        0.075 * cross * surface.gain[1] +
+        0.01 * ripple * surface.gain[2] +
+        0.07 * ring * surface.gain[3];
+
+      const px = (gx - 0.5) * 3.5;
+      const pz = (gy - 0.5) * 2.0;
+      const screenY = h * c + pz * s;
+      const depth = 2.5 + pz * c - h * s;
+      const scale = (2 * settings.zoom * fit) / depth;
+
+      const ndcX = (px * scale) / aspect;
+      const ndcY = screenY * scale * 1.15 - 0.06;
+      const sx = (ndcX * 0.5 + 0.5) * width;
+      const sy = (0.5 - ndcY * 0.5) * height;
+      const crest = smoothstep(-0.22, 0.3, h);
+      const alpha = edge * (0.22 + 0.78 * crest);
+      const size = Math.max(1, dpr * settings.pointSize * (0.9 + 0.8 * crest) * scale);
+
+      ctx.fillStyle = `rgb(${fgR} ${fgG} ${fgB} / ${alpha.toFixed(3)})`;
+      ctx.fillRect(sx - size * 0.5, sy - size * 0.5, size, size);
+    }
+  }
+}
+
+function getSharedRenderer(): { canvas: HTMLCanvasElement; renderer: WaveRenderer } | null {
+  if (sharedRenderer === undefined) {
+    sharedCanvas = document.createElement('canvas');
+    sharedRenderer = WaveRenderer.on(sharedCanvas);
+  }
+  return sharedRenderer && sharedCanvas ? { canvas: sharedCanvas, renderer: sharedRenderer } : null;
+}
+
+export function thumbCacheKey(options: WaveThumbOptions): string {
+  const bandsKey = options.bands
+    ? [
+        options.bands.low?.toFixed(2) ?? '',
+        options.bands.mid?.toFixed(2) ?? '',
+        options.bands.high?.toFixed(2) ?? '',
+        options.bands.tone?.toFixed(2) ?? '',
+        options.bands.spread?.toFixed(2) ?? '',
+      ].join(',')
+    : '';
+  const bg = options.background.map((c) => Math.round(c * 255)).join(',');
+  const fg = options.foreground.map((c) => Math.round(c * 255)).join(',');
+  return `${options.seed}|${bandsKey}|${options.width}x${options.height}@${options.dpr}|${bg}|${fg}`;
+}
+
+/** Draws a track's dot-wave thumbnail through one shared renderer and a bitmap cache. */
+export function drawWaveThumb(target: HTMLCanvasElement, options: WaveThumbOptions): string {
+  const width = Math.max(1, Math.round(options.width));
+  const height = Math.max(1, Math.round(options.height));
+  if (target.width !== width || target.height !== height) {
+    target.width = width;
+    target.height = height;
+  }
+
+  const key = thumbCacheKey({ ...options, width, height });
+  let cached = thumbCache.get(key);
+  if (!cached) {
+    cached = document.createElement('canvas');
+    cached.width = width;
+    cached.height = height;
+    const surface = trackSurface(options.seed, options.bands);
+    const shared = getSharedRenderer();
+    const cachedCtx = cached.getContext('2d');
+    if (shared && cachedCtx) {
+      shared.renderer.background = options.background;
+      shared.renderer.foreground = options.foreground;
+      shared.renderer.resize(width, height, options.dpr);
+      shared.renderer.useDensity(thumbSettings.density);
+      shared.renderer.draw(surface, thumbSettings);
+      cachedCtx.drawImage(shared.canvas, 0, 0);
+    } else {
+      drawCanvas2dFallback(
+        cached,
+        surface,
+        thumbSettings,
+        options.dpr,
+        options.background,
+        options.foreground,
+      );
+    }
+    if (thumbCache.size >= MAX_CACHED_THUMBS) {
+      const oldest = thumbCache.keys().next().value;
+      if (oldest !== undefined) thumbCache.delete(oldest);
+    }
+    thumbCache.set(key, cached);
+  }
+
+  const ctx = target.getContext('2d');
+  if (ctx) {
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(cached, 0, 0);
+  }
+  return key;
+}
+
+export function hasCachedThumb(key: string): boolean {
+  return thumbCache.has(key);
+}
+
+export function thumbCacheSize(): number {
+  return thumbCache.size;
+}
+
+export function clearThumbCache(): void {
+  thumbCache.clear();
 }

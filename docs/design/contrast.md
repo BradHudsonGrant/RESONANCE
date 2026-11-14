@@ -38,6 +38,8 @@ Two tokens are new:
 | border-control | 3.87 | 3.62 | 3.28 | 3.01 | 3 |
 
 on-accent on accent: 5.31, needs 4.5.
+background on text: 17.43, needs 4.5.
+surface on text: 16.31, needs 4.5.
 
 ### Light
 
@@ -50,6 +52,8 @@ on-accent on accent: 5.31, needs 4.5.
 | border-control | 3.38 | 3.62 | 3.01 | 3.62 | 3 |
 
 on-accent on accent: 4.81, needs 4.5.
+background on text: 16.74, needs 4.5.
+surface on text: 17.93, needs 4.5.
 
 ## Additional pairs from the concept boards
 

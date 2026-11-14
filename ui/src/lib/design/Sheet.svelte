@@ -4,12 +4,13 @@
   interface Props {
     open?: boolean;
     title: string;
+    variant?: 'modal' | 'drawer';
     children: Snippet;
     /** The buttons that answer the sheet, on its bottom edge. */
     actions?: Snippet;
   }
 
-  let { open = $bindable(false), title, children, actions }: Props = $props();
+  let { open = $bindable(false), title, variant = 'modal', children, actions }: Props = $props();
   let dialog: HTMLDialogElement;
   const titleId = $props.id();
 
@@ -19,7 +20,12 @@
   });
 </script>
 
-<dialog bind:this={dialog} class="sheet" aria-labelledby={titleId} onclose={() => (open = false)}>
+<dialog
+  bind:this={dialog}
+  class={['sheet', variant]}
+  aria-labelledby={titleId}
+  onclose={() => (open = false)}
+>
   <h2 id={titleId} class="title">{title}</h2>
   <div class="body">{@render children()}</div>
   {#if actions}
@@ -29,13 +35,24 @@
 
 <style>
   .sheet {
-    width: min(560px, calc(100vw - var(--space-8)));
+    width: min(var(--sheet-max-width), calc(100vw - var(--space-8)));
     margin-top: 12vh;
     padding: 0;
-    border: 1px solid var(--color-border-control);
-    border-radius: var(--radius-panel);
+    border: var(--border-width) solid var(--color-border-control);
+    border-radius: var(--radius-xl);
     background: var(--color-raised);
     color: var(--color-text);
+  }
+
+  .drawer {
+    width: min(var(--sheet-drawer-width), 100vw);
+    height: 100vh;
+    max-height: 100vh;
+    margin: 0 0 0 auto;
+    border-top: 0;
+    border-right: 0;
+    border-bottom: 0;
+    border-radius: 0;
   }
 
   .sheet::backdrop {
@@ -57,6 +74,6 @@
     justify-content: flex-end;
     gap: var(--space-2);
     padding: var(--space-3) var(--space-4);
-    border-top: 1px solid var(--color-border);
+    border-top: var(--border-width) solid var(--color-border);
   }
 </style>

@@ -9,9 +9,10 @@ const SILENCE = 0.03;
 const IDLE_FLOW_RATE = 0.035;
 const IDLE_RIPPLE_RATE = 0.03;
 
-export type Density = 'low' | 'medium' | 'high';
+export type Density = 'thumb' | 'low' | 'medium' | 'high';
 
 export const DENSITY: Record<Density, readonly [columns: number, rows: number]> = {
+  thumb: [38, 16],
   low: [170, 68],
   medium: [260, 104],
   high: [360, 144],
@@ -83,6 +84,15 @@ export interface Listening {
   onBeat: boolean;
 }
 
+/** Band energy for a track's thumbnail. */
+export interface TrackBands {
+  low?: number;
+  mid?: number;
+  high?: number;
+  tone?: number;
+  spread?: number;
+}
+
 /** The uniforms one frame is drawn with. */
 export interface Surface {
   flow: number;
@@ -98,6 +108,33 @@ const approach = (current: number, target: number, seconds: number, dt: number) 
   target + (current - target) * Math.exp(-dt / seconds);
 const follow = (current: number, target: number, attack: number, release: number, dt: number) =>
   approach(current, target, target > current ? attack : release, dt);
+
+function seededUnit(seed: number, salt: number): number {
+  let state =
+    (Math.imul(Math.trunc(seed) ^ 0x9e3779b9, 0x85ebca6b) + Math.imul(salt, 0xc2b2ae35)) | 0;
+  state = Math.imul(state ^ (state >>> 16), 0x7feb352d);
+  state = Math.imul(state ^ (state >>> 15), 0x846ca68b);
+  state = state ^ (state >>> 16);
+  return (state >>> 0) / 4294967296;
+}
+
+/** Still surface from a track's seed and band energy. */
+export function trackSurface(seed: number, bands?: TrackBands): Surface {
+  const low = clamp(bands?.low ?? 0.25 + 0.65 * seededUnit(seed, 1));
+  const mid = clamp(bands?.mid ?? 0.2 + 0.65 * seededUnit(seed, 2));
+  const high = clamp(bands?.high ?? 0.15 + 0.65 * seededUnit(seed, 3));
+  const tone = clamp(bands?.tone ?? 0.25 + 0.5 * seededUnit(seed, 4));
+  const spread = clamp(bands?.spread ?? 0.16 + 0.42 * seededUnit(seed, 5));
+
+  return {
+    flow: seededUnit(seed, 6) * TAU,
+    ripple: seededUnit(seed, 7) * TAU,
+    ring: 0.22 + 0.52 * seededUnit(seed, 8),
+    ridge: 0.42 + 0.36 * clamp((tone - 0.3) / 0.4),
+    width: clamp(0.2 + 0.5 * spread, 0.18, 0.36),
+    gain: [1 + 0.85 * low, 1 + 0.75 * mid, 0.4 + 1.8 * high, 0.35 * low],
+  };
+}
 
 export class WaveMotion {
   settings: WaveSettings;
