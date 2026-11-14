@@ -90,7 +90,7 @@
       size="lg"
       leadingIcon="search"
       {shortcutBadge}
-      placeholder="Search your library, or type a command..."
+      placeholder="Type a command…"
       autocomplete="off"
       role="combobox"
       aria-expanded={open}
@@ -135,14 +135,26 @@
 
   <div class="strip">
     <div class="chips">
-      {#each slashCommands as chip (chip.command)}
+      <!-- Only the first chip takes focus, so Tab does not stop on every placeholder. -->
+      {#each slashCommands as chip, index (chip.command)}
         <Tooltip text="{chip.description} arrives in {chip.arrives}" side="below">
-          <SlashChip command={chip.command} description={chip.description} disabled />
+          <SlashChip
+            command={chip.command}
+            description={chip.description}
+            disabled
+            tabindex={index === 0 ? undefined : -1}
+          />
         </Tooltip>
       {/each}
     </div>
     <Tooltip text="More slash commands arrive in M2" side="left">
-      <Button variant="icon" size="sm" aria-label="More slash commands" aria-disabled="true">
+      <Button
+        variant="icon"
+        size="sm"
+        aria-label="More slash commands"
+        aria-disabled="true"
+        tabindex={-1}
+      >
         <Icon name="more" size="xs" />
       </Button>
     </Tooltip>
@@ -151,8 +163,8 @@
 
 <style>
   .command-bar {
-    container: command-bar / inline-size;
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--space-3);
     padding: var(--space-3) var(--space-5) var(--space-3-5);
     border-bottom: var(--border-width) solid var(--color-border);
@@ -179,7 +191,6 @@
     border: var(--border-width) solid var(--color-border-control);
     border-radius: var(--radius-lg);
     background: var(--color-raised);
-    box-shadow: var(--shadow-popover);
     list-style: none;
   }
 
@@ -218,22 +229,13 @@
     gap: var(--space-4);
   }
 
+  /* One row high: a chip that does not fit wraps onto the hidden second row. */
   .chips {
     display: flex;
-    gap: var(--space-6);
+    flex-wrap: wrap;
+    column-gap: var(--space-6);
     min-width: 0;
-  }
-
-  /* Container queries cannot read custom properties, so these widths are written out. */
-  @container command-bar (width < 760px) {
-    .chips > :global(:nth-child(4)) {
-      display: none;
-    }
-  }
-
-  @container command-bar (width < 600px) {
-    .chips > :global(:nth-child(3)) {
-      display: none;
-    }
+    height: var(--control-height-xs);
+    overflow: hidden;
   }
 </style>

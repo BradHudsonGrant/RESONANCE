@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
+  import { onThemeChange } from '../design/theme';
+
   interface Props {
     mode: 'inline' | 'crossfade' | 'deck' | 'curve';
     peaks?: Float32Array | readonly number[] | null;
@@ -202,17 +204,13 @@
 
   onMount(() => {
     mounted = true;
-    const scheme = matchMedia('(prefers-color-scheme: dark)');
-    const forced = matchMedia('(forced-colors: active)');
     const sized = new ResizeObserver(paint);
     sized.observe(stage);
-    scheme.addEventListener('change', paint);
-    forced.addEventListener('change', paint);
+    const stopThemes = onThemeChange(paint);
     paint();
     return () => {
       sized.disconnect();
-      scheme.removeEventListener('change', paint);
-      forced.removeEventListener('change', paint);
+      stopThemes();
     };
   });
 </script>

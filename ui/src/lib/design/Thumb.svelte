@@ -3,6 +3,7 @@
 
   import type { TrackBands } from '../wave/motion';
   import { drawWaveThumb, type Rgb } from '../wave/renderer';
+  import { onThemeChange } from './theme';
 
   interface Props {
     size?: 'sm' | 'md' | 'lg';
@@ -57,15 +58,9 @@
 
   onMount(() => {
     mounted = true;
-    const scheme = matchMedia('(prefers-color-scheme: dark)');
-    const forced = matchMedia('(forced-colors: active)');
-    scheme.addEventListener('change', paint);
-    forced.addEventListener('change', paint);
+    const stopThemes = onThemeChange(paint);
     paint();
-    return () => {
-      scheme.removeEventListener('change', paint);
-      forced.removeEventListener('change', paint);
-    };
+    return stopThemes;
   });
 </script>
 

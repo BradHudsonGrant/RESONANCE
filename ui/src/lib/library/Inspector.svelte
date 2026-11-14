@@ -61,11 +61,10 @@
 </script>
 
 <aside class="inspector" aria-label="Inspector">
-  <div class="top">
-    <span class="heading">Inspector</span>
+  <div class="close">
     <Tooltip text="Hide the inspector" shortcut="I" side="left">
-      <Button variant="quiet" aria-label="Hide the inspector" onclick={onclose}>
-        <Icon icon={X} />
+      <Button variant="icon" aria-label="Hide the inspector" onclick={onclose}>
+        <Icon icon={X} size="sm" />
       </Button>
     </Tooltip>
   </div>
@@ -94,27 +93,20 @@
 
 <style>
   .inspector {
+    position: relative;
     display: grid;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: minmax(0, 1fr);
     width: 100%;
+    height: 100%;
     min-height: 0;
-    border-left: 1px solid var(--color-border);
+    border-left: var(--border-width) solid var(--color-border);
     background: var(--color-surface);
   }
 
-  .top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    height: 44px;
-    padding: 0 var(--space-2) 0 var(--space-4);
-    border-bottom: 1px solid var(--color-border);
-  }
-
-  .heading {
-    color: var(--color-text-2);
-    font-size: var(--text-sm);
-    font-weight: 500;
+  .close {
+    position: absolute;
+    top: var(--space-3);
+    right: var(--space-3);
   }
 
   .body {
@@ -124,6 +116,7 @@
   }
 
   .title {
+    padding-right: var(--control-height-md);
     font-size: var(--text-lg);
     overflow-wrap: anywhere;
   }
@@ -168,7 +161,7 @@
 
   .empty {
     margin: 0;
-    padding: var(--space-4);
+    padding: var(--space-4) var(--control-height-md) var(--space-4) var(--space-4);
     color: var(--color-text-2);
   }
 </style>

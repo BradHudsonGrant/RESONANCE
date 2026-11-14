@@ -3,7 +3,7 @@ import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import App from '../../App.svelte';
-import { getTheme, setTheme } from '../design/theme';
+import { getTheme, onThemeChange, setTheme } from '../design/theme';
 import CommandBar, { type Command } from './CommandBar.svelte';
 import PlayerBar from './PlayerBar.svelte';
 import SettingsSheet from './SettingsSheet.svelte';
@@ -11,264 +11,198 @@ import Sidebar, { spaces } from './Sidebar.svelte';
 import TopBar from './TopBar.svelte';
 import TransitionDock from './TransitionDock.svelte';
 
-describe('theme store', () => {
+function tooltipTexts(): (string | null)[] {
+  return screen.getAllByRole('tooltip', { hidden: true }).map((tooltip) => tooltip.textContent);
+}
+
+describe('theme', () => {
   beforeEach(() => {
     localStorage.clear();
     delete document.documentElement.dataset.theme;
   });
 
-  it('defaults to system theme and removes data-theme attribute', () => {
-    setTheme('system');
+  it('follows the system until a theme is chosen', () => {
     expect(getTheme()).toBe('system');
     expect(document.documentElement.dataset.theme).toBeUndefined();
-    expect(localStorage.getItem('resonance-theme')).toBe('system');
   });
 
-  it('sets dark theme and writes to data-theme attribute and localStorage', () => {
-    setTheme('dark');
-    expect(getTheme()).toBe('dark');
-    expect(document.documentElement.dataset.theme).toBe('dark');
-    expect(localStorage.getItem('resonance-theme')).toBe('dark');
-  });
-
-  it('sets light theme and writes to data-theme attribute and localStorage', () => {
+  it('keeps a chosen theme and sets it on the page', () => {
     setTheme('light');
     expect(getTheme()).toBe('light');
     expect(document.documentElement.dataset.theme).toBe('light');
     expect(localStorage.getItem('resonance-theme')).toBe('light');
+
+    setTheme('system');
+    expect(getTheme()).toBe('system');
+    expect(document.documentElement.dataset.theme).toBeUndefined();
   });
 
-  it('cleans up data-theme when switching back to system', () => {
+  it('tells canvases to repaint when a theme is chosen, until they stop listening', async () => {
+    const repaint = vi.fn();
+    const stop = onThemeChange(repaint);
+
     setTheme('dark');
-    expect(document.documentElement.dataset.theme).toBe('dark');
-    setTheme('system');
-    expect(document.documentElement.dataset.theme).toBeUndefined();
+    await vi.waitFor(() => expect(repaint).toHaveBeenCalledOnce());
+
+    stop();
+    setTheme('light');
+    await new Promise((resolve) => setTimeout(resolve));
+    expect(repaint).toHaveBeenCalledOnce();
   });
 });
 
 describe('TopBar', () => {
-  it('renders wordmark and utility controls', () => {
-    const onsettings = vi.fn();
-    render(TopBar, { onsettings });
-
-    expect(screen.getByLabelText('Resonance')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Audio engine status' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Activity' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Settings' })).toBeTruthy();
-  });
-
-  it('marks Audio and Activity buttons as disabled with milestone tooltips', () => {
+  it('has Settings, and names the milestone of each tool still to come', () => {
     render(TopBar, { onsettings: vi.fn() });
 
-    const audioBtn = screen.getByRole('button', { name: 'Audio engine status' });
-    expect(audioBtn.getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByLabelText('Resonance')).toBeTruthy();
+    const audio = screen.getByRole('button', { name: 'Audio engine status' });
+    const activity = screen.getByRole('button', { name: 'Activity' });
+    expect(audio.getAttribute('aria-disabled')).toBe('true');
+    expect(activity.getAttribute('aria-disabled')).toBe('true');
+    expect(activity.tabIndex).toBe(-1);
 
-    const activityBtn = screen.getByRole('button', { name: 'Activity' });
-    expect(activityBtn.getAttribute('aria-disabled')).toBe('true');
-
-    const tooltips = screen.getAllByRole('tooltip', { hidden: true });
-    expect(tooltips.some((t) => t.textContent?.includes('Audio engine status arrives in M7'))).toBe(
-      true,
-    );
-    expect(tooltips.some((t) => t.textContent?.includes('Activity arrives in M2'))).toBe(true);
+    const tooltips = tooltipTexts();
+    expect(tooltips.some((text) => text?.includes('Audio engine status arrives in M7'))).toBe(true);
+    expect(tooltips.some((text) => text?.includes('Activity arrives in M2'))).toBe(true);
   });
 
-  it('triggers onsettings when settings button is clicked', async () => {
+  it('opens Settings', async () => {
     const onsettings = vi.fn();
     render(TopBar, { onsettings });
 
-    const settingsBtn = screen.getByRole('button', { name: 'Settings' });
-    await fireEvent.click(settingsBtn);
-
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     expect(onsettings).toHaveBeenCalledOnce();
   });
 });
 
 describe('Sidebar', () => {
-  it('renders all five spaces in order with primary active space', () => {
-    render(Sidebar, {
-      activeSpace: 'Library',
-      collapsed: false,
-      trackCount: 12846,
-      onSelectSpace: vi.fn(),
-      onToggleCollapse: vi.fn(),
-    });
+  const props = {
+    activeSpace: 'Library' as const,
+    trackCount: 12846,
+    onSelectSpace: vi.fn(),
+    onCollapse: vi.fn(),
+  };
 
-    const spaceNames = spaces.map((s) => s.name);
-    expect(spaceNames).toEqual(['Library', 'Prep', 'Sets', 'Mix', 'Replay']);
+  it('lists the five spaces in order, with the active one current', () => {
+    render(Sidebar, props);
 
-    const libraryBtn = screen.getByRole('button', { name: 'Library' });
-    expect(libraryBtn.getAttribute('aria-current')).toBe('page');
+    expect(spaces.map((space) => space.name)).toEqual(['Library', 'Prep', 'Sets', 'Mix', 'Replay']);
+    expect(screen.getByRole('button', { name: 'Library' }).getAttribute('aria-current')).toBe(
+      'page',
+    );
     expect(screen.getByText('12,846')).toBeTruthy();
   });
 
-  it('disables unimplemented spaces with milestone arrival tooltips', async () => {
+  it('names the milestone of each space still to come, and does not open it', async () => {
     const onSelectSpace = vi.fn();
-    render(Sidebar, {
-      activeSpace: 'Library',
-      collapsed: false,
-      trackCount: 100,
-      onSelectSpace,
-      onToggleCollapse: vi.fn(),
-    });
+    render(Sidebar, { ...props, onSelectSpace });
 
-    const prepBtn = screen.getByRole('button', { name: 'Prep' });
-    const setsBtn = screen.getByRole('button', { name: 'Sets' });
-    const replayBtn = screen.getByRole('button', { name: 'Replay' });
-
-    expect(prepBtn.getAttribute('aria-disabled')).toBe('true');
-    expect(setsBtn.getAttribute('aria-disabled')).toBe('true');
-    expect(replayBtn.getAttribute('aria-disabled')).toBe('true');
-
-    await fireEvent.click(prepBtn);
+    for (const name of ['Prep', 'Sets', 'Replay']) {
+      expect(screen.getByRole('button', { name }).getAttribute('aria-disabled')).toBe('true');
+    }
+    await fireEvent.click(screen.getByRole('button', { name: 'Prep' }));
     expect(onSelectSpace).not.toHaveBeenCalled();
 
-    const tooltips = screen.getAllByRole('tooltip', { hidden: true });
-    expect(tooltips.some((t) => t.textContent?.includes('Prep arrives in M3'))).toBe(true);
-    expect(tooltips.some((t) => t.textContent?.includes('Sets arrives in M10'))).toBe(true);
-    expect(tooltips.some((t) => t.textContent?.includes('Replay arrives in M9'))).toBe(true);
+    const tooltips = tooltipTexts();
+    expect(tooltips.some((text) => text?.includes('Prep arrives in M3'))).toBe(true);
+    expect(tooltips.some((text) => text?.includes('Sets arrives in M10'))).toBe(true);
+    expect(tooltips.some((text) => text?.includes('Replay arrives in M9'))).toBe(true);
   });
 
-  it('navigates to enabled spaces when clicked', async () => {
+  it('keeps only the first space still to come in the Tab order', () => {
+    render(Sidebar, props);
+
+    expect(screen.getByRole('button', { name: 'Prep' }).tabIndex).toBe(0);
+    expect(screen.getByRole('button', { name: 'Sets' }).tabIndex).toBe(-1);
+    expect(screen.getByRole('button', { name: 'Replay' }).tabIndex).toBe(-1);
+    expect(screen.getByRole('button', { name: 'New collection' }).tabIndex).toBe(-1);
+  });
+
+  it('opens a space that exists', async () => {
     const onSelectSpace = vi.fn();
-    render(Sidebar, {
-      activeSpace: 'Library',
-      collapsed: false,
-      trackCount: 100,
-      onSelectSpace,
-      onToggleCollapse: vi.fn(),
-    });
+    render(Sidebar, { ...props, onSelectSpace });
 
-    const mixBtn = screen.getByRole('button', { name: 'Mix' });
-    expect(mixBtn.getAttribute('aria-disabled')).toBeNull();
-
-    await fireEvent.click(mixBtn);
+    await fireEvent.click(screen.getByRole('button', { name: 'Mix' }));
     expect(onSelectSpace).toHaveBeenCalledWith('Mix');
   });
 
-  it('renders collections sub-tree and active set placeholders when open', () => {
-    render(Sidebar, {
-      activeSpace: 'Library',
-      collapsed: false,
-      trackCount: 100,
-      onSelectSpace: vi.fn(),
-      onToggleCollapse: vi.fn(),
-    });
+  it('shows the collections and active set placeholders', () => {
+    render(Sidebar, props);
 
-    expect(screen.getByText('Collections')).toBeTruthy();
     expect(screen.getByText('None yet. Collections arrive in M2.')).toBeTruthy();
-    expect(screen.getByText('Active set')).toBeTruthy();
     expect(screen.getByText('No set yet. Sets arrive in M10.')).toBeTruthy();
   });
 
-  it('hides text, collections and active set when collapsed', () => {
-    render(Sidebar, {
-      activeSpace: 'Library',
-      collapsed: true,
-      trackCount: 100,
-      onSelectSpace: vi.fn(),
-      onToggleCollapse: vi.fn(),
-    });
+  it('asks the shell to collapse or expand it', async () => {
+    const onCollapse = vi.fn();
+    render(Sidebar, { ...props, onCollapse });
 
-    expect(screen.queryByText('Collections')).toBeNull();
-    expect(screen.queryByText('None yet. Collections arrive in M2.')).toBeNull();
-    expect(screen.queryByText('Active set')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Expand the sidebar' })).toBeTruthy();
-  });
-
-  it('triggers onToggleCollapse when collapse button is clicked', async () => {
-    const onToggleCollapse = vi.fn();
-    render(Sidebar, {
-      activeSpace: 'Library',
-      collapsed: false,
-      trackCount: 100,
-      onSelectSpace: vi.fn(),
-      onToggleCollapse,
-    });
-
-    const toggleBtn = screen.getByRole('button', { name: 'Collapse the sidebar' });
-    await fireEvent.click(toggleBtn);
-
-    expect(onToggleCollapse).toHaveBeenCalledOnce();
+    await fireEvent.click(screen.getByRole('button', { name: 'Collapse the sidebar' }));
+    expect(onCollapse).toHaveBeenLastCalledWith(true);
+    await fireEvent.click(screen.getByRole('button', { name: 'Expand the sidebar' }));
+    expect(onCollapse).toHaveBeenLastCalledWith(false);
   });
 });
 
 describe('CommandBar', () => {
-  it('renders search input with combobox role and shortcut badge', () => {
-    render(CommandBar, {
-      commands: [{ name: 'Scan a folder', run: vi.fn() }],
-      inputId: 'test-cmd-input',
-    });
+  it('asks for a command, since library search arrives in M2', () => {
+    render(CommandBar, { commands: [], inputId: 'commands' });
 
     const input = screen.getByRole('combobox', { name: 'Commands' });
-    expect(input).toBeTruthy();
-    expect(input.getAttribute('placeholder')).toContain('Search your library');
+    expect(input.getAttribute('placeholder')).toBe('Type a command…');
   });
 
-  it('renders disabled slash chips with milestone arrival tooltips', () => {
-    render(CommandBar, {
-      commands: [],
-      inputId: 'test-cmd-input',
-    });
+  it('names the milestone of each slash command, and keeps only the first in the Tab order', () => {
+    render(CommandBar, { commands: [], inputId: 'commands' });
 
-    const bpmChip = screen.getByRole('button', { name: '/ bpm 125-132 Filter by tempo' });
-    expect(bpmChip.getAttribute('aria-disabled')).toBe('true');
+    const chips = [
+      '/ bpm 125-132 Filter by tempo',
+      '/ key 8A Compatible with A minor',
+      '/ similar Find matching tracks',
+      '/ build set Generate 90m progression',
+    ].map((name) => screen.getByRole('button', { name }));
+    for (const chip of chips) expect(chip.getAttribute('aria-disabled')).toBe('true');
+    expect(chips.map((chip) => chip.tabIndex)).toEqual([0, -1, -1, -1]);
+    expect(screen.getByRole('button', { name: 'More slash commands' }).tabIndex).toBe(-1);
 
-    const keyChip = screen.getByRole('button', { name: '/ key 8A Compatible with A minor' });
-    expect(keyChip.getAttribute('aria-disabled')).toBe('true');
-
-    const similarChip = screen.getByRole('button', { name: '/ similar Find matching tracks' });
-    expect(similarChip.getAttribute('aria-disabled')).toBe('true');
-
-    const buildChip = screen.getByRole('button', { name: '/ build set Generate 90m progression' });
-    expect(buildChip.getAttribute('aria-disabled')).toBe('true');
-
-    const tooltips = screen.getAllByRole('tooltip', { hidden: true });
-    expect(tooltips.some((t) => t.textContent?.includes('arrives in M2'))).toBe(true);
-    expect(tooltips.some((t) => t.textContent?.includes('arrives in M5'))).toBe(true);
-    expect(tooltips.some((t) => t.textContent?.includes('arrives in M6'))).toBe(true);
-    expect(tooltips.some((t) => t.textContent?.includes('arrives in M10'))).toBe(true);
+    const tooltips = tooltipTexts();
+    for (const milestone of ['M2', 'M5', 'M6', 'M10']) {
+      expect(tooltips.some((text) => text?.includes(`arrives in ${milestone}`))).toBe(true);
+    }
   });
 
-  it('filters commands and executes runnable commands on selection', async () => {
-    const scanRun = vi.fn();
+  it('runs the command chosen from the list', async () => {
+    const scan = vi.fn();
     const commands: Command[] = [
-      { name: 'Scan a music folder', run: scanRun },
-      { name: 'Future AI action', arrives: 'M6' },
+      { name: 'Scan a music folder', run: scan },
+      { name: 'Find similar tracks', arrives: 'M6' },
     ];
+    render(CommandBar, { commands, inputId: 'commands' });
 
-    render(CommandBar, { commands, inputId: 'test-cmd-input' });
-
-    const input = screen.getByRole('combobox', { name: 'Commands' });
-    await fireEvent.focus(input);
-
-    const scanOption = screen.getByRole('option', { name: 'Scan a music folder' });
-    await fireEvent.mouseDown(scanOption);
-
-    expect(scanRun).toHaveBeenCalledOnce();
+    await fireEvent.focus(screen.getByRole('combobox', { name: 'Commands' }));
+    await fireEvent.mouseDown(screen.getByRole('option', { name: 'Scan a music folder' }));
+    expect(scan).toHaveBeenCalledOnce();
   });
 });
 
 describe('TransitionDock', () => {
-  it('renders header with transition pair and disabled controls', () => {
-    render(TransitionDock, { collapsed: false, ontoggle: vi.fn() });
+  it('names the milestone of each control still to come', () => {
+    render(TransitionDock, { onCollapse: vi.fn() });
 
     expect(screen.getByText('A → B')).toBeTruthy();
-    expect(screen.getByText('Transition')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Mix Point' }).getAttribute('aria-disabled')).toBe(
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Blend' }).tabIndex).toBe(-1);
 
-    const mixPoint = screen.getByRole('button', { name: 'Mix Point' });
-    expect(mixPoint.getAttribute('aria-disabled')).toBe('true');
-
-    const blend = screen.getByRole('button', { name: 'Blend' });
-    expect(blend.getAttribute('aria-disabled')).toBe('true');
-
-    const tooltips = screen.getAllByRole('tooltip', { hidden: true });
-    expect(tooltips.some((t) => t.textContent?.includes('Mix points arrive in M10'))).toBe(true);
-    expect(tooltips.some((t) => t.textContent?.includes('Blends arrive in M10'))).toBe(true);
+    const tooltips = tooltipTexts();
+    expect(tooltips.some((text) => text?.includes('Mix points arrive in M10'))).toBe(true);
+    expect(tooltips.some((text) => text?.includes('Blends arrive in M10'))).toBe(true);
   });
 
-  it('renders Deck A, Deck B and crossfade placeholder when expanded', () => {
-    render(TransitionDock, { collapsed: false, ontoggle: vi.fn() });
+  it('shows two empty decks and where their crossfade goes', () => {
+    render(TransitionDock, { onCollapse: vi.fn() });
 
     expect(screen.getByText('Deck A is empty')).toBeTruthy();
     expect(screen.getByText('Deck B is empty')).toBeTruthy();
@@ -277,183 +211,148 @@ describe('TransitionDock', () => {
     ).toBeTruthy();
   });
 
-  it('hides dock body when collapsed and expands on toggle click', async () => {
-    const ontoggle = vi.fn();
-    const { rerender } = render(TransitionDock, { collapsed: true, ontoggle });
+  it('asks the shell to collapse or expand it', async () => {
+    const onCollapse = vi.fn();
+    render(TransitionDock, { onCollapse });
 
-    expect(screen.queryByText('Deck A is empty')).toBeNull();
-    const toggleBtn = screen.getByRole('button', { name: 'Expand the dock' });
-    await fireEvent.click(toggleBtn);
-    expect(ontoggle).toHaveBeenCalledOnce();
-
-    rerender({ collapsed: false, ontoggle });
-    expect(screen.getByText('Deck A is empty')).toBeTruthy();
+    await fireEvent.click(screen.getByRole('button', { name: 'Collapse the dock' }));
+    expect(onCollapse).toHaveBeenLastCalledWith(true);
+    await fireEvent.click(screen.getByRole('button', { name: 'Expand the dock' }));
+    expect(onCollapse).toHaveBeenLastCalledWith(false);
   });
 });
 
 describe('PlayerBar', () => {
-  it('renders all player and mixer controls with milestone arrival notices', () => {
+  it('shows nothing playing, and names the milestone of every control', () => {
     render(PlayerBar);
 
-    expect(screen.getByRole('button', { name: 'Play' }).getAttribute('aria-disabled')).toBe('true');
-    expect(screen.getByRole('button', { name: 'Pause' }).getAttribute('aria-disabled')).toBe(
-      'true',
-    );
     expect(screen.getByText('Nothing playing')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Play' }).getAttribute('aria-disabled')).toBe('true');
+    for (const name of ['Pause', 'Curve', 'EQ', 'Headphone cue']) {
+      const button = screen.getByRole('button', { name });
+      expect(button.getAttribute('aria-disabled')).toBe('true');
+      expect(button.tabIndex).toBe(-1);
+    }
+    for (const name of ['Scrub', 'A Vol', 'B Vol']) {
+      expect(screen.getByRole('slider', { name }).hasAttribute('disabled')).toBe(true);
+    }
 
-    const sliders = screen.getAllByRole('slider');
-    expect(sliders).toHaveLength(3);
-    const timeline = screen.getByRole('slider', { name: 'Scrub' });
-    expect(timeline.hasAttribute('disabled')).toBe(true);
-    const volA = screen.getByRole('slider', { name: 'A Vol' });
-    expect(volA.hasAttribute('disabled')).toBe(true);
-    const volB = screen.getByRole('slider', { name: 'B Vol' });
-    expect(volB.hasAttribute('disabled')).toBe(true);
-
-    expect(screen.getByRole('button', { name: 'Curve' }).getAttribute('aria-disabled')).toBe(
-      'true',
-    );
-    expect(screen.getByRole('button', { name: 'EQ' }).getAttribute('aria-disabled')).toBe('true');
-    expect(
-      screen.getByRole('button', { name: 'Headphone cue' }).getAttribute('aria-disabled'),
-    ).toBe('true');
-
-    const tooltips = screen.getAllByRole('tooltip', { hidden: true });
-    expect(tooltips.some((t) => t.textContent?.includes('Preview playback arrives in M2'))).toBe(
-      true,
-    );
-    expect(tooltips.some((t) => t.textContent?.includes('Deck volume arrives in M7'))).toBe(true);
-    expect(
-      tooltips.some(
-        (t) =>
-          t.textContent?.includes('Crossfader curves arrives in M7') ||
-          t.textContent?.includes('Crossfader curves arrive in M7'),
-      ),
-    ).toBe(true);
-    expect(tooltips.some((t) => t.textContent?.includes('EQ arrives in M7'))).toBe(true);
-    expect(tooltips.some((t) => t.textContent?.includes('Headphone cue arrives in M7'))).toBe(true);
+    const tooltips = tooltipTexts();
+    for (const text of [
+      'Preview playback arrives in M2',
+      'Deck volume arrives in M7',
+      'Crossfader curves arrive in M7',
+      'EQ arrives in M7',
+      'Headphone cue arrives in M7',
+    ]) {
+      expect(tooltips.some((tooltip) => tooltip?.includes(text))).toBe(true);
+    }
   });
 });
 
 describe('SettingsSheet', () => {
-  it('renders theme switcher and future settings milestone placeholders', async () => {
-    render(SettingsSheet, { open: true, onclose: vi.fn() });
-
+  it('offers the three themes and names the milestone of each section still to come', () => {
+    render(SettingsSheet, { open: true });
     const dialog = screen.getByRole('dialog');
-    expect(dialog).toBeTruthy();
-    expect(within(dialog).getByText('Settings')).toBeTruthy();
 
-    expect(within(dialog).getByRole('tab', { name: 'Dark' })).toBeTruthy();
-    expect(within(dialog).getByRole('tab', { name: 'Light' })).toBeTruthy();
-    expect(within(dialog).getByRole('tab', { name: 'System' })).toBeTruthy();
-
+    for (const name of ['Dark', 'Light', 'System']) {
+      expect(within(dialog).getByRole('tab', { name })).toBeTruthy();
+    }
     expect(within(dialog).getByText('Library sources arrive in M2.')).toBeTruthy();
-    expect(within(dialog).getByText('AI provider keys arrive in M3.')).toBeTruthy();
+    expect(within(dialog).getByText('Provider keys')).toBeTruthy();
+    expect(
+      within(dialog).getByText('Keys for AcoustID, Discogs and paid recognisers arrive in M3.'),
+    ).toBeTruthy();
     expect(
       within(dialog).getByText('Audio and MIDI device configuration arrives in M7.'),
     ).toBeTruthy();
   });
 
-  it('switches themes when tab is clicked', async () => {
-    render(SettingsSheet, { open: true, onclose: vi.fn() });
-
+  it('switches the theme', async () => {
+    render(SettingsSheet, { open: true });
     const dialog = screen.getByRole('dialog');
-    const lightTab = within(dialog).getByRole('tab', { name: 'Light' });
-    await fireEvent.click(lightTab);
 
+    await fireEvent.click(within(dialog).getByRole('tab', { name: 'Light' }));
     expect(getTheme()).toBe('light');
     expect(document.documentElement.dataset.theme).toBe('light');
 
-    const darkTab = within(dialog).getByRole('tab', { name: 'Dark' });
-    await fireEvent.click(darkTab);
-
+    await fireEvent.click(within(dialog).getByRole('tab', { name: 'Dark' }));
     expect(getTheme()).toBe('dark');
     expect(document.documentElement.dataset.theme).toBe('dark');
   });
 
-  it('calls onclose when Done is clicked', async () => {
-    const onclose = vi.fn();
-    render(SettingsSheet, { open: true, onclose });
+  it('closes on Done', async () => {
+    render(SettingsSheet, { open: true });
+    const dialog = screen.getByRole('dialog') as HTMLDialogElement;
 
-    const doneBtn = screen.getByRole('button', { name: 'Done' });
-    await fireEvent.click(doneBtn);
-
-    expect(onclose).toHaveBeenCalledOnce();
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
+    expect(dialog.open).toBe(false);
   });
 });
 
-describe('App shell integration and keyboard shortcuts', () => {
-  beforeEach(() => {
-    window.innerWidth = 1586;
-    window.innerHeight = 992;
-  });
+describe('App shell', () => {
+  function shell(): HTMLElement {
+    const element = document.querySelector<HTMLElement>('.app-shell');
+    if (!element) throw new Error('the shell did not render');
+    return element;
+  }
 
-  it('renders full shell layout with all regions', () => {
+  it('renders the sidebar, command bar, dock and player', () => {
     render(App);
 
-    expect(screen.getAllByRole('banner')).toHaveLength(2); // TopBar and CommandBar
-    expect(screen.getByRole('navigation', { name: 'Spaces' })).toBeTruthy(); // Sidebar
-    expect(screen.getByRole('combobox', { name: 'Commands' })).toBeTruthy(); // CommandBar
-    expect(screen.getByRole('region', { name: 'Transition' })).toBeTruthy(); // Dock
-    expect(screen.getByRole('contentinfo', { name: 'Player' })).toBeTruthy(); // PlayerBar
+    expect(screen.getByRole('navigation', { name: 'Spaces' })).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: 'Commands' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Transition' })).toBeTruthy();
+    expect(screen.getByRole('contentinfo', { name: 'Player' })).toBeTruthy();
   });
 
-  it('auto-collapses sidebar and dock when window is smaller than breakpoints', () => {
-    window.innerWidth = 1280;
-    window.innerHeight = 720;
+  it('flips the sidebar with [ and the dock with D', async () => {
     render(App);
-
-    expect(screen.getByRole('button', { name: 'Expand the sidebar' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Expand the dock' })).toBeTruthy();
-  });
-
-  it('toggles sidebar collapse with [ key', async () => {
-    render(App);
-
-    expect(screen.getByRole('button', { name: 'Collapse the sidebar' })).toBeTruthy();
 
     await fireEvent.keyDown(window, { key: '[' });
-    expect(screen.getByRole('button', { name: 'Expand the sidebar' })).toBeTruthy();
-
+    expect(shell().dataset.sidebar).toBe('collapsed');
     await fireEvent.keyDown(window, { key: '[' });
-    expect(screen.getByRole('button', { name: 'Collapse the sidebar' })).toBeTruthy();
-  });
-
-  it('toggles dock collapse with D key', async () => {
-    render(App);
-
-    expect(screen.getByRole('button', { name: 'Collapse the dock' })).toBeTruthy();
+    expect(shell().dataset.sidebar).toBe('expanded');
 
     await fireEvent.keyDown(window, { key: 'd' });
-    expect(screen.getByRole('button', { name: 'Expand the dock' })).toBeTruthy();
-
+    expect(shell().dataset.dock).toBe('collapsed');
     await fireEvent.keyDown(window, { key: 'd' });
-    expect(screen.getByRole('button', { name: 'Collapse the dock' })).toBeTruthy();
+    expect(shell().dataset.dock).toBe('expanded');
   });
 
-  it('toggles inspector with I key', async () => {
+  it('hides and shows the inspector with I', async () => {
     render(App);
 
     expect(screen.getByRole('complementary', { name: 'Inspector' })).toBeTruthy();
-
     await fireEvent.keyDown(window, { key: 'i' });
     expect(screen.queryByRole('complementary', { name: 'Inspector' })).toBeNull();
-
     await fireEvent.keyDown(window, { key: 'i' });
     expect(screen.getByRole('complementary', { name: 'Inspector' })).toBeTruthy();
   });
 
-  it('switches between Library and Mix spaces with 1 and 4 keys', async () => {
+  it('switches between Library and Mix with 1 and 4, and leaves the dock out of Mix', async () => {
     render(App);
 
-    const libBtn = screen.getByRole('button', { name: 'Library' });
-    expect(libBtn.getAttribute('aria-current')).toBe('page');
-
     await fireEvent.keyDown(window, { key: '4' });
-    const mixBtn = screen.getByRole('button', { name: 'Mix' });
-    expect(mixBtn.getAttribute('aria-current')).toBe('page');
+    expect(screen.getByRole('button', { name: 'Mix' }).getAttribute('aria-current')).toBe('page');
+    expect(screen.queryByRole('region', { name: 'Transition' })).toBeNull();
 
     await fireEvent.keyDown(window, { key: '1' });
+    expect(screen.getByRole('button', { name: 'Library' }).getAttribute('aria-current')).toBe(
+      'page',
+    );
+    expect(screen.getByRole('region', { name: 'Transition' })).toBeTruthy();
+  });
+
+  it('ignores shortcuts while a sheet is open', async () => {
+    render(App);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    for (const key of ['i', 'd', '[', '4']) await fireEvent.keyDown(window, { key });
+
+    expect(shell().dataset.sidebar).toBeUndefined();
+    expect(shell().dataset.dock).toBeUndefined();
+    expect(shell().dataset.inspector).toBeUndefined();
     expect(screen.getByRole('button', { name: 'Library' }).getAttribute('aria-current')).toBe(
       'page',
     );

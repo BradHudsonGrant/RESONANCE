@@ -10,6 +10,10 @@ import Specimen from '../../design-page/Specimen.svelte';
 import { clearThumbCache, drawWaveThumb, hasCachedThumb, thumbCacheSize } from '../wave/renderer';
 import { describe as describeOrigin, originFromSource } from './provenance';
 
+// happy-dom has no popover API, so the top layer is left out here and checked in the browser tests.
+HTMLElement.prototype.showPopover ??= () => {};
+HTMLElement.prototype.hidePopover ??= () => {};
+
 function specimen() {
   render(Specimen, { theme: 'dark' });
 }
