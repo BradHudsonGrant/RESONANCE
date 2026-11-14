@@ -15,7 +15,8 @@ pub struct Machine {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Versions {
     pub resonance: String,
-    /// The commit the binary was run from, marked when the working tree had changes.
+    /// The commit the binary was run from, marked when the working tree had changes. Markdown is
+    /// left out, since the record itself is one of those files.
     pub commit: String,
     pub rustc: String,
 }
@@ -43,7 +44,8 @@ pub fn machine() -> Machine {
 
 pub fn versions() -> Versions {
     let commit = output_of("git", &["rev-parse", "--short", "HEAD"]);
-    let changed = output_of("git", &["status", "--porcelain"]).is_some_and(|s| !s.is_empty());
+    let changed = output_of("git", &["status", "--porcelain", "--", ".", ":!*.md"])
+        .is_some_and(|s| !s.is_empty());
     Versions {
         resonance: env!("CARGO_PKG_VERSION").to_owned(),
         commit: match (commit, changed) {

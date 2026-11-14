@@ -99,8 +99,8 @@ impl Record<'_> {
             budget: "Library table, 100,000 rows, fast scroll: holds the refresh rate, no frame over 16 ms",
             verdict: met_if(frames > 0 && missed == 0 && longest <= FRAME_MS),
             measured: format!(
-                "{} missed frames in {}, longest {}",
-                thousands(missed.into()),
+                "{} in {}, longest {}",
+                missed_frames(missed),
                 thousands(frames.into()),
                 ms(longest)
             ),
@@ -117,9 +117,9 @@ impl Record<'_> {
             budget: "Mix view: holds the refresh rate, 99th percentile under 8 ms at 120 Hz",
             verdict: met_if(frames > 0 && missed == 0 && p99 < MIX_P99_MS),
             measured: format!(
-                "99th percentile {}, {} missed frames in {}, {} by {} canvas",
+                "99th percentile {}, {} in {}, {} by {} canvas",
                 ms(p99),
-                thousands(missed.into()),
+                missed_frames(missed),
                 thousands(frames.into()),
                 canvas.width,
                 canvas.height
@@ -244,7 +244,7 @@ impl fmt::Display for Record<'_> {
         writeln!(
             f,
             "| Memory | {:.0} GB |",
-            self.machine.memory_bytes as f64 / 1e9
+            self.machine.memory_bytes as f64 / f64::from(1u32 << 30)
         )?;
         writeln!(f, "| System | {} |", self.machine.system)?;
         writeln!(f, "| Graphics in the desktop app | {} |", desktop.gpu)?;
@@ -414,7 +414,11 @@ impl fmt::Display for Record<'_> {
             "| Period | {} frames, {} asked for |",
             audio.device.period_frames, audio.device.requested_buffer_frames
         )?;
-        writeln!(f, "| Device buffer | {} frames |", audio.buffer_frames)?;
+        writeln!(
+            f,
+            "| Device buffer | {} frames |",
+            thousands(audio.buffer_frames.into())
+        )?;
         writeln!(f, "| Callbacks | {} |", thousands(audio.callbacks))?;
         writeln!(
             f,
@@ -485,6 +489,13 @@ fn memory_row(f: &mut fmt::Formatter<'_>, when: &str, memory: &Memory) -> fmt::R
         megabytes(memory.private_working_set_bytes),
         megabytes(memory.working_set_bytes)
     )
+}
+
+fn missed_frames(count: u32) -> String {
+    match count {
+        1 => "1 missed frame".to_owned(),
+        _ => format!("{} missed frames", thousands(count.into())),
+    }
 }
 
 fn met_if(met: bool) -> Verdict {
@@ -599,7 +610,7 @@ mod tests {
         Machine {
             processor: "Intel(R) Core(TM) Ultra 9 285H".to_owned(),
             logical_cores: 16,
-            memory_bytes: 64_000_000_000,
+            memory_bytes: 64 << 30,
             system: "Windows 11 Pro, build 26300".to_owned(),
         }
     }
@@ -676,6 +687,8 @@ mod tests {
         assert!(text.starts_with("# Budgets at v0.1.0\n"));
         assert!(text.contains("| Cold start to a usable library, under 1.5 s | Met | 0.52 s at the longest of 2 launches, 100,000 tracks |"));
         assert!(text.contains("| Missed | 2 missed frames in 1,200, longest 18.7 ms |"));
+        assert!(text.contains("| Memory | 64 GB |"));
+        assert!(text.contains("| Device buffer | 1,056 frames |"));
         assert!(text.contains("| Longest task 27.0 ms, while the desktop app starts |"));
         assert!(text.contains("| Missed | 480-frame period, 0 dropouts in 180 s |"));
         assert!(
