@@ -16,7 +16,7 @@ Each space is a job with a beginning and an end. Analysis, history and "intellig
 | Mix | 4 | The decks, the coach and recording | #52 restyles the spike, then M7, M8 and M12 |
 | Replay | 5 | Recorded mixes, their scores and progress over time | M9 |
 
-Until its milestone, a space shows a placeholder.
+Until its milestone, a space is disabled in the sidebar, with a tooltip naming the milestone that brings it.
 
 | Job | Where it lives |
 | --- | --- |
