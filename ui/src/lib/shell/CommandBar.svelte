@@ -1,26 +1,34 @@
 <script lang="ts" module>
-  export interface Command {
-    name: string;
-    /** The keys that do the same thing anywhere in the app. */
-    shortcut?: string;
-    run: () => void;
-  }
+  /** A command runs now, or names the milestone that builds it and cannot be chosen. */
+  export type Command = { name: string; shortcut?: string } & (
+    { run: () => void; arrives?: undefined } | { arrives: string; run?: undefined }
+  );
 </script>
 
 <script lang="ts">
+  import Button from '../design/Button.svelte';
+  import DataTag from '../design/DataTag.svelte';
+  import Icon from '../design/Icon.svelte';
+  import SlashChip from '../design/SlashChip.svelte';
   import TextInput from '../design/TextInput.svelte';
+  import Tooltip from '../design/Tooltip.svelte';
 
   interface Props {
-    space: string;
-    /** What the bar says about the space, such as how many tracks it holds. */
-    summary: string;
     commands: Command[];
     /** The id of the field, so Ctrl+K anywhere can put the cursor in it. */
     inputId: string;
   }
 
-  let { space, summary, commands, inputId }: Props = $props();
+  let { commands, inputId }: Props = $props();
 
+  const slashCommands = [
+    { command: '/ bpm 125-132', description: 'Filter by tempo', arrives: 'M2' },
+    { command: '/ key 8A', description: 'Compatible with A minor', arrives: 'M5' },
+    { command: '/ similar', description: 'Find matching tracks', arrives: 'M6' },
+    { command: '/ build set', description: 'Generate 90m progression', arrives: 'M10' },
+  ];
+
+  const shortcutBadge = /Mac/.test(navigator.userAgent) ? '⌘ K' : 'Ctrl K';
   const listId = $props.id();
   let query = $state('');
   let open = $state(false);
@@ -30,14 +38,29 @@
     commands.filter((command) => command.name.toLowerCase().includes(query.trim().toLowerCase())),
   );
 
+  /** The nearest command that can run, from `from` in the direction of `step`. */
+  function nextRunnable(from: number, step: 1 | -1): number {
+    const count = matching.length;
+    for (let tried = 0; tried < count; tried++) {
+      const index = (((from + step * tried) % count) + count) % count;
+      if (matching[index]?.run) return index;
+    }
+    return -1;
+  }
+
+  function reset() {
+    open = true;
+    active = nextRunnable(0, 1);
+  }
+
   function close() {
     open = false;
     query = '';
-    active = 0;
     document.getElementById(inputId)?.blur();
   }
 
-  function run(command: Command) {
+  function choose(command: Command | undefined) {
+    if (!command?.run) return;
     close();
     command.run();
   }
@@ -45,13 +68,12 @@
   function onkeydown(event: KeyboardEvent) {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
-      open = true;
       const step = event.key === 'ArrowDown' ? 1 : -1;
-      active = (active + step + matching.length) % Math.max(matching.length, 1);
+      if (open) active = nextRunnable(active + step, step);
+      else reset();
     } else if (event.key === 'Enter') {
       event.preventDefault();
-      const command = matching[active];
-      if (command) run(command);
+      choose(matching[active]);
     } else if (event.key === 'Escape') {
       event.preventDefault();
       close();
@@ -59,31 +81,27 @@
   }
 </script>
 
-<header class="bar">
-  <h1 class="space">{space}</h1>
-  <span class="summary numeric">{summary}</span>
+<header class="command-bar">
   <div class="palette">
     <TextInput
       id={inputId}
       label="Commands"
       hideLabel
-      placeholder="Commands"
+      size="lg"
+      leadingIcon="search"
+      {shortcutBadge}
+      placeholder="Search your library, or type a command..."
       autocomplete="off"
-      style="padding-right: 3.5rem"
       role="combobox"
       aria-expanded={open}
       aria-controls={listId}
-      aria-activedescendant={open && matching[active] ? `${listId}-${active}` : undefined}
+      aria-activedescendant={open && active >= 0 ? `${listId}-${active}` : undefined}
       bind:value={query}
-      onfocus={() => (open = true)}
+      onfocus={reset}
       onblur={() => (open = false)}
-      oninput={() => {
-        open = true;
-        active = 0;
-      }}
+      oninput={reset}
       {onkeydown}
     />
-    <kbd class="hint numeric" aria-hidden="true">Ctrl K</kbd>
     {#if open}
       <ul class="list" id={listId} role="listbox" aria-label="Commands">
         {#each matching as command, index (command.name)}
@@ -92,14 +110,19 @@
             class={['option', { active: index === active }]}
             role="option"
             aria-selected={index === active}
+            aria-disabled={command.arrives ? 'true' : undefined}
             onmousedown={(event) => {
               event.preventDefault();
-              run(command);
+              choose(command);
             }}
-            onmouseenter={() => (active = index)}
+            onmouseenter={() => {
+              if (command.run) active = index;
+            }}
           >
             <span>{command.name}</span>
-            {#if command.shortcut}
+            {#if command.arrives}
+              <DataTag variant="rect" label="Arrives in {command.arrives}" />
+            {:else if command.shortcut}
               <kbd class="numeric">{command.shortcut}</kbd>
             {/if}
           </li>
@@ -109,42 +132,40 @@
       </ul>
     {/if}
   </div>
+
+  <div class="strip">
+    <div class="chips">
+      {#each slashCommands as chip (chip.command)}
+        <Tooltip text="{chip.description} arrives in {chip.arrives}" side="below">
+          <SlashChip command={chip.command} description={chip.description} disabled />
+        </Tooltip>
+      {/each}
+    </div>
+    <Tooltip text="More slash commands arrive in M2" side="left">
+      <Button variant="icon" size="sm" aria-label="More slash commands" aria-disabled="true">
+        <Icon name="more" size="xs" />
+      </Button>
+    </Tooltip>
+  </div>
 </header>
 
 <style>
-  .bar {
-    display: flex;
-    align-items: center;
+  .command-bar {
+    container: command-bar / inline-size;
+    display: grid;
     gap: var(--space-3);
-    height: 44px;
-    padding: 0 var(--space-3) 0 var(--space-4);
-    border-bottom: 1px solid var(--color-border);
-    background: var(--color-surface);
+    padding: var(--space-3) var(--space-5) var(--space-3-5);
+    border-bottom: var(--border-width) solid var(--color-border);
   }
 
-  .space {
-    font-size: var(--text-lg);
-  }
-
-  .summary {
-    color: var(--color-text-2);
-    font-size: var(--text-sm);
+  .palette,
+  .strip {
+    width: 100%;
+    max-width: var(--command-bar-max-width);
   }
 
   .palette {
     position: relative;
-    width: min(24rem, 45%);
-    margin-left: auto;
-  }
-
-  .hint {
-    position: absolute;
-    top: 50%;
-    right: var(--space-2);
-    color: var(--color-muted);
-    font-size: var(--text-xs);
-    transform: translateY(-50%);
-    pointer-events: none;
   }
 
   .list {
@@ -155,9 +176,10 @@
     z-index: 20;
     margin: 0;
     padding: var(--space-1);
-    border: 1px solid var(--color-border-control);
-    border-radius: var(--radius-panel);
+    border: var(--border-width) solid var(--color-border-control);
+    border-radius: var(--radius-lg);
     background: var(--color-raised);
+    box-shadow: var(--shadow-popover);
     list-style: none;
   }
 
@@ -167,24 +189,51 @@
     align-items: center;
     justify-content: space-between;
     height: var(--row-height);
-    padding: 0 var(--space-2);
-    border-radius: var(--radius-control);
+    padding: 0 var(--space-2-5);
+    border-radius: var(--radius-sm);
   }
 
   .option {
     cursor: default;
   }
 
-  .active {
+  .option.active {
     background: var(--color-surface-2);
   }
 
+  .option[aria-disabled='true'],
   .none {
-    color: var(--color-text-2);
+    color: var(--color-muted);
   }
 
   kbd {
     color: var(--color-text-2);
     font-size: var(--text-xs);
+  }
+
+  .strip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+  }
+
+  .chips {
+    display: flex;
+    gap: var(--space-6);
+    min-width: 0;
+  }
+
+  /* Container queries cannot read custom properties, so these widths are written out. */
+  @container command-bar (width < 760px) {
+    .chips > :global(:nth-child(4)) {
+      display: none;
+    }
+  }
+
+  @container command-bar (width < 600px) {
+    .chips > :global(:nth-child(3)) {
+      display: none;
+    }
   }
 </style>
