@@ -10,12 +10,15 @@
   let { command, description, active = false, disabled = false, onclick }: Props = $props();
 </script>
 
+<!-- A chip that is not built yet stays focusable, so its tooltip can say when it arrives. -->
 <button
   type="button"
   class={['slash-chip', { active }]}
   aria-pressed={active ? true : undefined}
-  {disabled}
-  {onclick}
+  aria-disabled={disabled ? 'true' : undefined}
+  onclick={() => {
+    if (!disabled) onclick?.();
+  }}
 >
   <span class="code">{command}</span>
   <span class="description">{description}</span>
@@ -62,23 +65,23 @@
     transition: color var(--duration-fast) var(--ease-out);
   }
 
-  .slash-chip:hover:not(:disabled) .code,
+  .slash-chip:hover:not([aria-disabled='true']) .code,
   .active .code {
     border-color: var(--color-border-control);
     background: var(--color-raised);
   }
 
-  .slash-chip:hover:not(:disabled) .description,
+  .slash-chip:hover:not([aria-disabled='true']) .description,
   .active .description {
     color: var(--color-text);
   }
 
-  .slash-chip:disabled {
+  .slash-chip[aria-disabled='true'] {
     cursor: default;
   }
 
-  .slash-chip:disabled .code,
-  .slash-chip:disabled .description {
+  .slash-chip[aria-disabled='true'] .code,
+  .slash-chip[aria-disabled='true'] .description {
     color: var(--color-muted);
   }
 </style>
