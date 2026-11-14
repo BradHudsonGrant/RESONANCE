@@ -1,3 +1,4 @@
+mod bench;
 mod library_file;
 mod scan;
 mod serve;
@@ -31,6 +32,16 @@ enum Command {
         /// The music folder to read
         folder: PathBuf,
     },
+    /// Play both decks through the audio device and write every performance budget to
+    /// docs/benchmarks. `just bench` takes the page measurements first and then runs this
+    Bench {
+        /// The page measurements that ui/dev/bench.ts wrote
+        #[arg(long, value_name = "PATH")]
+        page: PathBuf,
+        /// How long to play both decks
+        #[arg(long, value_name = "SECONDS", default_value_t = 180)]
+        audio_seconds: u32,
+    },
     /// Run the core as a local process for the browser UI to talk to
     Serve {
         /// Write the port and token to this file as JSON, for the dev server to read
@@ -54,6 +65,10 @@ fn main() -> ExitCode {
     match cli.command {
         Command::Key { tags } => show_keys(&tags),
         Command::Scan { folder } => finished(scan::run(&folder, cli.data_folder.as_deref())),
+        Command::Bench {
+            page,
+            audio_seconds,
+        } => finished(bench::run(&page, audio_seconds)),
         Command::Serve { connection_file } => finished(serve::run(
             connection_file.as_deref(),
             cli.data_folder.as_deref(),

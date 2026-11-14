@@ -14,9 +14,13 @@ path = "src/main.rs"
 resonance-api.workspace = true
 resonance-core.workspace = true
 resonance-db.workspace = true
+resonance-engine.workspace = true
 resonance-library.workspace = true
 clap.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+# Only the processor, memory and system facts for the bench record.
+sysinfo = { version = "0.40.3", default-features = false, features = ["system"] }
 tokio.workspace = true
 
 [dev-dependencies]
