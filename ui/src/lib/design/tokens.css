@@ -161,7 +161,6 @@
   --provenance-dot-size: 6px;
   --wordmark-gap: 18px;
 
-  --shadow-popover: 0 12px 32px rgb(0 0 0 / 48%);
   --duration-fast: 80ms;
   --duration-normal: 140ms;
   --motion-fast: var(--duration-fast);
@@ -171,12 +170,10 @@
 
 [data-theme='dark'] {
   color-scheme: dark;
-  --shadow-popover: 0 12px 32px rgb(0 0 0 / 48%);
 }
 
 [data-theme='light'] {
   color-scheme: light;
-  --shadow-popover: 0 8px 24px rgb(20 20 19 / 10%);
 }
 
 @media (prefers-reduced-motion: reduce) {
