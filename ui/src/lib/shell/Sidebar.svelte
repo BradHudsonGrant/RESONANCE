@@ -30,20 +30,19 @@
 
   interface Props {
     activeSpace: SpaceName;
-    collapsed: boolean;
     /** Missing until the library has been read. */
     trackCount: number | null;
     onSelectSpace: (space: SpaceName) => void;
-    onToggleCollapse: () => void;
+    onCollapse: (collapsed: boolean) => void;
   }
 
-  let { activeSpace, collapsed, trackCount, onSelectSpace, onToggleCollapse }: Props = $props();
+  let { activeSpace, trackCount, onSelectSpace, onCollapse }: Props = $props();
 
-  const toggleLabel = $derived(collapsed ? 'Expand the sidebar' : 'Collapse the sidebar');
+  // Only the first space still to come takes focus, so Tab does not stop on every placeholder.
+  const firstToCome = spaces.find((space) => space.arrives)?.name;
 </script>
 
 {#snippet spaceButton(space: Space, index: number)}
-  {@const active = space.name === activeSpace}
   <Tooltip
     text={space.arrives ? `${space.name} arrives in ${space.arrives}` : space.name}
     shortcut={space.arrives ? undefined : String(index + 1)}
@@ -53,45 +52,58 @@
       type="button"
       class="space"
       aria-label={space.name}
-      aria-current={active ? 'page' : undefined}
+      aria-current={space.name === activeSpace ? 'page' : undefined}
       aria-disabled={space.arrives ? 'true' : undefined}
+      tabindex={space.arrives && space.name !== firstToCome ? -1 : undefined}
       onclick={() => {
         if (!space.arrives) onSelectSpace(space.name);
       }}
     >
       <Icon name={space.icon} size="sm" />
-      {#if !collapsed}
-        <span class="label">{space.name}</span>
-        {#if space.name === 'Library' && trackCount !== null}
-          <span class="count numeric">{trackCount.toLocaleString('en-GB')}</span>
-        {/if}
+      <span class="label">{space.name}</span>
+      {#if space.name === 'Library' && trackCount !== null}
+        <span class="count numeric">{trackCount.toLocaleString('en-GB')}</span>
       {/if}
     </button>
   </Tooltip>
 {/snippet}
 
-<nav class={['sidebar', { collapsed }]} aria-label="Spaces">
+<nav class="sidebar" aria-label="Spaces">
   <div class="head">
-    {#if !collapsed}
-      <MonoLabel text="Music intelligence&#10;for DJs" tone="secondary" />
-    {/if}
-    <Tooltip text={toggleLabel} shortcut="[" side="right">
-      <Button variant="icon" aria-label={toggleLabel} onclick={onToggleCollapse}>
-        <Icon name="sidebar-collapse" size="sm" />
-      </Button>
-    </Tooltip>
+    <span class="tagline"><MonoLabel text="Music intelligence&#10;for DJs" tone="secondary" /></span
+    >
+    <span class="collapse">
+      <Tooltip text="Collapse the sidebar" shortcut="[" side="right">
+        <Button variant="icon" aria-label="Collapse the sidebar" onclick={() => onCollapse(true)}>
+          <Icon name="sidebar-collapse" size="sm" />
+        </Button>
+      </Tooltip>
+    </span>
+    <span class="expand">
+      <Tooltip text="Expand the sidebar" shortcut="[" side="right">
+        <Button variant="icon" aria-label="Expand the sidebar" onclick={() => onCollapse(false)}>
+          <Icon name="sidebar-collapse" size="sm" />
+        </Button>
+      </Tooltip>
+    </span>
   </div>
 
   <div class="spaces">
     {#each spaces as space, index (space.name)}
       {@render spaceButton(space, index)}
-      {#if space.name === 'Library' && !collapsed}
+      {#if space.name === 'Library'}
         <div class="collections">
           <div class="collections-head">
             <Icon name="collections" size="sm" />
             <span class="label">Collections</span>
             <Tooltip text="Collections arrive in M2" side="right">
-              <Button variant="icon" size="sm" aria-label="New collection" aria-disabled="true">
+              <Button
+                variant="icon"
+                size="sm"
+                aria-label="New collection"
+                aria-disabled="true"
+                tabindex={-1}
+              >
                 <Icon name="plus" size="xs" />
               </Button>
             </Tooltip>
@@ -102,16 +114,14 @@
     {/each}
   </div>
 
-  {#if !collapsed}
-    <div class="foot">
-      <div class="active-set">
-        <ModularDivider />
-        <MonoLabel text="Active set" tone="secondary" />
-        <p class="waiting">No set yet. Sets arrive in M10.</p>
-      </div>
-      <Wave variant="sidebar" />
+  <div class="foot">
+    <div class="active-set">
+      <ModularDivider />
+      <MonoLabel text="Active set" tone="secondary" />
+      <p class="waiting">No set yet. Sets arrive in M10.</p>
     </div>
-  {/if}
+    <Wave variant="sidebar" />
+  </div>
 </nav>
 
 <style>
@@ -133,9 +143,8 @@
     padding: var(--space-5) var(--space-3) var(--space-4) var(--space-6);
   }
 
-  .collapsed .head {
-    justify-content: center;
-    padding: var(--space-3) 0;
+  .expand {
+    display: none;
   }
 
   .spaces {
@@ -143,12 +152,7 @@
     align-content: start;
     gap: var(--space-1);
     padding: 0 var(--space-3);
-    overflow-y: auto;
-  }
-
-  .collapsed .spaces {
-    justify-items: center;
-    padding: 0;
+    overflow: hidden auto;
   }
 
   .spaces > :global(.anchor) {
@@ -175,12 +179,6 @@
     transition:
       background-color var(--duration-fast) var(--ease-out),
       color var(--duration-fast) var(--ease-out);
-  }
-
-  .collapsed .space {
-    justify-content: center;
-    width: var(--control-height-nav);
-    padding: 0;
   }
 
   .space:hover:not([aria-disabled='true']) {
@@ -255,5 +253,43 @@
     display: grid;
     gap: var(--space-3);
     padding: 0 var(--space-5);
+  }
+
+  @media (forced-colors: active) {
+    .space[aria-disabled='true'] {
+      color: GrayText;
+    }
+  }
+
+  /* The shell sets --sidebar-state from the window size, or from the user's own choice. */
+  @container style(--sidebar-state: collapsed) {
+    .tagline,
+    .collapse,
+    .label,
+    .count,
+    .collections,
+    .foot {
+      display: none;
+    }
+
+    .expand {
+      display: inline-flex;
+    }
+
+    .head {
+      justify-content: center;
+      padding: var(--space-3) 0;
+    }
+
+    .spaces {
+      justify-items: center;
+      padding: 0;
+    }
+
+    .space {
+      justify-content: center;
+      width: var(--control-height-nav);
+      padding: 0;
+    }
   }
 </style>

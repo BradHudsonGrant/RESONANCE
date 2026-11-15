@@ -196,7 +196,7 @@
     cursor: default;
   }
 
-  /* Not built yet: it stays focusable so its tooltip can say which milestone brings it. */
+  /* Not built yet: it stays hoverable so its tooltip can say which milestone brings it. */
   .button[aria-disabled='true'] {
     color: var(--color-muted);
     cursor: default;
@@ -205,5 +205,12 @@
   .circle.size-lg[aria-disabled='true'] {
     border-color: var(--color-border);
     background: var(--color-surface-2);
+  }
+
+  @media (forced-colors: active) {
+    .button:disabled,
+    .button[aria-disabled='true'] {
+      color: GrayText;
+    }
   }
 </style>

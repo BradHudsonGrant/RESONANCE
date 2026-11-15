@@ -5,6 +5,7 @@
   import Tooltip from '../design/Tooltip.svelte';
 
   // Loading a track onto a deck arrives with the decks in M7, so the card says the deck is empty.
+  // Its actions take no focus: the dock's Mix Point already says what is still to come.
   let { deck }: { deck: 'A' | 'B' } = $props();
 </script>
 
@@ -18,7 +19,13 @@
         <span class="note">Decks arrive in M7</span>
       </div>
       <Tooltip text="Deck {deck} actions arrive in M7" side="left">
-        <Button variant="icon" size="sm" aria-label="Deck {deck} actions" aria-disabled="true">
+        <Button
+          variant="icon"
+          size="sm"
+          aria-label="Deck {deck} actions"
+          aria-disabled="true"
+          tabindex={-1}
+        >
           <Icon name="more" size="xs" />
         </Button>
       </Tooltip>
@@ -47,8 +54,8 @@
     flex-shrink: 0;
     align-items: center;
     justify-content: center;
-    width: var(--deck-badge-width);
-    height: var(--deck-badge-height);
+    width: var(--control-height-md);
+    height: var(--control-height-md);
     border: var(--border-width) solid var(--color-border);
     border-radius: var(--radius-sm);
     background: var(--color-surface-2);

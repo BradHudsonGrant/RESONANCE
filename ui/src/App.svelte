@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Sheet from './lib/design/Sheet.svelte';
   import { core } from './lib/ipc/core';
   import Inspector from './lib/library/Inspector.svelte';
   import Library from './lib/library/Library.svelte';
@@ -11,59 +12,69 @@
   import Sidebar, { type SpaceName } from './lib/shell/Sidebar.svelte';
   import TopBar from './lib/shell/TopBar.svelte';
   import TransitionDock from './lib/shell/TransitionDock.svelte';
-  import Sheet from './lib/design/Sheet.svelte';
+
+  type Fold = 'collapsed' | 'expanded';
 
   const commandInput = 'command-bar';
   const pages = new TrackPages((offset, limit) => core.call('tracks', { offset, limit }));
 
+  let shell: HTMLDivElement;
   let space = $state<SpaceName>('Library');
-  let innerWidth = $state(1586);
-  let innerHeight = $state(992);
-
-  let userSidebarCollapsed = $state<boolean | null>(null);
-  let userDockCollapsed = $state<boolean | null>(null);
-  let inspectorOpen = $state(true);
+  // The window size sets the layout in CSS. These hold only what the user chose over it.
+  let sidebarChoice = $state<Fold>();
+  let dockChoice = $state<Fold>();
+  let inspectorHidden = $state(false);
+  let sheetOpen = $state(false);
   let settingsOpen = $state(false);
   let scanOpen = $state(false);
 
-  const isNarrow = $derived(innerWidth < 1280);
-  const sidebarCollapsed = $derived(
-    userSidebarCollapsed !== null ? userSidebarCollapsed : innerWidth < 1360,
-  );
-  const dockCollapsed = $derived(
-    userDockCollapsed !== null ? userDockCollapsed : innerHeight < 820,
-  );
-
   const track = $derived(pages.selectedTrack);
+  const inspectorDocked = $derived(space === 'Library' && !inspectorHidden);
+
+  /** What the stylesheet decided, read only when the user asks for the opposite. */
+  function layout(property: '--sidebar-state' | '--dock-state' | '--inspector-mode'): string {
+    return getComputedStyle(shell).getPropertyValue(property).trim();
+  }
+
+  function flipped(choice: Fold | undefined, property: '--sidebar-state' | '--dock-state'): Fold {
+    return (choice ?? layout(property)) === 'collapsed' ? 'expanded' : 'collapsed';
+  }
 
   function toggleSidebar() {
-    userSidebarCollapsed = !sidebarCollapsed;
+    sidebarChoice = flipped(sidebarChoice, '--sidebar-state');
   }
 
   function toggleDock() {
-    userDockCollapsed = !dockCollapsed;
+    dockChoice = flipped(dockChoice, '--dock-state');
   }
+
+  function toggleInspector() {
+    if (layout('--inspector-mode') === 'sheet') sheetOpen = !sheetOpen;
+    else inspectorHidden = !inspectorHidden;
+  }
+
+  function showInspector() {
+    if (layout('--inspector-mode') === 'sheet') sheetOpen = true;
+    else inspectorHidden = false;
+  }
+
+  $effect(() => {
+    if (!sheetOpen) return;
+    const closeWhenDocked = () => {
+      if (layout('--inspector-mode') !== 'sheet') sheetOpen = false;
+    };
+    addEventListener('resize', closeWhenDocked);
+    return () => removeEventListener('resize', closeWhenDocked);
+  });
 
   const commands: Command[] = $derived([
     space === 'Mix'
       ? { name: 'Go to the library', shortcut: '1', run: () => (space = 'Library') }
       : { name: 'Go to Mix', shortcut: '4', run: () => (space = 'Mix') },
     { name: 'Scan a music folder', run: () => (scanOpen = true) },
-    {
-      name: inspectorOpen ? 'Hide the inspector' : 'Show the inspector',
-      shortcut: 'I',
-      run: () => (inspectorOpen = !inspectorOpen),
-    },
-    {
-      name: sidebarCollapsed ? 'Expand the sidebar' : 'Collapse the sidebar',
-      shortcut: '[',
-      run: toggleSidebar,
-    },
-    {
-      name: dockCollapsed ? 'Expand the dock' : 'Collapse the dock',
-      shortcut: 'D',
-      run: toggleDock,
-    },
+    { name: 'Show or hide the inspector', shortcut: 'I', run: toggleInspector },
+    { name: 'Collapse or expand the sidebar', shortcut: '[', run: toggleSidebar },
+    { name: 'Collapse or expand the dock', shortcut: 'D', run: toggleDock },
     { name: 'Open settings', run: () => (settingsOpen = true) },
     { name: 'Go to the first track', shortcut: 'Home', run: () => goTo(0) },
     { name: 'Go to the last track', shortcut: 'End', run: () => goTo(pages.total - 1) },
@@ -85,66 +96,44 @@
     );
   }
 
+  const keys: Record<string, () => void> = {
+    '/': () => document.getElementById(commandInput)?.focus(),
+    i: toggleInspector,
+    '[': toggleSidebar,
+    d: toggleDock,
+    '1': () => (space = 'Library'),
+    '4': () => (space = 'Mix'),
+  };
+
   function onkeydown(event: KeyboardEvent) {
-    const isTyping = typing(event.target);
-    const key = event.key;
-    const mod = event.ctrlKey || event.metaKey;
+    // An open sheet is modal and owns the keyboard, so nothing changes behind it.
+    if (event.altKey || document.querySelector('dialog[open]')) return;
+    const key = event.key.toLowerCase();
+    const command = event.ctrlKey || event.metaKey;
 
-    if (mod && key.toLowerCase() === 'k') {
+    if (command && key === 'k') {
       event.preventDefault();
       document.getElementById(commandInput)?.focus();
-      return;
-    }
-
-    if (mod && !event.altKey) {
-      if (key === '1') {
-        event.preventDefault();
-        space = 'Library';
-        return;
-      }
-      if (key === '4') {
-        event.preventDefault();
-        space = 'Mix';
-        return;
-      }
-    }
-
-    if (isTyping) return;
-
-    if (key === '/' && !mod && !event.altKey) {
+    } else if (command && (key === '1' || key === '4')) {
       event.preventDefault();
-      document.getElementById(commandInput)?.focus();
-    } else if (key.toLowerCase() === 'i' && !mod && !event.altKey) {
+      keys[key]?.();
+    } else if (!command && !typing(event.target) && keys[key]) {
       event.preventDefault();
-      inspectorOpen = !inspectorOpen;
-    } else if (key === '[' && !mod && !event.altKey) {
-      event.preventDefault();
-      toggleSidebar();
-    } else if (key.toLowerCase() === 'd' && !mod && !event.altKey) {
-      event.preventDefault();
-      toggleDock();
-    } else if (key === '1' && !mod && !event.altKey) {
-      event.preventDefault();
-      space = 'Library';
-    } else if (key === '4' && !mod && !event.altKey) {
-      event.preventDefault();
-      space = 'Mix';
+      keys[key]();
     }
   }
 
   pages.load();
 </script>
 
-<svelte:window bind:innerWidth bind:innerHeight {onkeydown} />
+<svelte:window {onkeydown} />
 
 <div
+  bind:this={shell}
   class="app-shell"
-  style:--shell-sidebar-col={sidebarCollapsed
-    ? 'var(--sidebar-collapsed-width)'
-    : 'var(--sidebar-width)'}
-  style:--shell-inspector-col={!isNarrow && inspectorOpen && space === 'Library'
-    ? 'clamp(var(--inspector-min-width), 26.5vw, var(--inspector-max-width))'
-    : '0px'}
+  data-sidebar={sidebarChoice}
+  data-dock={dockChoice}
+  data-inspector={inspectorDocked ? undefined : 'hidden'}
 >
   <div class="topbar">
     <TopBar onsettings={() => (settingsOpen = true)} />
@@ -153,10 +142,9 @@
   <div class="sidebar">
     <Sidebar
       activeSpace={space}
-      collapsed={sidebarCollapsed}
       trackCount={pages.state.kind === 'ready' ? pages.total : null}
       onSelectSpace={(nextSpace) => (space = nextSpace)}
-      onToggleCollapse={toggleSidebar}
+      onCollapse={(collapsed) => (sidebarChoice = collapsed ? 'collapsed' : 'expanded')}
     />
   </div>
 
@@ -169,35 +157,40 @@
         <Library
           {pages}
           bind:selected={pages.selected}
-          onopen={() => (inspectorOpen = true)}
+          onopen={showInspector}
           onscan={() => (scanOpen = true)}
         />
       {/if}
     </main>
   </div>
 
-  {#if !isNarrow && inspectorOpen && space === 'Library'}
+  {#if inspectorDocked}
     <div class="inspector-dock">
-      <Inspector {track} onclose={() => (inspectorOpen = false)} />
+      <Inspector {track} onclose={() => (inspectorHidden = true)} />
     </div>
   {/if}
 
-  <div class="dock">
-    <TransitionDock collapsed={dockCollapsed} ontoggle={toggleDock} />
-  </div>
+  <!-- The Mix spike has its own decks and transport until the real decks arrive in M7. -->
+  {#if space !== 'Mix'}
+    <div class="dock">
+      <TransitionDock
+        onCollapse={(collapsed) => (dockChoice = collapsed ? 'collapsed' : 'expanded')}
+      />
+    </div>
 
-  <div class="player">
-    <PlayerBar />
-  </div>
+    <div class="player">
+      <PlayerBar />
+    </div>
+  {/if}
 </div>
 
-{#if isNarrow && inspectorOpen && space === 'Library'}
-  <Sheet bind:open={inspectorOpen} variant="drawer" title="Inspector">
-    <Inspector {track} onclose={() => (inspectorOpen = false)} />
+{#if sheetOpen && space === 'Library'}
+  <Sheet bind:open={sheetOpen} variant="drawer" title="Inspector">
+    <Inspector {track} inSheet onclose={() => (sheetOpen = false)} />
   </Sheet>
 {/if}
 
-<SettingsSheet bind:open={settingsOpen} onclose={() => (settingsOpen = false)} />
+<SettingsSheet bind:open={settingsOpen} />
 
 <ScanFolder
   bind:open={scanOpen}
@@ -206,27 +199,76 @@
 />
 
 <style>
+  /*
+   * The window size decides the layout here. Each state is a custom property that the sidebar
+   * and dock read through style queries, and that App reads when a shortcut flips it. Media
+   * queries cannot read tokens, so the breakpoints are written out.
+   */
   .app-shell {
+    --sidebar-state: expanded;
+    --sidebar-column: var(--sidebar-width);
+    --dock-state: expanded;
+    --inspector-mode: docked;
+    --inspector-column: clamp(var(--inspector-min-width), 26.5vw, var(--inspector-max-width));
+
     display: grid;
+    grid-template:
+      'topbar topbar topbar' var(--topbar-height)
+      'sidebar workspace inspector' minmax(var(--workspace-min-height), 1fr)
+      'dock dock dock' auto
+      'player player player' auto
+      / var(--sidebar-column) minmax(var(--workspace-min-width), 1fr) var(--inspector-column);
     width: 100vw;
     height: 100vh;
     overflow: hidden;
     background: var(--color-background);
     color: var(--color-text);
-    grid-template-columns:
-      var(--shell-sidebar-col, var(--sidebar-width))
-      minmax(var(--workspace-min-width, 520px), 1fr)
-      var(--shell-inspector-col, 0px);
-    grid-template-rows:
-      var(--topbar-height)
-      minmax(var(--workspace-min-height, 280px), 1fr)
-      auto
-      calc(var(--player-height) + var(--player-inset-bottom));
-    grid-template-areas:
-      'topbar  topbar     topbar'
-      'sidebar workspace  inspector'
-      'dock    dock       dock'
-      'player  player     player';
+  }
+
+  @media (width < 1360px) {
+    .app-shell {
+      --sidebar-state: collapsed;
+      --sidebar-column: var(--sidebar-collapsed-width);
+    }
+  }
+
+  @media (width < 1280px) {
+    .app-shell {
+      --inspector-mode: sheet;
+      --inspector-column: 0px;
+    }
+
+    .inspector-dock {
+      display: none;
+    }
+  }
+
+  @media (height < 820px) {
+    .app-shell {
+      --dock-state: collapsed;
+    }
+  }
+
+  .app-shell[data-sidebar='collapsed'] {
+    --sidebar-state: collapsed;
+    --sidebar-column: var(--sidebar-collapsed-width);
+  }
+
+  .app-shell[data-sidebar='expanded'] {
+    --sidebar-state: expanded;
+    --sidebar-column: var(--sidebar-width);
+  }
+
+  .app-shell[data-dock='collapsed'] {
+    --dock-state: collapsed;
+  }
+
+  .app-shell[data-dock='expanded'] {
+    --dock-state: expanded;
+  }
+
+  .app-shell[data-inspector='hidden'] {
+    --inspector-column: 0px;
   }
 
   .topbar {
@@ -240,9 +282,10 @@
   }
 
   .workspace {
-    grid-area: workspace;
     display: grid;
-    grid-template-rows: auto 1fr;
+    grid-area: workspace;
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     min-width: 0;
     min-height: 0;
     overflow: hidden;

@@ -16,7 +16,7 @@
       </Button>
     </Tooltip>
     <Tooltip text="Activity arrives in M2" side="below">
-      <Button variant="icon" aria-label="Activity" aria-disabled="true">
+      <Button variant="icon" aria-label="Activity" aria-disabled="true" tabindex={-1}>
         <Icon name="activity" size="md" />
       </Button>
     </Tooltip>

@@ -6,12 +6,7 @@
   import Sheet from '../design/Sheet.svelte';
   import { getTheme, setTheme, type Theme } from '../design/theme';
 
-  interface Props {
-    open: boolean;
-    onclose: () => void;
-  }
-
-  let { open = $bindable(false), onclose }: Props = $props();
+  let { open = $bindable(false) }: { open: boolean } = $props();
 
   const themeTabs: SegmentedTabItem[] = [
     { id: 'dark', label: 'Dark' },
@@ -19,23 +14,11 @@
     { id: 'system', label: 'System' },
   ];
 
-  let currentTheme = $state<Theme>(getTheme());
+  let theme = $state<Theme>(getTheme());
 
-  function onThemeChange(id: string) {
-    const next = id as Theme;
-    currentTheme = next;
-    setTheme(next);
-  }
-
-  $effect(() => {
-    if (open) {
-      currentTheme = getTheme();
-    }
-  });
-
-  function close() {
-    open = false;
-    onclose?.();
+  function choose(id: string) {
+    theme = id as Theme;
+    setTheme(theme);
   }
 </script>
 
@@ -45,13 +28,7 @@
       <div class="section-head">
         <MonoLabel text="Appearance" tone="secondary" />
       </div>
-      <p class="description">Select interface theme.</p>
-      <SegmentedTabs
-        items={themeTabs}
-        value={currentTheme}
-        ariaLabel="Theme selection"
-        onChange={onThemeChange}
-      />
+      <SegmentedTabs items={themeTabs} value={theme} ariaLabel="Theme" onChange={choose} />
     </section>
 
     <ModularDivider />
@@ -67,9 +44,9 @@
 
     <section class="section">
       <div class="section-head">
-        <MonoLabel text="AI provider keys" tone="secondary" />
+        <MonoLabel text="Provider keys" tone="secondary" />
       </div>
-      <p class="waiting">AI provider keys arrive in M3.</p>
+      <p class="waiting">Keys for AcoustID, Discogs and paid recognisers arrive in M3.</p>
     </section>
 
     <ModularDivider />
@@ -83,7 +60,7 @@
   </div>
 
   {#snippet actions()}
-    <Button variant="quiet" onclick={close}>Done</Button>
+    <Button variant="quiet" onclick={() => (open = false)}>Done</Button>
   {/snippet}
 </Sheet>
 
@@ -101,12 +78,6 @@
   .section-head {
     display: flex;
     align-items: center;
-  }
-
-  .description {
-    margin: 0;
-    color: var(--color-text-2);
-    font-size: var(--text-sm);
   }
 
   .waiting {

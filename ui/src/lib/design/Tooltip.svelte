@@ -11,14 +11,23 @@
   }
 
   let { text, shortcut, side = 'above', children }: Props = $props();
+  let tip: HTMLSpanElement;
   let shown = $state(false);
   const id = $props.id();
+  const anchor = `--tooltip-${id}`;
+
+  // The tooltip sits in the top layer, so a panel that clips its overflow cannot cut it off.
+  $effect(() => {
+    if (shown) tip.showPopover();
+    else if (tip.matches(':popover-open')) tip.hidePopover();
+  });
 </script>
 
 <span
   class="anchor"
   role="presentation"
   aria-describedby={id}
+  style:anchor-name={anchor}
   onmouseenter={() => (shown = true)}
   onmouseleave={() => (shown = false)}
   onfocusin={() => (shown = true)}
@@ -28,7 +37,14 @@
   }}
 >
   {@render children()}
-  <span {id} class={['tooltip', side, { shown }]} role="tooltip">
+  <span
+    bind:this={tip}
+    {id}
+    class={['tooltip', side, { shown }]}
+    role="tooltip"
+    popover="manual"
+    style:position-anchor={anchor}
+  >
     {text}
     {#if shortcut}
       <kbd class="numeric">{shortcut}</kbd>
@@ -38,18 +54,17 @@
 
 <style>
   .anchor {
-    position: relative;
     display: inline-flex;
   }
 
   .tooltip {
-    position: absolute;
-    bottom: calc(100% + var(--space-1));
-    left: 50%;
-    z-index: 10;
-    display: flex;
+    position-area: top;
+    position-try-fallbacks: flip-block, flip-inline;
+    inset: auto;
     gap: var(--space-2);
+    margin: var(--space-1);
     padding: var(--space-1) var(--space-2);
+    overflow: visible;
     border: var(--border-width) solid var(--color-border-control);
     border-radius: var(--radius-sm);
     background: var(--color-raised);
@@ -58,37 +73,23 @@
     font-size: var(--text-sm);
     font-weight: var(--weight-regular);
     white-space: nowrap;
-    visibility: hidden;
-    opacity: 0;
-    transform: translateX(-50%);
-    transition: opacity var(--duration-fast) var(--ease-out);
     pointer-events: none;
   }
 
-  .below {
-    top: calc(100% + var(--space-1));
-    bottom: auto;
+  .tooltip:popover-open {
+    display: flex;
   }
 
-  .right,
-  .left {
-    top: 50%;
-    bottom: auto;
-    transform: translateY(-50%);
+  .below {
+    position-area: bottom;
   }
 
   .right {
-    left: calc(100% + var(--space-1));
+    position-area: right;
   }
 
   .left {
-    right: calc(100% + var(--space-1));
-    left: auto;
-  }
-
-  .shown {
-    visibility: visible;
-    opacity: 1;
+    position-area: left;
   }
 
   kbd {

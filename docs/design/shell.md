@@ -30,8 +30,8 @@ Collapsed, the sidebar is 52 px wide and shows only the five space icons as 38 p
 
 At the top of the workspace, closed by a 1 px border under it.
 
-- The search box: 42 px tall, 12 px below the top bar, on Surface with a 1 px control border and 10 px corners. A 16 px search icon, the placeholder "Search your library, or type a command..." in 14 px, and a Ctrl K badge on the right (⌘ K on macOS). #51 builds the box and its focus. Text search arrives in M2 and natural-language search in M6.
-- Slash chips, 12 px below the box and 24 px apart, with an overflow button at the end. Clicking one puts its command in the box and focuses it.
+- The search box: 42 px tall, 12 px below the top bar, on Surface with a 1 px control border and 10 px corners. A 16 px search icon, a 14 px placeholder ("Type a command…" until library search arrives in M2, then "Search your library, or type a command…"), and a Ctrl K badge on the right (⌘ K on macOS). #51 builds the box and its focus. Text search arrives in M2 and natural-language search in M6.
+- Slash chips, 12 px below the box and 12 px apart, with an overflow button at the end. Clicking one puts its command in the box and focuses it.
 
 | Chip | Description | Works from |
 | --- | --- | --- |
@@ -45,7 +45,7 @@ At the top of the workspace, closed by a 1 px border under it.
 160 px tall above the player bar, with a 1 px border above it.
 
 - A 52 px header, 20 px in from each side: "A → B" in 16 px Space Grotesk 600, "Transition" and an info icon, then the Mix point (for example "4:15 (60%)") and Blend (for example "Crossfade") as quiet selects. The controls work from M10.
-- Under it, three columns 13 px apart: deck A's card, the crossfade waveform and deck B's card. The cards are `Deck variant="dock"`: 340 by 87 with 10 px corners on Surface. The waveform is `Waveform mode="crossfade"`, 101 px tall, and takes the remaining width.
+- Under it, three columns 12 px apart: deck A's card, the crossfade waveform and deck B's card. The cards are `Deck variant="dock"`: 340 by 87 with 10 px corners on Surface. The waveform is `Waveform mode="crossfade"`, 101 px tall, and takes the remaining width.
 
 Live decks and the crossfade arrive in M7 and M10. In Mix the dock folds away, so the scrolling waveforms aren't shown twice ([mix.md](mix.md)).
 
