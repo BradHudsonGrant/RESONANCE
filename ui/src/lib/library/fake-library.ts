@@ -27,6 +27,7 @@ export function fakeTrack(index: number): LibraryTrack {
       bit_depth: 16,
       bitrate_kbps: 900,
     },
+    collections: [],
   };
 }
 

@@ -116,7 +116,7 @@ describe('Sidebar', () => {
     expect(screen.getByRole('button', { name: 'Prep' }).tabIndex).toBe(0);
     expect(screen.getByRole('button', { name: 'Sets' }).tabIndex).toBe(-1);
     expect(screen.getByRole('button', { name: 'Replay' }).tabIndex).toBe(-1);
-    expect(screen.getByRole('button', { name: 'New collection' }).tabIndex).toBe(-1);
+    expect(screen.getByRole('button', { name: 'New collection' }).tabIndex).toBe(0);
   });
 
   it('opens a space that exists', async () => {
@@ -127,11 +127,69 @@ describe('Sidebar', () => {
     expect(onSelectSpace).toHaveBeenCalledWith('Mix');
   });
 
-  it('shows the collections and active set placeholders', () => {
+  it('shows empty collections and active set placeholder before collections exist', () => {
     render(Sidebar, props);
 
-    expect(screen.getByText('None yet. Collections arrive in M2.')).toBeTruthy();
+    expect(screen.getByText('No collections yet.')).toBeTruthy();
     expect(screen.getByText('No set yet. Sets arrive in M10.')).toBeTruthy();
+  });
+
+  it('creates, selects, renames and confirms deleting collections', async () => {
+    const onSelectSpace = vi.fn();
+    const onSelectCollection = vi.fn();
+    const onCreateCollection = vi.fn(async () => {});
+    const onRenameCollection = vi.fn(async () => {});
+    const onDeleteCollection = vi.fn(async () => {});
+    const sample = [{ id: 1, name: 'Warm Up', position: 0, track_count: 12 }];
+
+    const { rerender } = render(Sidebar, {
+      ...props,
+      collections: sample,
+      activeCollectionId: null,
+      onSelectSpace,
+      onSelectCollection,
+      onCreateCollection,
+      onRenameCollection,
+      onDeleteCollection,
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'New collection' }));
+    const createField = screen.getByRole('textbox', { name: 'New collection name' });
+    await fireEvent.input(createField, { target: { value: 'Peak Hour' } });
+    await fireEvent.submit(createField.closest('form')!);
+    expect(onCreateCollection).toHaveBeenCalledWith('Peak Hour');
+
+    await fireEvent.click(screen.getByRole('button', { name: /^Warm Up/ }));
+    expect(onSelectSpace).toHaveBeenCalledWith('Library');
+    expect(onSelectCollection).toHaveBeenCalledWith(1);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Library' }));
+    expect(onSelectCollection).toHaveBeenLastCalledWith(null);
+
+    await rerender({
+      ...props,
+      collections: sample,
+      activeCollectionId: 1,
+      onSelectSpace,
+      onSelectCollection,
+      onCreateCollection,
+      onRenameCollection,
+      onDeleteCollection,
+    });
+    expect(tooltipTexts().some((text) => text?.includes('Library · Warm Up'))).toBe(true);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Actions for Warm Up' }));
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    const renameField = screen.getByRole('textbox', { name: 'Rename collection' });
+    await fireEvent.input(renameField, { target: { value: 'Opener' } });
+    await fireEvent.submit(renameField.closest('form')!);
+    expect(onRenameCollection).toHaveBeenCalledWith(1, 'Opener');
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Actions for Warm Up' }));
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+    expect(screen.getByText(/Tracks and files on disk will stay/)).toBeTruthy();
+    await fireEvent.click(screen.getByRole('button', { name: 'Delete collection' }));
+    expect(onDeleteCollection).toHaveBeenCalledWith(1);
   });
 
   it('asks the shell to collapse or expand it', async () => {

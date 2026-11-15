@@ -2,6 +2,7 @@ import { untrack } from 'svelte';
 import { SvelteMap } from 'svelte/reactivity';
 
 import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
+import type { TrackCollection } from '../ipc/bindings/TrackCollection';
 import type { TrackPage } from '../ipc/bindings/TrackPage';
 import type { TrackQuery } from '../ipc/bindings/TrackQuery';
 
@@ -35,12 +36,16 @@ export function countActiveDrawerFilters(query: TrackQuery): number {
   return count;
 }
 
-export function isQueryNarrowed(query: TrackQuery): boolean {
+export function hasQueryFilters(query: TrackQuery): boolean {
   return (
     Boolean(query.text && query.text.trim().length > 0) ||
     (query.pill !== undefined && query.pill !== null && query.pill !== 'all') ||
     countActiveDrawerFilters(query) > 0
   );
+}
+
+export function isQueryNarrowed(query: TrackQuery): boolean {
+  return hasQueryFilters(query) || query.collection_id != null;
 }
 
 /**
@@ -177,24 +182,102 @@ export class TrackPages {
     await this.#readPage(first, false);
   }
 
+  #mapTracks(transform: (track: LibraryTrack) => LibraryTrack | undefined) {
+    for (const [page, tracks] of this.#pages.entries()) {
+      let changed = false;
+      const updated = tracks.map((item) => {
+        const next = transform(item);
+        if (next) {
+          changed = true;
+          return next;
+        }
+        return item;
+      });
+      if (changed) this.#pages.set(page, updated);
+    }
+    if (this.#selectedTrack) {
+      const next = transform(this.#selectedTrack);
+      if (next) this.#selectedTrack = next;
+    }
+  }
+
   /** Updates a track's favourite flag in cached pages and the selected track immediately. */
   setLocalFavourite(trackId: number, favourite: boolean) {
-    for (const [page, tracks] of this.#pages.entries()) {
-      const index = tracks.findIndex((item) => item.id === trackId);
-      if (index !== -1) {
-        const updated = [...tracks];
-        updated[index] = { ...tracks[index]!, favourite };
-        this.#pages.set(page, updated);
+    this.#mapTracks((track) => (track.id === trackId ? { ...track, favourite } : undefined));
+  }
+
+  /** Adds a collection pill to cached tracks after membership changes. */
+  addTracksToLocalCollection(trackIds: number[], collection: TrackCollection) {
+    if (trackIds.length === 0) return;
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- local lookup set
+    const ids = new Set(trackIds);
+    this.#mapTracks((track) => {
+      if (!ids.has(track.id) || track.collections.some((c) => c.id === collection.id)) {
+        return undefined;
       }
-    }
-    if (this.#selectedTrack?.id === trackId) {
-      this.#selectedTrack = { ...this.#selectedTrack, favourite };
-    }
+      return { ...track, collections: [...track.collections, collection] };
+    });
+  }
+
+  /** Removes a collection pill from cached tracks after membership removal. */
+  removeTracksFromLocalCollection(collectionId: number, trackIds: number[]) {
+    if (trackIds.length === 0) return;
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- local lookup set
+    const ids = new Set(trackIds);
+    this.#mapTracks((track) => {
+      if (!ids.has(track.id) || !track.collections.some((c) => c.id === collectionId)) {
+        return undefined;
+      }
+      return {
+        ...track,
+        collections: track.collections.filter((c) => c.id !== collectionId),
+      };
+    });
+  }
+
+  /** Updates a renamed collection's label on all cached tracks. */
+  renameLocalCollection(collectionId: number, name: string) {
+    this.#mapTracks((track) => {
+      if (!track.collections.some((c) => c.id === collectionId)) return undefined;
+      return {
+        ...track,
+        collections: track.collections.map((c) => (c.id === collectionId ? { ...c, name } : c)),
+      };
+    });
+  }
+
+  /** Strips a deleted collection from all cached tracks. */
+  removeLocalCollection(collectionId: number) {
+    this.#mapTracks((track) => {
+      if (!track.collections.some((c) => c.id === collectionId)) return undefined;
+      return {
+        ...track,
+        collections: track.collections.filter((c) => c.id !== collectionId),
+      };
+    });
   }
 
   /** The track at a place in current query order, or nothing while its page is still on its way. */
   track(index: number): LibraryTrack | undefined {
     return this.#pages.get(Math.floor(index / PAGE_SIZE))?.[index % PAGE_SIZE];
+  }
+
+  /** Looks up a cached track by id across already-loaded pages. */
+  trackById(trackId: number): LibraryTrack | undefined {
+    for (const tracks of this.#pages.values()) {
+      const hit = tracks.find((track) => track.id === trackId);
+      if (hit) return hit;
+    }
+    return this.#selectedTrack?.id === trackId ? this.#selectedTrack : undefined;
+  }
+
+  /** Tracks currently held in cached pages. */
+  loadedTracks(): LibraryTrack[] {
+    const out: LibraryTrack[] = [];
+    for (const tracks of this.#pages.values()) {
+      out.push(...tracks);
+    }
+    return out;
   }
 
   /**

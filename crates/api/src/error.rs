@@ -30,6 +30,13 @@ impl ApiError {
         }
     }
 
+    pub fn invalid_input(detail: impl fmt::Display) -> Self {
+        Self {
+            code: ErrorCode::BadRequest,
+            message: detail.to_string(),
+        }
+    }
+
     pub fn library_unreadable(detail: impl fmt::Display) -> Self {
         Self {
             code: ErrorCode::LibraryUnreadable,

@@ -1,3 +1,4 @@
+mod collections;
 mod identity;
 mod search;
 mod sources;
@@ -8,7 +9,9 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+pub use collections::{CollectionSummary, TrackCollection};
 pub use identity::{IdentityMatch, PendingAsset, StoredAssetIdentity};
+use resonance_core::collections::CollectionNameError;
 use resonance_core::library::{
     AudioFacts, AudioFormat, ScannedFile, TagField, is_asset_path_included,
 };
@@ -18,12 +21,13 @@ pub use sources::SourceConfig;
 
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
-const MIGRATIONS: [&str; 5] = [
+const MIGRATIONS: [&str; 6] = [
     include_str!("../migrations/0001_library.sql"),
     include_str!("../migrations/0002_sources.sql"),
     include_str!("../migrations/0003_identity.sql"),
     include_str!("../migrations/0004_search_and_sort.sql"),
     include_str!("../migrations/0005_asset_fts_delete_trigger.sql"),
+    include_str!("../migrations/0006_collections.sql"),
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -37,6 +41,8 @@ pub enum DbError {
     Sqlite(rusqlite::Error),
     NewerSchema { found: u32, known: u32 },
     UnknownName { column: &'static str, name: String },
+    InvalidCollectionName(CollectionNameError),
+    DuplicateCollectionName { name: String },
 }
 
 impl fmt::Display for DbError {
@@ -59,6 +65,10 @@ impl fmt::Display for DbError {
                     "The database holds \"{name}\" in {column}, which this build does not know"
                 )
             }
+            Self::InvalidCollectionName(error) => error.fmt(f),
+            Self::DuplicateCollectionName { name } => {
+                write!(f, "A collection named \"{name}\" already exists.")
+            }
         }
     }
 }
@@ -68,6 +78,12 @@ impl std::error::Error for DbError {}
 impl From<rusqlite::Error> for DbError {
     fn from(source: rusqlite::Error) -> Self {
         Self::Sqlite(source)
+    }
+}
+
+impl From<CollectionNameError> for DbError {
+    fn from(source: CollectionNameError) -> Self {
+        Self::InvalidCollectionName(source)
     }
 }
 
@@ -98,6 +114,7 @@ pub struct TrackRow {
     pub source_folder: String,
     pub file: ScannedFile,
     pub favourite: bool,
+    pub collections: Vec<TrackCollection>,
 }
 
 /// The connection that writes. Readers open their own.
@@ -352,6 +369,7 @@ impl Database {
             track.file.tags.sort();
             tracks.push(track);
         }
+        collections::populate_track_collections(&self.connection, &mut tracks)?;
         Ok(tracks)
     }
 
@@ -375,6 +393,7 @@ impl Database {
             track.file.tags.sort();
             tracks.push(track);
         }
+        collections::populate_track_collections(&self.connection, &mut tracks)?;
         Ok(tracks)
     }
 
@@ -439,6 +458,7 @@ pub(crate) fn track_row(row: &Row<'_>) -> Result<(i64, TrackRow), DbError> {
             tags: Vec::new(),
         },
         favourite: favourite_raw != 0,
+        collections: Vec::new(),
     };
     Ok((row.get(0)?, track))
 }
@@ -668,5 +688,43 @@ mod tests {
             .expect("fts query runs"),
             0
         );
+    }
+
+    #[test]
+    fn migrating_from_v5_adds_collections_and_cascades_cleanly() {
+        let mut v5 = Connection::open_in_memory().expect("in-memory sqlite opens");
+        v5.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("foreign keys enable");
+        for (i, sql) in MIGRATIONS[..5].iter().enumerate() {
+            v5.execute_batch(sql).expect("prior migration runs");
+            v5.pragma_update(None, "user_version", i64::try_from(i + 1).expect("fits"))
+                .expect("user_version stamps");
+        }
+        v5.execute("INSERT INTO source (folder) VALUES ('D:\\Club')", [])
+            .expect("source inserts");
+        v5.execute("INSERT INTO track DEFAULT VALUES", [])
+            .expect("track inserts");
+        v5.execute(
+            "INSERT INTO asset (track_id, source_id, path, size_bytes, modified_ns, format, sort_title)
+             VALUES (1, 1, '01/opener.flac', 100, 1000, 'flac', 'opener')",
+            [],
+        )
+        .expect("asset inserts");
+
+        migrate(&mut v5).expect("v5 migrates to v6");
+
+        let mut db = Database { connection: v5 };
+        let col = db.create_collection("Warm Up").expect("collection creates");
+        db.add_tracks_to_collection(col.id, &[1])
+            .expect("track adds to collection");
+        assert_eq!(db.collections().expect("lists")[0].track_count, 1);
+
+        db.connection
+            .execute("DELETE FROM asset WHERE track_id = 1", [])
+            .expect("asset deletes");
+        db.connection
+            .execute("DELETE FROM track WHERE id = 1", [])
+            .expect("track deletes");
+        assert_eq!(db.collections().expect("lists")[0].track_count, 0);
     }
 }

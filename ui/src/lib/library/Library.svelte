@@ -4,23 +4,30 @@
   import GridDots from '../design/GridDots.svelte';
   import Icon, { type IconName } from '../design/Icon.svelte';
   import Tooltip from '../design/Tooltip.svelte';
+  import type { LibraryCollection } from '../ipc/bindings/LibraryCollection';
   import type { LibraryFacets } from '../ipc/bindings/LibraryFacets';
   import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
   import type { TrackFilterPill } from '../ipc/bindings/TrackFilterPill';
   import type { TrackQuery } from '../ipc/bindings/TrackQuery';
   import FilterDrawer from './FilterDrawer.svelte';
   import { trackCount } from './format';
-  import { countActiveDrawerFilters, type TrackPages } from './track-pages.svelte';
+  import { countActiveDrawerFilters, hasQueryFilters, type TrackPages } from './track-pages.svelte';
   import TrackTable from './TrackTable.svelte';
 
   interface Props {
     pages: TrackPages;
     selected?: number | null;
+    collections?: LibraryCollection[];
+    activeCollection?: LibraryCollection | null;
     loadFacets?: () => Promise<LibraryFacets>;
     onopen?: () => void;
     onscan: () => void;
     ontogglefavourite?: (track: LibraryTrack) => void;
     onclearsearch?: () => void;
+    onclearcollection?: () => void;
+    onaddtocollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
+    onremovefromcollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
+    oncreatecollectionandadd?: (name: string, trackIds: number[]) => Promise<void> | void;
   }
 
   type FilterId = TrackFilterPill | 'analysed' | 'unanalysed';
@@ -56,11 +63,17 @@
   let {
     pages,
     selected = $bindable(null),
+    collections = [],
+    activeCollection = null,
     loadFacets,
     onopen,
     onscan,
     ontogglefavourite,
     onclearsearch,
+    onclearcollection,
+    onaddtocollection,
+    onremovefromcollection,
+    oncreatecollectionandadd,
   }: Props = $props();
 
   let m5Gate = $state<'analysed' | 'unanalysed' | null>(null);
@@ -102,12 +115,14 @@
   function clearAllFilters() {
     m5Gate = null;
     onclearsearch?.();
-    const keepSort: TrackQuery =
-      pages.query.sort || pages.query.direction
-        ? { sort: pages.query.sort, direction: pages.query.direction }
-        : {};
-    void pages.setQuery(keepSort);
+    const keepContext: TrackQuery = {};
+    if (pages.query.collection_id != null) keepContext.collection_id = pages.query.collection_id;
+    if (pages.query.sort) keepContext.sort = pages.query.sort;
+    if (pages.query.direction) keepContext.direction = pages.query.direction;
+    void pages.setQuery(keepContext);
   }
+
+  const hasFiltersInView = $derived(hasQueryFilters(pages.query));
 
   function openDrawer() {
     drawerOpen = true;
@@ -126,9 +141,29 @@
   <div class="header">
     <div class="title-row">
       <div class="title-group">
-        <h1 class="heading">Library</h1>
-        {#if pages.state.kind === 'ready' && pages.libraryTotal > 0}
-          <span class="count numeric">{trackCount(pages.total)}</span>
+        {#if activeCollection}
+          <div class="breadcrumb">
+            <button
+              type="button"
+              class="crumb-root"
+              aria-label="Back to Library"
+              onclick={() => onclearcollection?.()}
+            >
+              Library
+            </button>
+            <span class="crumb-sep" aria-hidden="true">
+              <Icon name="chevron-right" size="xs" />
+            </span>
+            <h1 class="heading">{activeCollection.name}</h1>
+          </div>
+          {#if pages.state.kind === 'ready'}
+            <span class="count numeric">{trackCount(pages.total)}</span>
+          {/if}
+        {:else}
+          <h1 class="heading">Library</h1>
+          {#if pages.state.kind === 'ready' && pages.libraryTotal > 0}
+            <span class="count numeric">{trackCount(pages.total)}</span>
+          {/if}
         {/if}
       </div>
       {#if pages.state.kind === 'ready' && pages.libraryTotal > 0}
@@ -202,17 +237,30 @@
         <Button onclick={() => (m5Gate = null)}>Show all tracks</Button>
       </div>
     {:else if pages.total === 0}
-      <div class="state">
-        <h2>No tracks match</h2>
-        <p>Try clearing the search text or adjusting your filters.</p>
-        <Button onclick={clearAllFilters}>Clear filters</Button>
-      </div>
+      {#if activeCollection && !hasFiltersInView}
+        <div class="state">
+          <h2>This collection is empty</h2>
+          <p>Add tracks from Library using row actions, the C shortcut or the Inspector.</p>
+          <Button onclick={() => onclearcollection?.()}>Show all tracks</Button>
+        </div>
+      {:else}
+        <div class="state">
+          <h2>No tracks match</h2>
+          <p>Try clearing the search text or adjusting your filters.</p>
+          <Button onclick={clearAllFilters}>Clear filters</Button>
+        </div>
+      {/if}
     {:else}
       <TrackTable
         {pages}
         bind:selected
+        {collections}
+        {activeCollection}
         {onopen}
         {ontogglefavourite}
+        {onaddtocollection}
+        {onremovefromcollection}
+        {oncreatecollectionandadd}
         onsort={(sort, direction) => void pages.setQuery({ ...pages.query, sort, direction })}
       />
     {/if}
@@ -254,6 +302,37 @@
     flex-wrap: wrap;
     align-items: baseline;
     gap: var(--space-3);
+    min-width: 0;
+  }
+
+  .breadcrumb {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  .crumb-root {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-text-2);
+    font-family: var(--font-display);
+    font-size: var(--text-xl);
+    font-weight: var(--weight-medium);
+    line-height: var(--leading-tight);
+    cursor: pointer;
+    transition: color var(--duration-fast) var(--ease-out);
+  }
+
+  .crumb-root:hover {
+    color: var(--color-text);
+  }
+
+  .crumb-sep {
+    display: inline-flex;
+    align-self: center;
+    color: var(--color-muted);
   }
 
   .heading {

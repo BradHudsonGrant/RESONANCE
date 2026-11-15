@@ -265,12 +265,19 @@ fn build_query_sql(query: &TrackQuery, count_only: bool) -> (String, Vec<Value>)
     let mut conditions = vec!["asset.included = 1".to_owned()];
     let mut needs_track_join = query.sort == TrackSortField::Added
         || matches!(query.pill, FilterPill::Favourites | FilterPill::Recent);
-    let mut needs_source_join =
-        !count_only && query.sort == TrackSortField::Index && query.pill != FilterPill::Recent;
+    let mut needs_source_join = !count_only
+        && query.sort == TrackSortField::Index
+        && query.pill != FilterPill::Recent
+        && query.collection_id.is_none();
 
     if let Some(fts) = fts_match.as_ref() {
         let slot = bind_param(&mut params, Value::Text(fts.clone()));
         conditions.push(format!("asset_fts MATCH {slot}"));
+    }
+
+    if let Some(collection_id) = query.collection_id {
+        let slot = bind_param(&mut params, Value::Integer(collection_id));
+        conditions.push(format!("collection_item.collection_id = {slot}"));
     }
 
     match query.pill {
@@ -334,6 +341,7 @@ fn build_query_sql(query: &TrackQuery, count_only: bool) -> (String, Vec<Value>)
 
     // Choose join order to keep SQLite walking the matching index without a temp sort.
     let has_selective_filter = query.pill == FilterPill::Favourites
+        || query.collection_id.is_some()
         || query.bpm_min.is_some()
         || query.bpm_max.is_some()
         || query.year_min.is_some()
@@ -348,6 +356,20 @@ fn build_query_sql(query: &TrackQuery, count_only: bool) -> (String, Vec<Value>)
     let from = if fts_match.is_some() {
         let mut from =
             String::from("FROM asset_fts CROSS JOIN asset ON asset.id = asset_fts.rowid");
+        if query.collection_id.is_some() {
+            from.push_str(" JOIN collection_item ON collection_item.track_id = asset.track_id");
+        }
+        if needs_source_join {
+            from.push_str(" JOIN source ON source.id = asset.source_id");
+        }
+        if needs_track_join {
+            from.push_str(" JOIN track ON track.id = asset.track_id");
+        }
+        from
+    } else if query.collection_id.is_some() {
+        let mut from = String::from(
+            "FROM collection_item CROSS JOIN asset ON asset.track_id = collection_item.track_id",
+        );
         if needs_source_join {
             from.push_str(" JOIN source ON source.id = asset.source_id");
         }
@@ -408,6 +430,9 @@ fn build_query_sql(query: &TrackQuery, count_only: bool) -> (String, Vec<Value>)
     };
 
     let order_by = match query.sort {
+        TrackSortField::Index if query.collection_id.is_some() => {
+            format!("collection_item.position {dir}, collection_item.track_id {dir}")
+        }
         TrackSortField::Index if query.pill == FilterPill::Recent => match query.direction {
             SortDirection::Asc => "track.added_ns DESC, track.id DESC, asset.id DESC",
             SortDirection::Desc => "track.added_ns ASC, track.id ASC, asset.id ASC",
@@ -483,5 +508,6 @@ fn load_tracks_by_ids(connection: &Connection, ids: &[i64]) -> Result<Vec<TrackR
             ordered.push(track);
         }
     }
+    crate::collections::populate_track_collections(connection, &mut ordered)?;
     Ok(ordered)
 }

@@ -1,3 +1,4 @@
+pub mod collections;
 pub mod identity;
 pub mod key;
 pub mod library;

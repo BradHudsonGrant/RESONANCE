@@ -3,6 +3,7 @@ import type { AppInfo } from "./AppInfo";
 import type { FavouriteState } from "./FavouriteState";
 import type { IdentifyReport } from "./IdentifyReport";
 import type { LibraryChanged } from "./LibraryChanged";
+import type { LibraryCollection } from "./LibraryCollection";
 import type { LibraryFacets } from "./LibraryFacets";
 import type { LibrarySources } from "./LibrarySources";
 import type { MixState } from "./MixState";
@@ -10,4 +11,4 @@ import type { ScanReport } from "./ScanReport";
 import type { SourceSubfolder } from "./SourceSubfolder";
 import type { TrackPage } from "./TrackPage";
 
-export type Response = { "command": "app_info", "result": AppInfo } | { "command": "tracks", "result": TrackPage } | { "command": "set_track_favourite", "result": FavouriteState } | { "command": "library_facets", "result": LibraryFacets } | { "command": "scan", "result": ScanReport } | { "command": "identify", "result": IdentifyReport } | { "command": "sources", "result": LibrarySources } | { "command": "source_subfolders", "result": Array<SourceSubfolder> } | { "command": "update_source", "result": LibrarySources } | { "command": "remove_source", "result": LibrarySources } | { "command": "set_ignored_folders", "result": LibrarySources } | { "command": "library_changed", "result": LibraryChanged } | { "command": "mix_load", "result": MixState } | { "command": "mix_play", "result": MixState } | { "command": "mix_status", "result": MixState };
+export type Response = { "command": "app_info", "result": AppInfo } | { "command": "tracks", "result": TrackPage } | { "command": "set_track_favourite", "result": FavouriteState } | { "command": "collections", "result": Array<LibraryCollection> } | { "command": "create_collection", "result": LibraryCollection } | { "command": "rename_collection", "result": LibraryCollection } | { "command": "delete_collection", "result": Array<LibraryCollection> } | { "command": "add_tracks_to_collection", "result": LibraryCollection } | { "command": "remove_tracks_from_collection", "result": LibraryCollection } | { "command": "library_facets", "result": LibraryFacets } | { "command": "scan", "result": ScanReport } | { "command": "identify", "result": IdentifyReport } | { "command": "sources", "result": LibrarySources } | { "command": "source_subfolders", "result": Array<SourceSubfolder> } | { "command": "update_source", "result": LibrarySources } | { "command": "remove_source", "result": LibrarySources } | { "command": "set_ignored_folders", "result": LibrarySources } | { "command": "library_changed", "result": LibraryChanged } | { "command": "mix_load", "result": MixState } | { "command": "mix_play", "result": MixState } | { "command": "mix_status", "result": MixState };
