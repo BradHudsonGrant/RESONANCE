@@ -285,12 +285,17 @@ test('manual collections create, assign via multi-select, inspect, persist and d
 
   await page.setViewportSize({ width: 1100, height: 700 });
   const collapsedLib = sidebar.getByRole('button', { name: 'Library' });
-  const railActive = await collapsedLib.evaluate((el) => ({
-    bg: getComputedStyle(el).backgroundColor,
-    barDisplay: getComputedStyle(el, '::before').display,
-  }));
-  expect(railActive.bg).not.toBe('rgba(0, 0, 0, 0)');
-  expect(railActive.barDisplay).not.toBe('none');
+  await expect
+    .poll(() =>
+      collapsedLib.evaluate((el) => ({
+        bg: getComputedStyle(el).backgroundColor,
+        barDisplay: getComputedStyle(el, '::before').display,
+      })),
+    )
+    .toEqual({
+      bg: expect.not.stringMatching(/^rgba\(0,\s*0,\s*0,\s*0\)$/),
+      barDisplay: 'block',
+    });
   await collapsedLib.hover();
   await expect(sidebar.getByText('Library · Warm Up')).toBeVisible();
 

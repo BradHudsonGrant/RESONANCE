@@ -8,6 +8,8 @@ const port = 5180;
 export default defineConfig({
   testDir: 'e2e',
   testMatch: '**/*.e2e.ts',
+  // Cold browser launch on shared CI runners can take over 20 s on the first test.
+  timeout: 60_000,
   globalSetup: './e2e/core.ts',
   // One core and one library, so tests run in order.
   workers: 1,
