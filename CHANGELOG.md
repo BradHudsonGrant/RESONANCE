@@ -2,6 +2,32 @@
 
 Every release, newest first. Made from the commit history with git-cliff.
 
+## 0.2.0, 15 November 2026
+
+### Added
+
+- Build primitives and micro elements to spec ([#61](https://github.com/BradHudsonGrant/RESONANCE/pull/61))
+- Implement application shell to design spec ([#63](https://github.com/BradHudsonGrant/RESONANCE/pull/63))
+- Rebuild Library and Mix views to design spec ([#69](https://github.com/BradHudsonGrant/RESONANCE/pull/69))
+
+### Fixed
+
+- Finish #51 layout, tooltip and theme fixes ([#68](https://github.com/BradHudsonGrant/RESONANCE/pull/68))
+
+### Faster
+
+- Verify 240 Hz scroll budget and settle wording ([#70](https://github.com/BradHudsonGrant/RESONANCE/pull/70))
+- Verify full-window stability and settle budget ([#71](https://github.com/BradHudsonGrant/RESONANCE/pull/71))
+- Split startup tasks and defer sidebar wave init ([#72](https://github.com/BradHudsonGrant/RESONANCE/pull/72))
+
+### Docs
+
+- Mark M0 v0.1.0 release complete ([#60](https://github.com/BradHudsonGrant/RESONANCE/pull/60))
+- Restore dropped rules and correct ADR 0012 ([#67](https://github.com/BradHudsonGrant/RESONANCE/pull/67))
+- Record bar-synchronous features and transition scoring ([#66](https://github.com/BradHudsonGrant/RESONANCE/pull/66))
+- Record M1 design acceptance ([#74](https://github.com/BradHudsonGrant/RESONANCE/pull/74))
+- Refresh screenshots and status for v0.2.0 ([#76](https://github.com/BradHudsonGrant/RESONANCE/pull/76))
+
 ## 0.1.0, 14 November 2026
 
 ### Added

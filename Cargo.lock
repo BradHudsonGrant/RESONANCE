@@ -3131,7 +3131,7 @@ dependencies = [
 
 [[package]]
 name = "resonance-api"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "directories",
  "futures-util",
@@ -3150,7 +3150,7 @@ dependencies = [
 
 [[package]]
 name = "resonance-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "resonance-api",
@@ -3162,7 +3162,7 @@ dependencies = [
 
 [[package]]
 name = "resonance-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "resonance-api",
@@ -3179,11 +3179,11 @@ dependencies = [
 
 [[package]]
 name = "resonance-core"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "resonance-db"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "resonance-core",
  "rusqlite",
@@ -3191,7 +3191,7 @@ dependencies = [
 
 [[package]]
 name = "resonance-engine"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cpal",
  "resonance-core",
@@ -3202,7 +3202,7 @@ dependencies = [
 
 [[package]]
 name = "resonance-fixtures"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "resonance-core",
  "resonance-db",
@@ -3214,7 +3214,7 @@ dependencies = [
 
 [[package]]
 name = "resonance-library"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dunce",
  "lofty",
