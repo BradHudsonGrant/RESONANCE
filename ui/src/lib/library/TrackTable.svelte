@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { SvelteSet } from 'svelte/reactivity';
+
   import TableCell from '../design/TableCell.svelte';
   import TableRow from '../design/TableRow.svelte';
-  import { columns, columnWidths, tableWidth } from './columns';
+  import { columnWidths, compactColumnWidths, dataColumns, tableMinWidth } from './columns';
   import type { TrackPages } from './track-pages.svelte';
 
   interface Props {
@@ -18,8 +20,9 @@
   const OVERSCAN = 8;
 
   const id = $props.id();
+  const checkedIds = new SvelteSet<number>();
   let viewport: HTMLDivElement | undefined = $state();
-  let rowHeight = $state(30);
+  let rowHeight = $state(33);
   let scrollTop = $state(0);
   let viewportHeight = $state(0);
   let headHeight = $state(0);
@@ -65,6 +68,11 @@
     if (pages.total > 0) selected = Math.min(Math.max(index, 0), pages.total - 1);
   }
 
+  function toggleChecked(trackId: number) {
+    if (checkedIds.has(trackId)) checkedIds.delete(trackId);
+    else checkedIds.add(trackId);
+  }
+
   function onkeydown(event: KeyboardEvent) {
     if (event.altKey || event.ctrlKey || event.metaKey) return;
     const at = selected ?? -1;
@@ -83,6 +91,12 @@
     } else if (event.key === 'Enter' && selected !== null) {
       event.preventDefault();
       onopen?.();
+    } else if (event.key.toLowerCase() === 'x' && selected !== null) {
+      const track = pages.track(selected);
+      if (track) {
+        event.preventDefault();
+        toggleChecked(track.id);
+      }
     }
   }
 </script>
@@ -97,7 +111,8 @@
     ? `${id}-row-${selected}`
     : undefined}
   style:--columns={columnWidths}
-  style:--table-width={tableWidth}
+  style:--columns-compact={compactColumnWidths}
+  style:--table-width={tableMinWidth}
   {onkeydown}
 >
   <div
@@ -107,10 +122,16 @@
     onscroll={() => (scrollTop = viewport?.scrollTop ?? 0)}
   >
     <div class="head" role="rowgroup" bind:offsetHeight={headHeight}>
-      <TableRow aria-rowindex={1} style="grid-template-columns: var(--columns)">
-        {#each columns as column (column.key)}
+      <TableRow header aria-rowindex={1} style="grid-template-columns: var(--active-columns)">
+        <TableCell header compact><span class="visually-hidden">Selected</span></TableCell>
+        <TableCell header compact><span class="visually-hidden">Status</span></TableCell>
+        <TableCell header numeric class="col-index">#</TableCell>
+        {#each dataColumns as column (column.key)}
           <TableCell header numeric={column.numeric}>{column.label}</TableCell>
         {/each}
+        <TableCell header compact class="col-actions">
+          <span class="visually-hidden">Actions</span>
+        </TableCell>
       </TableRow>
     </div>
     <div class="body" role="rowgroup" style:height="{pages.total * rowHeight}px">
@@ -118,11 +139,13 @@
         {#each { length: shown }, offset}
           {@const index = first + offset}
           {@const track = pages.track(index)}
+          {@const isSelected = index === selected}
+          {@const isChecked = track ? checkedIds.has(track.id) : false}
           <TableRow
             id="{id}-row-{index}"
             aria-rowindex={index + 2}
-            selected={index === selected}
-            style="grid-template-columns: var(--columns)"
+            selected={isSelected}
+            style="grid-template-columns: var(--active-columns)"
             onclick={() => select(index)}
             ondblclick={() => {
               select(index);
@@ -131,9 +154,70 @@
           >
             <!-- The cells stay while a row waits for its page, so a jump changes text and does
                  not rebuild them. -->
-            {#each columns as column (column.key)}
-              <TableCell numeric={column.numeric}>{track ? column.text(track) : ''}</TableCell>
+            <TableCell compact>
+              <button
+                type="button"
+                class={['tick', { filled: isSelected || isChecked }]}
+                role="checkbox"
+                aria-label={track ? `Tick ${track.title}` : 'Tick row'}
+                aria-checked={isChecked}
+                tabindex={-1}
+                disabled={!track}
+                onclick={(event) => {
+                  event.stopPropagation();
+                  if (track) toggleChecked(track.id);
+                }}
+              >
+                {#if isSelected || isChecked}
+                  <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
+                    <path
+                      d="M2.2 6.2 4.8 8.8 9.8 3.4"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.6"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                {/if}
+              </button>
+            </TableCell>
+            <TableCell compact>
+              {#if isSelected}
+                <svg class="status-icon" viewBox="0 0 14 14" width="14" height="14" aria-hidden="true">
+                  <path d="M3.5 2.4 11.5 7 3.5 11.6Z" fill="currentColor" />
+                </svg>
+              {/if}
+            </TableCell>
+            <TableCell numeric size="sm" tone="muted" class="col-index">
+              {track ? index + 1 : ''}
+            </TableCell>
+            {#each dataColumns as column (column.key)}
+              <TableCell
+                numeric={column.numeric}
+                mono={column.mono}
+                tone={column.tone}
+                weight={column.weight}
+              >
+                {track ? column.text(track) : ''}
+              </TableCell>
             {/each}
+            <TableCell compact class="col-actions">
+              <button
+                type="button"
+                class="more"
+                aria-label="Track actions"
+                aria-disabled="true"
+                tabindex={-1}
+                title="Track actions arrive in M2"
+              >
+                <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+                  <circle cx="3.5" cy="8" r="1.2" fill="currentColor" />
+                  <circle cx="8" cy="8" r="1.2" fill="currentColor" />
+                  <circle cx="12.5" cy="8" r="1.2" fill="currentColor" />
+                </svg>
+              </button>
+            </TableCell>
             {#if !track}
               <span class="pending" aria-label="Loading"></span>
             {/if}
@@ -146,12 +230,16 @@
 
 <style>
   .table {
+    --active-columns: var(--columns);
+    container: track-table / inline-size;
     height: 100%;
     min-height: 0;
+    padding: 0 var(--space-5);
   }
 
   .table:focus-visible {
-    outline-offset: -2px;
+    outline: var(--focus-ring-width) solid var(--color-border-control);
+    outline-offset: var(--focus-ring-offset);
   }
 
   .viewport {
@@ -169,7 +257,7 @@
     position: sticky;
     top: 0;
     z-index: 1;
-    background: var(--color-surface);
+    background: var(--color-background);
   }
 
   /* What changes as the table scrolls is laid out and painted inside here alone. */
@@ -186,6 +274,68 @@
     contain: layout paint;
   }
 
+  .tick {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--checkbox-size);
+    height: var(--checkbox-size);
+    padding: 0;
+    border: var(--border-width) solid var(--color-border-control);
+    border-radius: var(--radius-xs);
+    background: transparent;
+    color: var(--color-background);
+    cursor: pointer;
+  }
+
+  .tick.filled {
+    border-color: var(--color-text);
+    background: var(--color-text);
+  }
+
+  .tick:disabled {
+    cursor: default;
+    opacity: 0.4;
+  }
+
+  .status-icon {
+    color: var(--color-text);
+  }
+
+  .more {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--control-height-keybadge);
+    height: var(--control-height-keybadge);
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-xs);
+    background: transparent;
+    color: var(--color-muted);
+    cursor: default;
+  }
+
+  @container track-table (width < 580px) {
+    .viewport {
+      --active-columns: var(--columns-compact);
+    }
+
+    .viewport :global(.col-index),
+    .viewport :global(.col-actions) {
+      display: none;
+    }
+  }
+
+  @media (forced-colors: active) {
+    .tick.filled {
+      border-color: Highlight;
+      background: Highlight;
+      color: HighlightText;
+      forced-color-adjust: none;
+    }
+  }
+
   /* A row's layout containment makes it the box this is placed in. */
   .pending {
     position: absolute;
@@ -193,7 +343,7 @@
     right: var(--space-2);
     left: var(--space-2);
     height: 6px;
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     background: var(--color-surface-2);
   }
 </style>

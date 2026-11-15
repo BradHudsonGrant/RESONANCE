@@ -90,6 +90,23 @@
   let deckAVol = $state(100);
   let removableTags = $state(['Hypnotic', 'Peak Time', 'Industrial', 'Rolling Bass']);
 
+  function specimenPeaks(trackSeed: number, total = 180): Float32Array {
+    const out = new Float32Array(total);
+    for (let index = 0; index < total; index++) {
+      const pos = index / Math.max(1, total - 1);
+      const envelope = Math.sin(pos * Math.PI) ** 0.45;
+      const phrase = 0.65 + 0.35 * Math.sin(pos * Math.PI * 6 + trackSeed * 1.7);
+      const fine = Math.abs(Math.sin(index * 12.9898 + trackSeed * 78.233) * 43758.5453) % 1;
+      out[index] = Math.min(1, Math.max(0.08, envelope * phrase * (0.38 + 0.62 * fine)));
+    }
+    return out;
+  }
+
+  const inlinePeaks = specimenPeaks(1);
+  const curvePeaks = specimenPeaks(2);
+  const crossfadePeaksA = specimenPeaks(3);
+  const crossfadePeaksB = specimenPeaks(20);
+
   function removeTag(tag: string) {
     removableTags = removableTags.filter((item) => item !== tag);
   }
@@ -330,11 +347,19 @@
     </div>
 
     <div class="waveforms">
-      <Waveform mode="inline" seed={1} progress={0.45} label="Inline track waveform" />
-      <Waveform mode="curve" seed={2} durationSec={422} label="Energy curve waveform" />
+      <Waveform
+        mode="inline"
+        peaks={inlinePeaks}
+        durationSec={332}
+        progress={0.45}
+        label="Inline track waveform"
+      />
+      <Waveform mode="curve" peaks={curvePeaks} durationSec={422} label="Energy curve waveform" />
       <Waveform
         mode="crossfade"
-        seed={3}
+        peaks={crossfadePeaksA}
+        secondaryPeaks={crossfadePeaksB}
+        durationSec={422}
         progress={0.55}
         mixPoint={0.6}
         playing

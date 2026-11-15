@@ -1,74 +1,76 @@
 import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
 import { duration, tempo } from './format';
 
-export interface Column {
-  key: string;
+export interface DataColumn {
+  key: 'title' | 'artist' | 'bpm' | 'key' | 'time';
   label: string;
-  /** Set in the number face and to the right, so the digits line up down the column. */
-  numeric: boolean;
-  /** The narrowest the column goes, in rem. */
-  min: number;
-  /** Its share of any width left over. A column with none stays at its narrowest. */
-  grow: number;
+  track: string;
+  numeric?: boolean;
+  mono?: boolean;
+  tone?: 'primary' | 'secondary' | 'muted';
+  weight?: 'regular' | 'medium';
   text: (track: LibraryTrack) => string;
 }
 
-export const columns: Column[] = [
-  { key: 'title', label: 'Title', numeric: false, min: 12, grow: 3, text: (track) => track.title },
+/** Container-width drop thresholds for M5 analysis columns (docs/design/library.md). */
+export const ENERGY_HIDE_BELOW_PX = 820;
+export const WAVEFORM_NARROW_BELOW_PX = 740;
+export const WAVEFORM_HIDE_BELOW_PX = 640;
+
+/** Container width below which the row index and row-actions columns fold away. */
+export const COMPACT_TABLE_BELOW_PX = 580;
+
+export const dataColumns: DataColumn[] = [
+  {
+    key: 'title',
+    label: 'Title',
+    track: 'minmax(150px, 1.8fr)',
+    weight: 'medium',
+    text: (track) => track.title,
+  },
   {
     key: 'artist',
     label: 'Artist',
-    numeric: false,
-    min: 9,
-    grow: 2,
+    track: 'minmax(120px, 1.3fr)',
+    tone: 'secondary',
     text: (track) => track.artist ?? '',
   },
-  { key: 'bpm', label: 'BPM', numeric: true, min: 4.5, grow: 0, text: (track) => tempo(track.bpm) },
+  {
+    key: 'bpm',
+    label: 'BPM',
+    track: '58px',
+    numeric: true,
+    text: (track) => tempo(track.bpm),
+  },
   {
     key: 'key',
     label: 'Key',
-    numeric: true,
-    min: 3.5,
-    grow: 0,
-    text: (track) => track.key?.camelot ?? '',
+    track: '52px',
+    mono: true,
+    text: (track) => track.key?.camelot ?? track.key_tag ?? '',
   },
   {
     key: 'time',
     label: 'Time',
+    track: '56px',
     numeric: true,
-    min: 4.5,
-    grow: 0,
+    tone: 'secondary',
     text: (track) => duration(track.audio?.duration_ms),
-  },
-  {
-    key: 'genre',
-    label: 'Genre',
-    numeric: false,
-    min: 7,
-    grow: 1,
-    text: (track) => track.genre ?? '',
-  },
-  {
-    key: 'album',
-    label: 'Album',
-    numeric: false,
-    min: 8,
-    grow: 1.5,
-    text: (track) => track.album ?? '',
-  },
-  {
-    key: 'format',
-    label: 'Format',
-    numeric: false,
-    min: 4.5,
-    grow: 0,
-    text: (track) => track.format.toUpperCase(),
   },
 ];
 
-export const columnWidths = columns
-  .map(({ min, grow }) => (grow > 0 ? `minmax(${min}rem, ${grow}fr)` : `${min}rem`))
-  .join(' ');
+/** Tick box (30) + Status (22) + # (36) + data columns + Actions (32). */
+export const columnWidths = `30px 22px 36px ${dataColumns.map((col) => col.track).join(' ')} 32px`;
 
-/** The row's selection border and the columns at their narrowest. Past this the table scrolls. */
-export const tableWidth = `calc(2px + ${columns.reduce((sum, { min }) => sum + min, 0)}rem)`;
+/** Below COMPACT_TABLE_BELOW_PX, # and Actions fold away so narrow workspaces never scroll sideways. */
+export const compactColumnWidths = [
+  '30px',
+  '22px',
+  'minmax(136px, 1.8fr)',
+  'minmax(108px, 1.3fr)',
+  '58px',
+  '52px',
+  '56px',
+].join(' ');
+
+export const tableMinWidth = '462px';

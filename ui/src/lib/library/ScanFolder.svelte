@@ -11,6 +11,7 @@
   }
 
   let { open = $bindable(), scan, onscanned }: Props = $props();
+  const formId = $props.id();
   let folder = $state('');
   let running = $state(false);
   let report = $state<ScanReport>();
@@ -34,19 +35,15 @@
 </script>
 
 <Sheet bind:open title="Scan a music folder">
-  <form onsubmit={submit}>
-    <p>Paste the path to a music folder. Its subfolders are included. Nothing in it is changed.</p>
+  <form id={formId} onsubmit={submit}>
+    <p class="intro">
+      Paste the path to a music folder. Its subfolders are included. Nothing in it is changed.
+    </p>
     <TextInput label="Music folder" bind:value={folder} required disabled={running} />
-    <div class="actions">
-      <Button variant="primary" type="submit" disabled={running || !folder.trim()}>
-        {running ? 'Scanning…' : 'Scan folder'}
-      </Button>
-      <Button onclick={() => (open = false)}>{running ? 'Hide' : 'Close'}</Button>
-    </div>
-    <div aria-live="polite" role="status">
+    <div class="feedback" aria-live="polite" role="status">
       {#if running}<p>Reading the folder. You can hide this sheet while it runs.</p>{/if}
       {#if report}
-        <p>
+        <p class="numeric">
           {report.found} files: {report.added} added, {report.changed} changed,
           {report.unchanged} unchanged.
         </p>
@@ -63,8 +60,15 @@
         {/if}
       {/if}
     </div>
-    {#if error}<p role="alert">{error}</p>{/if}
+    {#if error}<p class="error" role="alert">{error}</p>{/if}
   </form>
+
+  {#snippet actions()}
+    <Button variant="quiet" onclick={() => (open = false)}>{running ? 'Hide' : 'Close'}</Button>
+    <Button variant="primary" type="submit" form={formId} disabled={running || !folder.trim()}>
+      {running ? 'Scanning…' : 'Scan folder'}
+    </Button>
+  {/snippet}
 </Sheet>
 
 <style>
@@ -73,15 +77,28 @@
     gap: var(--space-3);
   }
 
-  .actions {
-    display: flex;
+  .intro,
+  .feedback p,
+  .error {
+    margin: 0;
+  }
+
+  .feedback {
+    display: grid;
     gap: var(--space-2);
+    font-size: var(--text-sm);
+  }
+
+  .error {
+    color: var(--color-text);
+    font-size: var(--text-sm);
   }
 
   .unreadable {
     max-height: 30vh;
+    margin: 0;
+    padding-left: var(--space-4);
     overflow: auto;
     overflow-wrap: anywhere;
-    padding-left: var(--space-4);
   }
 </style>
