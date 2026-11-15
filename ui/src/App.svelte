@@ -27,6 +27,7 @@
   let sheetOpen = $state(false);
   let settingsOpen = $state(false);
   let scanOpen = $state(false);
+  let mixPlaying = $state(false);
 
   const track = $derived(pages.selectedTrack);
   const inspectorDocked = $derived(space === 'Library' && !inspectorHidden);
@@ -143,6 +144,7 @@
     <Sidebar
       activeSpace={space}
       trackCount={pages.state.kind === 'ready' ? pages.total : null}
+      wavePaused={space === 'Mix' && mixPlaying}
       onSelectSpace={(nextSpace) => (space = nextSpace)}
       onCollapse={(collapsed) => (sidebarChoice = collapsed ? 'collapsed' : 'expanded')}
     />
@@ -152,7 +154,7 @@
     <CommandBar {commands} inputId={commandInput} />
     <main class="workspace-content">
       {#if space === 'Mix'}
-        <Mix />
+        <Mix onplayingchange={(playing) => (mixPlaying = playing)} />
       {:else}
         <Library
           {pages}

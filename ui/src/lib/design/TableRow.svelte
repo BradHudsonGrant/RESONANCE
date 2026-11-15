@@ -43,6 +43,7 @@
 
   .selected,
   .selected:not(.header):not(.disabled):hover {
+    border-bottom-color: transparent;
     border-radius: var(--radius-sm);
     background: var(--color-raised);
     outline: var(--border-width) solid var(--color-border-control);

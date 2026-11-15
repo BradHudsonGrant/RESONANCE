@@ -3,9 +3,14 @@ import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CoreError } from '../ipc/client';
-import { fakeLibrary } from './fake-library';
+import { fakeLibrary, fakeTrack } from './fake-library';
+import { audioSummary, trackSeed } from './format';
+import Inspector from './Inspector.svelte';
 import Library from './Library.svelte';
 import { TrackPages } from './track-pages.svelte';
+
+HTMLElement.prototype.showPopover ??= () => {};
+HTMLElement.prototype.hidePopover ??= () => {};
 
 describe('Library', () => {
   it('shows the Library header, track count and a virtualised slice of 100,000 rows', async () => {
@@ -16,6 +21,7 @@ describe('Library', () => {
 
     expect(screen.getByRole('heading', { name: 'Library' })).toBeTruthy();
     expect(screen.getByText('100,000 tracks')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeTruthy();
 
     const grid = screen.getByRole('grid', { name: 'Tracks' });
     expect(grid.getAttribute('aria-rowcount')).toBe('100001');
@@ -58,7 +64,7 @@ describe('Library', () => {
     expect(top[0]?.textContent).toContain('Track 0');
   });
 
-  it('toggles filter pills and names the milestone for filters still to come', async () => {
+  it('toggles filter pills and returns to all tracks when an active pill is clicked again', async () => {
     const { pages } = fakeLibrary(12);
     await pages.load();
     render(Library, { pages, onscan: vi.fn() });
@@ -77,7 +83,7 @@ describe('Library', () => {
     await fireEvent.click(favouritesPill);
     expect(screen.getByRole('heading', { name: 'Favourites arrives in M2' })).toBeTruthy();
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Show all tracks' }));
+    await fireEvent.click(favouritesPill);
     expect(allPill.getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByRole('grid', { name: 'Tracks' })).toBeTruthy();
   });
@@ -114,5 +120,63 @@ describe('Library', () => {
 
     expect(screen.getByRole('alert').textContent).toContain('The core is not running.');
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+  });
+});
+
+describe('Inspector and track formatting', () => {
+  it('shows seeded artwork, audio format, two detail rows and file facts for a track', async () => {
+    const onclose = vi.fn();
+    const track = {
+      ...fakeTrack(3),
+      album: 'Night Bus',
+      album_artist: 'Ada Marsh',
+      track_number: '4',
+      label: 'Northline',
+      comment: 'Vinyl rip',
+    };
+
+    render(Inspector, { track, onclose });
+
+    const aside = screen.getByRole('complementary', { name: 'Inspector' });
+    expect(within(aside).getByRole('heading', { name: 'Track 3' })).toBeTruthy();
+    expect(within(aside).getByRole('img', { name: 'Track 3 artwork' })).toBeTruthy();
+    expect(aside.textContent).toContain('FLAC · 44.1 kHz · 16-bit');
+    expect(aside.textContent).toContain('124.0');
+    expect(aside.textContent).toContain('8A · Am');
+    expect(aside.textContent).toContain('5:01');
+    expect(aside.textContent).toContain('Night Bus');
+    expect(aside.textContent).toContain('Northline');
+    expect(aside.textContent).toContain('Vinyl rip');
+    expect(aside.textContent).toContain('/music/3.flac');
+
+    await fireEvent.click(within(aside).getByRole('button', { name: 'Hide the inspector' }));
+    expect(onclose).toHaveBeenCalledOnce();
+  });
+
+  it('explains when audio properties are missing and renders a quiet empty state', () => {
+    const unreadable = { ...fakeTrack(0), artist: null, audio: null, format: 'mp3' };
+    const { unmount } = render(Inspector, { track: unreadable, onclose: vi.fn() });
+
+    expect(screen.getByText('No artist tag')).toBeTruthy();
+    expect(screen.getByText(/could not be read as audio/)).toBeTruthy();
+    unmount();
+
+    render(Inspector, { track: undefined, onclose: vi.fn() });
+    expect(screen.getByText(/Select a track in the table/)).toBeTruthy();
+  });
+
+  it('derives stable track seeds and readable lossless or lossy summaries', () => {
+    expect(trackSeed('/a/first.wav')).toBe(trackSeed('/a/first.wav'));
+    expect(trackSeed('/a/first.wav')).not.toBe(trackSeed('/a/second.wav'));
+    expect(
+      audioSummary('mp3', {
+        duration_ms: 1000,
+        sample_rate: 48_000,
+        channels: 2,
+        bit_depth: null,
+        bitrate_kbps: 320,
+      }),
+    ).toBe('MP3 · 48 kHz · 320 kbps');
+    expect(audioSummary('wav', null)).toBe('WAV');
   });
 });

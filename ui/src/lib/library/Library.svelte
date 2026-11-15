@@ -1,9 +1,9 @@
 <script lang="ts">
   import Button from '../design/Button.svelte';
   import FilterPill from '../design/FilterPill.svelte';
+  import GridDots from '../design/GridDots.svelte';
   import Icon, { type IconName } from '../design/Icon.svelte';
   import Tooltip from '../design/Tooltip.svelte';
-  import Wave from '../wave/Wave.svelte';
   import { trackCount } from './format';
   import type { TrackPages } from './track-pages.svelte';
   import TrackTable from './TrackTable.svelte';
@@ -68,32 +68,36 @@
     <div class="title-row">
       <div class="title-group">
         <h1 class="heading">Library</h1>
-        {#if pages.state.kind === 'ready'}
+        {#if pages.state.kind === 'ready' && pages.total > 0}
           <span class="count numeric">{trackCount(pages.total)}</span>
         {/if}
       </div>
-      <div class="actions">
-        {#if pages.state.kind === 'ready' && pages.total > 0}
+      {#if pages.state.kind === 'ready' && pages.total > 0}
+        <div class="actions">
           <Button variant="quiet" onclick={onscan}>Scan folder</Button>
-        {/if}
-        <Tooltip text="Filters arrive in M2" side="left">
-          <Button aria-label="Filters" aria-disabled="true">
-            <Icon name="sliders" size="sm" />Filters
-          </Button>
-        </Tooltip>
-      </div>
+          <Tooltip text="Filters arrive in M2" side="left">
+            <Button variant="icon" size="lg" aria-label="Filters" aria-disabled="true">
+              <Icon name="sliders" size="sm" />
+            </Button>
+          </Tooltip>
+        </div>
+      {/if}
     </div>
 
-    <div class="pills" role="toolbar" aria-label="Track filters">
-      {#each pills as pill (pill.id)}
-        <FilterPill
-          label={pill.label}
-          icon={pill.icon}
-          active={activeFilter === pill.id}
-          onclick={() => (activeFilter = pill.id)}
-        />
-      {/each}
-    </div>
+    {#if pages.state.kind !== 'ready' || pages.total > 0}
+      <div class="pills" role="toolbar" aria-label="Track filters">
+        {#each pills as pill (pill.id)}
+          <FilterPill
+            label={pill.label}
+            icon={pill.icon}
+            active={activeFilter === pill.id}
+            onclick={() => {
+              activeFilter = activeFilter === pill.id ? 'all' : pill.id;
+            }}
+          />
+        {/each}
+      </div>
+    {/if}
   </div>
 
   <div class="stage">
@@ -112,12 +116,13 @@
       </div>
     {:else if pages.total === 0}
       <div class="empty">
-        <div class="empty-wave"><Wave /></div>
-        <div class="state">
-          <h2>No tracks yet</h2>
-          <p>Add a music folder to see its tracks here. Nothing in the folder is changed.</p>
-          <Button variant="primary" onclick={onscan}>Add a music folder</Button>
-        </div>
+        <GridDots spacing={24}>
+          <div class="empty-card">
+            <h2>No tracks yet</h2>
+            <p>Add a music folder to see its tracks here. Nothing in the folder is changed.</p>
+            <Button variant="primary" onclick={onscan}>Add a music folder</Button>
+          </div>
+        </GridDots>
       </div>
     {:else if activePill.arrives}
       <div class="state">
@@ -208,16 +213,39 @@
   }
 
   .empty {
-    display: grid;
-    grid-template-rows: minmax(140px, 220px) auto;
     height: 100%;
     min-height: 0;
-    overflow-y: auto;
+    padding: var(--space-2) var(--space-5) var(--space-5);
   }
 
-  .empty-wave {
-    min-height: 0;
-    mask-image: linear-gradient(to bottom, black 60%, transparent);
+  .empty :global(.grid-dots) {
+    display: flex;
+    align-items: center;
+    height: 100%;
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-lg);
+  }
+
+  .empty-card {
+    display: grid;
+    justify-items: start;
+    gap: var(--space-3);
+    max-width: 32rem;
+    padding: var(--space-6);
+  }
+
+  .empty-card h2,
+  .state h2 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: var(--text-lg);
+    font-weight: var(--weight-medium);
+  }
+
+  .empty-card p,
+  .state p {
+    margin: 0;
+    color: var(--color-text-2);
   }
 
   .state {
@@ -227,17 +255,5 @@
     gap: var(--space-3);
     max-width: 34rem;
     padding: var(--space-6) var(--space-5);
-  }
-
-  .state h2 {
-    margin: 0;
-    font-family: var(--font-display);
-    font-size: var(--text-lg);
-    font-weight: var(--weight-medium);
-  }
-
-  .state p {
-    margin: 0;
-    color: var(--color-text-2);
   }
 </style>

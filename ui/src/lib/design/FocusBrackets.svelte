@@ -40,7 +40,14 @@
     border-color: var(--bracket-color);
     border-style: solid;
     border-width: 0;
+    opacity: 0;
     pointer-events: none;
+    transition: opacity var(--duration-fast) var(--ease-out);
+  }
+
+  .active .corner,
+  .accent .corner {
+    opacity: 1;
   }
 
   .top-left {

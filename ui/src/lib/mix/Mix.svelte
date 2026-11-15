@@ -2,15 +2,17 @@
   import { onMount } from 'svelte';
 
   import Button from '../design/Button.svelte';
+  import DataTag from '../design/DataTag.svelte';
   import { onThemeChange } from '../design/theme';
+  import Tooltip from '../design/Tooltip.svelte';
   import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
   import type { MixDeck } from '../ipc/bindings/MixDeck';
   import type { MixDevice } from '../ipc/bindings/MixDevice';
   import type { MixState } from '../ipc/bindings/MixState';
   import { CoreError } from '../ipc/client';
   import { core } from '../ipc/core';
-  import { duration } from '../library/format';
   import { DeckClock } from './clock';
+  import Deck from './Deck.svelte';
   import {
     emptyTelemetry,
     frameKind,
@@ -22,9 +24,15 @@
   import { mixProbe } from './probe';
   import { type LaneState, MixRenderer } from './renderer';
 
-  const decks: { id: MixDeck; name: string }[] = [
-    { id: 'a', name: 'Deck A' },
-    { id: 'b', name: 'Deck B' },
+  interface Props {
+    onplayingchange?: (playing: boolean) => void;
+  }
+
+  let { onplayingchange }: Props = $props();
+
+  const decks: { id: MixDeck; letter: 'A' | 'B' }[] = [
+    { id: 'a', letter: 'A' },
+    { id: 'b', letter: 'B' },
   ];
 
   // The installed app has no binary channel yet, so the view needs the development core.
@@ -37,7 +45,12 @@
   let shownSeconds = $state([0, 0]);
   let durations = $state([0, 0]);
   let device = $state<MixDevice | null>(null);
+  let maxCallbackMs = $state<string | null>(null);
   let problem = $state<string | null>(null);
+
+  $effect(() => {
+    onplayingchange?.(Boolean(playing[0] || playing[1]));
+  });
 
   function show(state: MixState) {
     device = state.device;
@@ -71,22 +84,26 @@
 
   /** The rgb() a colour token resolves to on the canvas, as 0 to 1 channels. */
   function tone(name: string): [number, number, number] {
-    canvas.style.color = getComputedStyle(canvas).getPropertyValue(name);
+    canvas.style.forcedColorAdjust = 'none';
+    canvas.style.color = `var(${name})`;
     const [r = 0, g = 0, b = 0] = (getComputedStyle(canvas).color.match(/[\d.]+/g) ?? []).map(
       Number,
     );
     canvas.style.color = '';
+    canvas.style.forcedColorAdjust = '';
     return [r / 255, g / 255, b / 255];
   }
 
   onMount(() => {
     core.call('mix_status').then(show, failed);
     core.call('tracks', { offset: 0, limit: 1000 }).then((page) => (tracks = page.tracks), failed);
-    if (!frames) return;
+    if (!frames) {
+      return () => onplayingchange?.(false);
+    }
     const renderer = MixRenderer.on(canvas);
     if (!renderer) {
       problem = 'This browser has no WebGL2, which the Mix view draws with.';
-      return;
+      return () => onplayingchange?.(false);
     }
 
     const telemetry = emptyTelemetry();
@@ -97,6 +114,8 @@
     ];
     const generations = [0, 0];
     const waveformGenerations = [0, 0];
+    let peakCallbackNs = 0;
+    let lastCallbackStamp = -1;
     let changed = true;
 
     const stopListening = frames.onFrame((frame, arrivedAt) => {
@@ -108,6 +127,15 @@
         changed = true;
       } else if (kind === TELEMETRY) {
         readTelemetry(frame, telemetry);
+        if (telemetry.decks[0].playing || telemetry.decks[1].playing) {
+          peakCallbackNs = Math.max(peakCallbackNs, telemetry.engine.windowMaxCallbackNs);
+        }
+        const stamp = Math.floor(arrivedAt / 1000);
+        if (peakCallbackNs >= 10_000 && stamp !== lastCallbackStamp) {
+          lastCallbackStamp = stamp;
+          const formatted = (peakCallbackNs / 1_000_000).toFixed(2);
+          if (formatted !== maxCallbackMs) maxCallbackMs = formatted;
+        }
         for (let index = 0; index < 2; index++) {
           const deck = telemetry.decks[index]!;
           clocks[index]!.update(deck, arrivedAt);
@@ -130,6 +158,7 @@
     const readColours = () => {
       renderer.palette = {
         background: tone('--color-background'),
+        divider: tone('--color-border'),
         peak: tone('--color-text-2'),
         rms: tone('--color-text'),
         playhead: tone('--color-accent'),
@@ -179,6 +208,7 @@
 
     return () => {
       mixProbe.attached = false;
+      onplayingchange?.(false);
       cancelAnimationFrame(request);
       stopListening();
       seen.disconnect();
@@ -190,119 +220,158 @@
 </script>
 
 <section class="mix" aria-label="Mix">
-  <div class="decks">
-    {#each decks as deck, index (deck.id)}
-      <div class="deck" aria-label={deck.name}>
-        <span class="name">{deck.name}</span>
-        <select
-          class="track"
-          aria-label="Track on {deck.name}"
-          value={loadedPaths[index]}
-          onchange={(event) => load(index, event.currentTarget.value)}
-          disabled={!frames}
-        >
-          <option value="" disabled>Choose a track</option>
-          {#each tracks as track (track.id)}
-            <option value={track.location}>
-              {track.artist ? `${track.artist} - ${track.title}` : track.title}
-            </option>
-          {/each}
-        </select>
-        <Button onclick={() => toggle(index)} disabled={!loadedPaths[index]}>
-          {playing[index] ? 'Stop' : 'Play'}
+  <div class="header">
+    <div class="header-left">
+      <h1 class="heading">Mix</h1>
+      <Tooltip text="Audio device selection arrives in M7">
+        <Button variant="select" size="sm" aria-label="Audio device" aria-disabled="true">
+          {device ? device.name : 'Default output'}
         </Button>
-        <span class="time">
-          {duration(shownSeconds[index]! * 1000)} / {duration(durations[index]! * 1000)}
-        </span>
-      </div>
-    {/each}
+      </Tooltip>
+    </div>
+
+    <div class="header-right">
+      {#if device}
+        <DataTag
+          variant="rect"
+          label="{(device.sample_rate / 1000).toFixed(
+            1,
+          )} kHz · {device.period_frames} frames{maxCallbackMs ? ` · ${maxCallbackMs} ms max` : ''}"
+        />
+      {:else}
+        <span class="idle-note">Audio opens when a track loads</span>
+      {/if}
+      <Tooltip text="Session recording arrives in M7" side="left">
+        <Button size="sm" aria-label="Record session" aria-disabled="true" tabindex={-1}>
+          <span class="rec-dot" aria-hidden="true"></span>Rec
+        </Button>
+      </Tooltip>
+    </div>
   </div>
 
-  {#if !frames}
-    <p class="note">
-      The Mix view runs against the development core for now. Start it with just serve and open the
-      page from just ui.
-    </p>
-  {/if}
-  <canvas bind:this={canvas} class="lanes" aria-hidden="true"></canvas>
-
-  <footer class="status">
-    {#if problem}
-      <span role="alert">{problem}</span>
-    {:else if device}
-      <span>
-        {device.name}, {device.sample_rate / 1000} kHz, {device.period_frames}-frame period ({device.requested_buffer_frames}
-        asked for)
-      </span>
-    {:else}
-      <span>Choose a track for a deck. The audio device opens with the first one.</span>
+  <div class="body">
+    {#if !frames}
+      <p class="note">
+        The Mix view runs against the development core for now. Start it with just serve and open
+        the page from just ui.
+      </p>
     {/if}
-  </footer>
+
+    {#if problem}
+      <p class="problem" role="alert">{problem}</p>
+    {/if}
+
+    <div class="waveform-card">
+      <canvas bind:this={canvas} class="lanes" aria-hidden="true"></canvas>
+    </div>
+
+    <div class="decks">
+      {#each decks as deck, index (deck.id)}
+        <Deck
+          deck={deck.letter}
+          variant="full"
+          {tracks}
+          loadedPath={loadedPaths[index]}
+          playing={playing[index]}
+          shownSeconds={shownSeconds[index]}
+          durationSeconds={durations[index]}
+          canLoad={Boolean(frames)}
+          onload={(path) => load(index, path)}
+          ontoggle={() => toggle(index)}
+        />
+      {/each}
+    </div>
+  </div>
 </section>
 
 <style>
   .mix {
     display: grid;
-    grid-template-rows: auto auto 1fr auto;
+    grid-template-rows: var(--control-height-lg) minmax(0, 1fr);
     height: 100%;
     min-height: 0;
   }
 
-  .decks {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     gap: var(--space-4);
-    padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid var(--color-border);
+    padding: 0 var(--space-5);
+    border-bottom: var(--border-width) solid var(--color-border);
   }
 
-  .deck {
+  .header-left,
+  .header-right {
     display: flex;
     align-items: center;
     gap: var(--space-3);
     min-width: 0;
   }
 
-  .name {
-    font-family: var(--font-heading);
-    font-weight: 500;
-    white-space: nowrap;
+  .heading {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: var(--text-xl);
+    font-weight: var(--weight-medium);
+    line-height: var(--leading-snug);
+    letter-spacing: var(--tracking-tight);
   }
 
-  .track {
-    flex: 1;
-    min-width: 0;
-    height: var(--control-height);
-    padding: 0 var(--space-2);
-    border: 1px solid var(--color-border-control);
-    border-radius: var(--radius-control);
-    background: var(--color-surface-2);
-    color: var(--color-text);
-    font: inherit;
-  }
-
-  .time {
-    font-family: var(--font-mono);
+  .idle-note {
+    color: var(--color-muted);
     font-size: var(--text-sm);
     white-space: nowrap;
   }
 
-  .note {
-    padding: var(--space-3) var(--space-4);
+  .rec-dot {
+    width: var(--provenance-dot-size);
+    height: var(--provenance-dot-size);
+    border-radius: var(--radius-pill);
+    background: var(--color-muted);
+  }
+
+  .body {
+    display: grid;
+    align-content: start;
+    gap: var(--space-4);
+    min-height: 0;
+    padding: var(--space-4) var(--space-5);
+    overflow-y: auto;
+  }
+
+  .note,
+  .problem {
+    margin: 0;
+    padding: var(--space-2-5) var(--space-3);
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
     color: var(--color-text-2);
+    font-size: var(--text-sm);
+  }
+
+  .problem {
+    border-color: var(--color-border-control);
+    color: var(--color-text);
+  }
+
+  .waveform-card {
+    overflow: hidden;
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-background);
   }
 
   .lanes {
     display: block;
     width: 100%;
-    height: 100%;
-    min-height: 0;
+    height: calc(2 * var(--mix-lane-height) + var(--border-width));
   }
 
-  .status {
-    padding: var(--space-2) var(--space-4);
-    border-top: 1px solid var(--color-border);
-    color: var(--color-text-2);
-    font-size: var(--text-sm);
+  .decks {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: var(--space-4);
   }
 </style>

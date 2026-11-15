@@ -123,13 +123,20 @@
   >
     <div class="head" role="rowgroup" bind:offsetHeight={headHeight}>
       <TableRow header aria-rowindex={1} style="grid-template-columns: var(--active-columns)">
-        <TableCell header compact><span class="visually-hidden">Selected</span></TableCell>
+        <TableCell header compact>
+          <span
+            class="tick header-tick"
+            aria-label="Tick all tracks"
+            aria-disabled="true"
+            title="Batch selection arrives in M2"
+          ></span>
+        </TableCell>
         <TableCell header compact><span class="visually-hidden">Status</span></TableCell>
-        <TableCell header numeric class="col-index">#</TableCell>
+        <TableCell header numeric>#</TableCell>
         {#each dataColumns as column (column.key)}
           <TableCell header numeric={column.numeric}>{column.label}</TableCell>
         {/each}
-        <TableCell header compact class="col-actions">
+        <TableCell header compact>
           <span class="visually-hidden">Actions</span>
         </TableCell>
       </TableRow>
@@ -184,12 +191,18 @@
             </TableCell>
             <TableCell compact>
               {#if isSelected}
-                <svg class="status-icon" viewBox="0 0 14 14" width="14" height="14" aria-hidden="true">
+                <svg
+                  class="status-icon"
+                  viewBox="0 0 14 14"
+                  width="14"
+                  height="14"
+                  aria-hidden="true"
+                >
                   <path d="M3.5 2.4 11.5 7 3.5 11.6Z" fill="currentColor" />
                 </svg>
               {/if}
             </TableCell>
-            <TableCell numeric size="sm" tone="muted" class="col-index">
+            <TableCell numeric size="sm" tone="muted">
               {track ? index + 1 : ''}
             </TableCell>
             {#each dataColumns as column (column.key)}
@@ -202,7 +215,7 @@
                 {track ? column.text(track) : ''}
               </TableCell>
             {/each}
-            <TableCell compact class="col-actions">
+            <TableCell compact>
               <button
                 type="button"
                 class="more"
@@ -238,7 +251,17 @@
   }
 
   .table:focus-visible {
+    outline: none;
+  }
+
+  .table:focus-visible:not(:has([aria-selected='true'])) .viewport {
+    border-radius: var(--radius-sm);
     outline: var(--focus-ring-width) solid var(--color-border-control);
+    outline-offset: var(--focus-ring-offset);
+  }
+
+  .table:focus-visible :global(.row.selected) {
+    outline-width: var(--focus-ring-width);
     outline-offset: var(--focus-ring-offset);
   }
 
@@ -293,6 +316,11 @@
     background: var(--color-text);
   }
 
+  .header-tick {
+    border-color: var(--color-border);
+    cursor: default;
+  }
+
   .tick:disabled {
     cursor: default;
     opacity: 0.4;
@@ -316,14 +344,9 @@
     cursor: default;
   }
 
-  @container track-table (width < 580px) {
+  @container track-table (width < 600px) {
     .viewport {
       --active-columns: var(--columns-compact);
-    }
-
-    .viewport :global(.col-index),
-    .viewport :global(.col-actions) {
-      display: none;
     }
   }
 
@@ -339,10 +362,10 @@
   /* A row's layout containment makes it the box this is placed in. */
   .pending {
     position: absolute;
-    top: calc(50% - 3px);
+    top: calc(50% - var(--space-1-5) / 2);
     right: var(--space-2);
     left: var(--space-2);
-    height: 6px;
+    height: var(--space-1-5);
     border-radius: var(--radius-xs);
     background: var(--color-surface-2);
   }

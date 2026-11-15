@@ -17,8 +17,8 @@ export const ENERGY_HIDE_BELOW_PX = 820;
 export const WAVEFORM_NARROW_BELOW_PX = 740;
 export const WAVEFORM_HIDE_BELOW_PX = 640;
 
-/** Container width below which the row index and row-actions columns fold away. */
-export const COMPACT_TABLE_BELOW_PX = 580;
+/** Container width below which Title and Artist narrow their floor while keeping every column. */
+export const COMPACT_TABLE_BELOW_PX = 600;
 
 export const dataColumns: DataColumn[] = [
   {
@@ -62,15 +62,17 @@ export const dataColumns: DataColumn[] = [
 /** Tick box (30) + Status (22) + # (36) + data columns + Actions (32). */
 export const columnWidths = `30px 22px 36px ${dataColumns.map((col) => col.track).join(' ')} 32px`;
 
-/** Below COMPACT_TABLE_BELOW_PX, # and Actions fold away so narrow workspaces never scroll sideways. */
+/** Every non-M5 column stays at every size; narrow workspaces tighten Title and Artist floors. */
 export const compactColumnWidths = [
   '30px',
   '22px',
-  'minmax(136px, 1.8fr)',
-  'minmax(108px, 1.3fr)',
+  '36px',
+  'minmax(108px, 1.8fr)',
+  'minmax(80px, 1.3fr)',
   '58px',
   '52px',
   '56px',
+  '32px',
 ].join(' ');
 
-export const tableMinWidth = '462px';
+export const tableMinWidth = '474px';
