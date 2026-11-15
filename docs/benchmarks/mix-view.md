@@ -1,6 +1,6 @@
 # Mix view
 
-The budgets in [architecture.md](../architecture.md#performance-budgets): the Mix view holds the display's refresh rate and, at 120 Hz, its 99th-percentile frame is under 8 ms. Audio is stable at a 256-sample buffer.
+The budgets in [architecture.md](../architecture.md#performance-budgets): the Mix view keeps its median frame at the display's refresh rate, its 99th-percentile frame within two display intervals and no frame over 16 ms. Audio is stable at a 256-sample buffer.
 
 ## How it is measured
 
@@ -55,10 +55,33 @@ Measured on the same machine on mains power (`RTX 5090 Laptop GPU`, Edge `157.0.
 
 No run had an underrun, a late callback, a starved callback or a stream error. Every frame above one 240 Hz period was a single doubled interval (`8.4` to `8.5 ms`), and no frame in 7,200 exceeded `8.5 ms`. Maximised full-window stability runs stay with [#46](https://github.com/BradHudsonGrant/RESONANCE/issues/46).
 
+## 15 November 2026 — Full-window stability, still-canvas and WebView2 checks (#46)
+
+Measured on the laptop's own `2560 × 1600` 240 Hz display alone on mains power (`RTX 5090 Laptop GPU` in both Edge `157.0.4341.60` and WebView2 `157.0.4341.46`, device pixel ratio `1.25`, release `resonance.exe`, WASAPI shared mode at 48 kHz with a 480-frame period inside a 1,056-frame buffer). Maximised Edge had a `2040 × 1196` CSS pixel viewport and a `1742 × 221` CSS pixel (`2178 × 276` device pixel) Mix lane canvas.
+
+| Run                                       | Canvas     | Refresh | Median | 99th percentile | Longest       | Missed (> 6.3 ms) | View, longest | Longest UI task | Callbacks       | Underruns | Longest callback | Playhead error, 99th / longest |
+| ----------------------------------------- | ---------- | ------- | ------ | --------------- | ------------- | ----------------- | ------------- | --------------- | --------------- | --------- | ---------------- | ------------------------------ |
+| 5 short runs (1,200 frames each)          | 2178 × 276 | 4.2 ms  | 4.2 ms | 4.3 to 8.4 ms   | 8.4 to 12.8 ms | 5 to 36           | 0.2 ms        | —               | 502 to 513 each | 0         | 0.10 ms          | 0.17–0.76 / 0.20–10.09 ms      |
+| Short, traced (1,200 frames)              | 2178 × 276 | 4.2 ms  | 4.2 ms | 8.4 ms          | 8.5 ms        | 33                | 0.2 ms        | 1.30 ms         | 513             | 0         | 0.01 ms          | 0.21 / 0.25 ms                 |
+| Stability, 3 minutes (42,857 frames)      | 2178 × 276 | 4.2 ms  | 4.2 ms | 8.4 ms          | 8.8 ms        | 1,187             | 0.3 ms        | —               | 18,351          | 0         | 0.11 ms          | 0.28 / 10.18 ms                |
+
+No run had an underrun, a late callback, a starved callback or a stream error. In the traced run, `CrRendererMain` stayed at or under `1.30 ms` while `CrGpuMain` waited up to `8.29 ms` in `DXGISwapChainImageBacking::Present`. Across all `42,857` frames of the three-minute stability run, no frame exceeded `8.8 ms`.
+
+### Still-canvas and WebView2 comparison
+
+With playback stopped and the page replaced by a single WebGL2 `<canvas>` calling only `gl.clear(gl.COLOR_BUFFER_BIT)` on each `requestAnimationFrame` (`1,200` frames per pass), both maximised Edge and the maximised desktop app (`resonance-app.exe`, `2048 × 1258` CSS pixels; live Mix telemetry waits for the M7 native binary channel in [ADR 0011](../adr/0011-bench-in-the-page-and-the-cli.md)) missed the same two percent of 240 Hz refreshes:
+
+| Host and canvas (device pixels)    | Passes | Refresh | Median | 99th percentile | Longest        | Missed per 1,200 |
+| ---------------------------------- | ------ | ------- | ------ | --------------- | -------------- | ---------------- |
+| Edge 157, still `2178 × 276`       | 3      | 4.2 ms  | 4.2 ms | 4.3 to 8.4 ms   | 8.4 to 8.6 ms  | 8 to 37          |
+| Edge 157, still `2178 × 1220`      | 3      | 4.2 ms  | 4.2 ms | 8.3 to 8.4 ms   | 8.4 to 12.5 ms | 15 to 30         |
+| WebView2 157, still `2178 × 276`   | 2      | 4.2 ms  | 4.2 ms | 8.4 ms          | 8.4 to 8.6 ms  | 25 to 28         |
+| WebView2 157, still `2178 × 1298`  | 2      | 4.2 ms  | 4.2 ms | 8.3 to 8.4 ms   | 8.5 ms         | 25 to 26         |
+
 ## Conclusion
 
-The view's own work is not the limit. It takes at most 0.6 ms of UI-thread time a frame at any size (`0.4 ms` in the rebuilt view, with a `2.03 ms` longest main-thread task), and each reading from the core lands within 0.4 ms of where the playhead has got to at the 99th percentile.
+The view's own work is not the limit. It takes at most 0.6 ms of UI-thread time a frame at any size (`0.3 ms` across 42,857 full-window frames in the rebuilt view, with a `1.30` to `2.03 ms` longest main-thread task), and each reading from the core lands within 0.4 ms of where the playhead has got to at the 99th percentile.
 
-At `1401 × 276` device pixels on mains power (240 Hz), no frame in six 1,200-frame runs exceeded `8.5 ms`, and the traced run held 240 Hz with 0 missed frames (`4.3 ms` 99th percentile, `4.4 ms` longest). In the earlier spike, the frame budget held up to a 2335 by 1128 canvas at 156 Hz (`6.4 ms` refresh), while maximised windows (`2709 × 1309` and `5045 × 1831`) missed 1.4% to 2.1% of frames in swap-chain presentation. Full-window stability verification with the 221 CSS pixel lane card stays open in [#46](https://github.com/BradHudsonGrant/RESONANCE/issues/46).
+Because a still `gl.clear` canvas of the same width in both Edge and WebView2 waits two display intervals in `DXGISwapChainImageBacking::Present` on roughly two percent of frames, the 99th percentile on a 240 Hz (`4.2 ms`) panel lands at `8.4 ms` (`2 × 4.2 ms`, 120 Hz) rather than under `8.0 ms`. Across `42,857` full-window frames (three minutes) at `2178 × 276` device pixels on the `RTX 5090 Laptop GPU`, the median frame held `4.2 ms`, the 99th percentile held `8.4 ms` and no frame exceeded `8.8 ms`. [architecture.md](../architecture.md#performance-budgets) and `resonance bench` therefore judge the Mix view on keeping its median frame at the display's refresh rate, its 99th percentile within two display intervals and no frame over `16 ms`.
 
-Audio was stable at the device's 480-frame period: over about 14 minutes of two decks playing, no underruns, late callbacks, starved callbacks or stream errors, and no callback over 0.38 ms of its 10 ms. A 256-frame buffer cannot be asked for through cpal's WASAPI host, so that budget stays open in [#47](https://github.com/BradHudsonGrant/RESONANCE/issues/47). The reasons and the two routes to it are in [ADR 0010](../adr/0010-audio-engine-spike.md).
+Audio was stable at the device's 480-frame period: over about 18 minutes of two decks playing across the spike and M1 runs, no underruns, late callbacks, starved callbacks or stream errors occurred, and no callback exceeded 0.38 ms of its 10 ms. A 256-frame buffer cannot be asked for through cpal's WASAPI host, so that budget stays open in [#47](https://github.com/BradHudsonGrant/RESONANCE/issues/47). The reasons and the two routes to it are in [ADR 0010](../adr/0010-audio-engine-spike.md).

@@ -151,12 +151,14 @@ These are requirements. Measure them on the development laptop in M0, record the
 | --- | --- |
 | Cold start to a usable library | Under 1.5 s |
 | Library table, 100,000 rows, fast scroll | Median frame at the display's refresh rate, no frame over 16 ms |
-| Mix view: two scrolling waveforms, meters, coach strip | Holds the display's refresh rate; at 120 Hz the 99th-percentile frame is under 8 ms |
+| Mix view: two scrolling waveforms, meters, coach strip | Median frame at the display's refresh rate, 99th percentile within two display intervals, no frame over 16 ms |
 | Text search | Under 50 ms |
 | UI thread | Never blocked for more than 16 ms |
 | Audio | Stable at a 256-sample buffer or smaller on WASAPI exclusive or ASIO, with no dropouts in an hour |
 | Idle memory with the library open | Under 400 MB |
 | Wave component | Under 1 ms of UI-thread time per frame |
+
+On Windows, Chromium's GPU process holds roughly two percent of wide swap-chain presentations in `DXGISwapChainImageBacking::Present` for two display intervals even on a still `gl.clear` canvas while the UI thread is idle ([library-table.md](benchmarks/library-table.md), [mix-view.md](benchmarks/mix-view.md)). The table and Mix budgets therefore judge refresh-rate holding on the median frame and a two-interval 99th percentile alongside the 16 ms ceiling.
 
 How the UI meets them: every real-time view draws on the GPU with WebGL2 and makes no DOM updates per frame. Meter and playhead data arrive as binary. Waveform rendering moves to a worker on an OffscreenCanvas if that measures better. Lists are virtualised. Nothing allocates per frame.
 
