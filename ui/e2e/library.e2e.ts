@@ -319,3 +319,85 @@ test('manual collections create, assign via multi-select, inspect, persist and d
   await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible();
   await expect(page.getByText('6 tracks', { exact: true })).toBeVisible();
 });
+
+test('preview plays from row, Inspector, double-click and Spacebar with PlayerBar seek, volume and Mix pause', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1586, height: 992 });
+  await page.goto('/');
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible({ timeout: 10_000 });
+
+  const table = page.getByRole('grid', { name: 'Tracks' });
+  const inspector = page.getByRole('complementary', { name: 'Inspector' });
+  const player = page.getByRole('contentinfo', { name: 'Player' });
+
+  await expect(player).toContainText('Nothing playing');
+
+  // 1. Start preview from the row status button.
+  await table.getByRole('button', { name: 'Play Ada Marsh - First Light' }).click();
+  await expect(player).toContainText('Ada Marsh - First Light');
+  await expect(player.getByRole('button', { name: 'Pause' })).toBeVisible();
+  await expect(table.getByRole('button', { name: 'Pause Ada Marsh - First Light' })).toBeVisible();
+
+  // Telemetry advances elapsed time.
+  await expect(player.locator('.time.elapsed')).not.toHaveText('0:00', { timeout: 5_000 });
+
+  // 2. Scrub seeks cleanly into the track.
+  const scrub = player.getByRole('slider', { name: 'Scrub' });
+  await scrub.fill('9000');
+  await expect(player.locator('.time.elapsed')).toHaveText(/0:(09|1[0-5])/);
+
+  // 3. Mute toggles off/on and Volume updates.
+  await player.getByRole('button', { name: 'Mute' }).click();
+  await expect(player.getByRole('button', { name: 'Unmute' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await player.getByRole('slider', { name: 'Volume' }).fill('65');
+  await expect(player.getByRole('button', { name: 'Mute' })).toBeVisible();
+
+  // 4. Double-clicking another track switches preview playback.
+  await table.getByText('Ada Marsh - Second Wind').dblclick();
+  await expect(player).toContainText('Ada Marsh - Second Wind');
+  await expect(
+    inspector.getByRole('button', { name: 'Pause Ada Marsh - Second Wind' }),
+  ).toBeVisible();
+
+  // 5. Inspector Play/Pause toggles playback.
+  await inspector.getByRole('button', { name: 'Pause Ada Marsh - Second Wind' }).click();
+  await expect(player.getByRole('button', { name: 'Play' })).toBeVisible();
+  await inspector.getByRole('button', { name: 'Play Ada Marsh - Second Wind' }).click();
+  await expect(player.getByRole('button', { name: 'Pause' })).toBeVisible();
+
+  // 6. Spacebar is ignored inside the search input and open dialogs, and toggles on the grid.
+  const search = page.getByRole('combobox', { name: 'Commands' });
+  await search.focus();
+  await page.keyboard.press('Space');
+  await expect(player.getByRole('button', { name: 'Pause' })).toBeVisible();
+  await search.fill('');
+
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await expect(settings).toBeVisible();
+  await page.keyboard.press('Space');
+  await settings.getByRole('button', { name: 'Done' }).click();
+  await expect(player.getByRole('button', { name: 'Pause' })).toBeVisible();
+
+  await table.focus();
+  await page.keyboard.press('Space');
+  await expect(player.getByRole('button', { name: 'Play' })).toBeVisible();
+  await page.keyboard.press('Space');
+  await expect(player.getByRole('button', { name: 'Pause' })).toBeVisible();
+
+  // 7. Switching to Mix hides PlayerBar and pauses preview playback.
+  await page.getByRole('button', { name: 'Mix', exact: true }).click();
+  await expect(player).toHaveCount(0);
+  await page.getByRole('button', { name: 'Library', exact: true }).click();
+  await expect(player).toBeVisible();
+  await expect(player.getByRole('button', { name: 'Play' })).toBeVisible();
+
+  // 8. At 1100x700 the PlayerBar stays within the viewport without horizontal overflow.
+  await page.setViewportSize({ width: 1100, height: 700 });
+  const playerBox = await player.boundingBox();
+  expect(playerBox && playerBox.x + playerBox.width <= 1100).toBe(true);
+});

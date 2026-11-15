@@ -178,6 +178,26 @@ impl ScannedFile {
     }
 }
 
+/// Byte offset immediately after a valid 10-byte ID3v2 header, including any 10-byte footer.
+///
+/// Some taggers prepend an ID3v2 block to an MP4 container; callers check whether the eight bytes
+/// at this offset begin an `ftyp` box ([`is_mp4_ftyp_box`]) before stepping over the tag.
+pub fn id3v2_tag_end(header: &[u8; 10]) -> Option<u64> {
+    if !header.starts_with(b"ID3") || header[6..].iter().any(|byte| byte & 0x80 != 0) {
+        return None;
+    }
+    let size = header[6..]
+        .iter()
+        .fold(0u64, |acc, &byte| (acc << 7) | u64::from(byte));
+    let footer = if header[5] & 0x10 == 0 { 0 } else { 10 };
+    Some(10 + size + footer)
+}
+
+/// Whether the eight-byte box header starts an ISO base media (`ftyp`) container.
+pub fn is_mp4_ftyp_box(box_header: &[u8; 8]) -> bool {
+    &box_header[4..] == b"ftyp"
+}
+
 /// Where the old app parked files it had replaced, converted or rejected. They sit inside music
 /// folders, and scanning them would bring every one back as a track. They seed the editable
 /// ignored-folder list in a fresh library.
@@ -566,5 +586,15 @@ mod tests {
             &excluded,
             &ignored
         ));
+    }
+
+    #[test]
+    fn id3v2_header_end_and_mp4_ftyp_match_syncsafe_sizes_and_footers() {
+        assert_eq!(id3v2_tag_end(b"ID3\x03\x00\x00\x00\x00\x00\x04"), Some(14));
+        assert_eq!(id3v2_tag_end(b"ID3\x04\x00\x10\x00\x00\x01\x00"), Some(148));
+        assert_eq!(id3v2_tag_end(b"ID3\x03\x00\x00\x00\x00\x80\x00"), None);
+        assert_eq!(id3v2_tag_end(b"fLaC\x00\x00\x00\x22\x00\x00"), None);
+        assert!(is_mp4_ftyp_box(b"\x00\x00\x00\x14ftyp"));
+        assert!(!is_mp4_ftyp_box(b"RIFF1234"));
     }
 }

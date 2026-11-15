@@ -11,6 +11,7 @@ resonance-core.workspace = true
 # `realtime` puts the callback thread in the Windows multimedia scheduler.
 cpal = { version = "0.18.2", features = ["realtime"] }
 rtrb = "0.4.1"
+rubato.workspace = true
 symphonia.workspace = true
 
 [dev-dependencies]

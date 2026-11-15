@@ -3328,6 +3328,7 @@ dependencies = [
  "resonance-core",
  "resonance-fixtures",
  "rtrb",
+ "rubato",
  "symphonia",
 ]
 

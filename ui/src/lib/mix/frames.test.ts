@@ -12,7 +12,7 @@ import {
 
 /** The same reading as the Rust test in crates/api/src/mix_frame.rs, laid out by hand. */
 function telemetryFrame(): ArrayBuffer {
-  const frame = new ArrayBuffer(120);
+  const frame = new ArrayBuffer(144);
   const view = new DataView(frame);
   view.setUint8(0, TELEMETRY);
   [48_000, 256, 480, 1056, 470, 490, 51_000, 1000, 2, 300, 5, 1, 0].forEach((value, field) =>
@@ -27,6 +27,10 @@ function telemetryFrame(): ArrayBuffer {
   view.setFloat64(96, 200, true);
   view.setFloat32(108, 0.25, true);
   view.setUint32(112, 4, true);
+  view.setFloat64(120, 42.5, true);
+  view.setFloat64(128, 180.0, true);
+  view.setUint32(136, 7, true);
+  view.setUint8(140, 1);
   return frame;
 }
 
@@ -69,15 +73,23 @@ describe('readTelemetry', () => {
         meterRight: 0.25,
       },
     ]);
+    expect(telemetry.preview).toEqual({
+      generation: 7,
+      playing: true,
+      positionSeconds: 42.5,
+      durationSeconds: 180.0,
+    });
   });
 
   it('reuses the objects it is given', () => {
     const telemetry = emptyTelemetry();
     const deck = telemetry.decks[0];
+    const preview = telemetry.preview;
 
     readTelemetry(telemetryFrame(), telemetry);
 
     expect(telemetry.decks[0]).toBe(deck);
+    expect(telemetry.preview).toBe(preview);
   });
 
   it('refuses a frame that is cut short', () => {

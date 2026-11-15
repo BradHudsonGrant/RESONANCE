@@ -13,8 +13,9 @@ use std::time::Duration;
 
 use command::{
     AppInfo, FavouriteState, IdentifyReport, LibraryFacets, LibraryTrack, MixDeck, MixDeckState,
-    MixDevice, MixState, Request, Response, ScanReport, SortDirection, TrackAudio, TrackCollection,
-    TrackFilterPill, TrackFormat, TrackKey, TrackPage, TrackQuery, TrackSortField, UnreadableFile,
+    MixDevice, MixState, PreviewState, Request, Response, ScanReport, SortDirection, TrackAudio,
+    TrackCollection, TrackFilterPill, TrackFormat, TrackKey, TrackPage, TrackQuery, TrackSortField,
+    UnreadableFile,
 };
 use error::ApiError;
 use identity::{IdentityWorker, run_identify_pass, to_command_report};
@@ -24,11 +25,21 @@ use resonance_core::search::{
     TrackSortField as CoreTrackSortField,
 };
 use resonance_db::{Database, TrackRow};
-use resonance_engine::{DeckId, Mix, MixStatus};
+use resonance_engine::{DeckId, Mix, MixStatus, PreviewStatus};
 use resonance_library::watch::SourceWatcher;
 use tokio::sync::watch;
 
 const REPORTED_UNREADABLE_FILES: usize = 100;
+
+#[derive(Clone)]
+struct PreviewTrackMeta {
+    generation: u32,
+    path: PathBuf,
+    track_id: i64,
+    title: String,
+    artist: Option<String>,
+    db_duration_ms: Option<u64>,
+}
 
 pub(crate) struct LibraryCore {
     pub(crate) library: Mutex<Database>,
@@ -43,18 +54,24 @@ pub struct Api {
     pub(crate) identity: Arc<IdentityWorker>,
     pub(crate) core: Arc<LibraryCore>,
     mix: Mix,
+    preview_meta: Mutex<Option<PreviewTrackMeta>>,
 }
 
 impl Api {
     pub fn new(library: Database) -> Self {
-        Self::build(library, None)
+        Self::build(library, None, false)
     }
 
     pub fn with_watch_quiet_window(library: Database, quiet_window: Duration) -> Self {
-        Self::build(library, Some(quiet_window))
+        Self::build(library, Some(quiet_window), false)
     }
 
-    fn build(library: Database, quiet_window: Option<Duration>) -> Self {
+    #[doc(hidden)]
+    pub fn new_silent(library: Database) -> Self {
+        Self::build(library, None, true)
+    }
+
+    fn build(library: Database, quiet_window: Option<Duration>, silent: bool) -> Self {
         let (watch_revisions, _) = watch::channel(0u64);
         let core = Arc::new(LibraryCore {
             library: Mutex::new(library),
@@ -94,7 +111,12 @@ impl Api {
             watcher,
             identity,
             core,
-            mix: Mix::new(),
+            mix: if silent {
+                Mix::new_silent()
+            } else {
+                Mix::new()
+            },
+            preview_meta: Mutex::new(None),
         };
         {
             let guard = api
@@ -223,6 +245,32 @@ impl Api {
                 .map(|status| Response::MixPlay(mix_state(status)))
                 .map_err(ApiError::audio_failed),
             Request::MixStatus => Ok(Response::MixStatus(mix_state(self.mix.status()))),
+            Request::PreviewLoadAndPlay { track_id, start_ms } => self
+                .preview_load_and_play(track_id, start_ms)
+                .map(Response::PreviewLoadAndPlay),
+            Request::PreviewTogglePlay => self
+                .mix
+                .preview_toggle_play()
+                .map(|status| Response::PreviewTogglePlay(self.preview_state(status)))
+                .map_err(ApiError::audio_failed),
+            Request::PreviewPause => self
+                .mix
+                .preview_pause()
+                .map(|status| Response::PreviewPause(self.preview_state(status)))
+                .map_err(ApiError::audio_failed),
+            Request::PreviewSeek { position_ms } => self
+                .mix
+                .preview_seek(position_ms)
+                .map(|status| Response::PreviewSeek(self.preview_state(status)))
+                .map_err(ApiError::audio_failed),
+            Request::PreviewSetVolume { volume } => self
+                .mix
+                .preview_set_volume(volume)
+                .map(|status| Response::PreviewSetVolume(self.preview_state(status)))
+                .map_err(ApiError::audio_failed),
+            Request::PreviewStatus => Ok(Response::PreviewStatus(
+                self.preview_state(self.mix.preview_status()),
+            )),
         }
     }
 
@@ -346,6 +394,84 @@ impl Api {
                 .send_modify(|revision| *revision += 1);
         }
         Ok(to_command_report(report))
+    }
+
+    fn preview_load_and_play(
+        &self,
+        track_id: i64,
+        start_ms: Option<u64>,
+    ) -> Result<PreviewState, ApiError> {
+        let row = {
+            let library = self
+                .core
+                .library
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            library
+                .track_by_id(track_id)
+                .map_err(ApiError::library_unreadable)?
+        };
+        let Some(row) = row else {
+            return Err(ApiError::bad_request(format!(
+                "Track {track_id} is no longer in the library."
+            )));
+        };
+        let path = resonance_library::identity::full_asset_path(&row.source_folder, &row.file.path);
+        let title = row.file.title().to_owned();
+        let artist = row.file.tag(TagField::Artist).map(str::to_owned);
+        let db_duration_ms = row.file.audio.map(|audio| audio.duration_ms);
+        let status = self
+            .mix
+            .preview_load_and_play(&path, start_ms.unwrap_or(0), db_duration_ms)
+            .map_err(ApiError::audio_failed)?;
+        let mut meta = self
+            .preview_meta
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let should_store = meta
+            .as_ref()
+            .is_none_or(|existing| status.generation >= existing.generation);
+        if should_store {
+            *meta = Some(PreviewTrackMeta {
+                generation: status.generation,
+                path,
+                track_id,
+                title,
+                artist,
+                db_duration_ms,
+            });
+        }
+        Ok(preview_state_from(&meta, status))
+    }
+
+    fn preview_state(&self, status: PreviewStatus) -> PreviewState {
+        let meta = self
+            .preview_meta
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        preview_state_from(&meta, status)
+    }
+}
+
+fn preview_state_from(meta: &Option<PreviewTrackMeta>, status: PreviewStatus) -> PreviewState {
+    let matched = status.path.as_deref().and_then(|loaded_path| {
+        meta.as_ref()
+            .filter(|entry| entry.path.as_path() == loaded_path)
+    });
+    let duration_ms = if status.duration_ms > 0 {
+        status.duration_ms
+    } else {
+        matched.and_then(|entry| entry.db_duration_ms).unwrap_or(0)
+    };
+    PreviewState {
+        track_id: matched.map(|entry| entry.track_id),
+        title: matched.map(|entry| entry.title.clone()),
+        artist: matched.and_then(|entry| entry.artist.clone()),
+        playing: status.playing,
+        position_ms: status.position_ms,
+        duration_ms,
+        volume: status.volume,
+        generation: status.generation,
     }
 }
 
@@ -741,5 +867,130 @@ mod tests {
         assert_eq!(facets.bpm_max, Some(128.0));
         assert_eq!(facets.year_min, Some(2020));
         assert_eq!(facets.year_max, Some(2023));
+    }
+
+    #[test]
+    fn preview_commands_load_seek_toggle_volume_and_pause_for_mix_deck() {
+        use resonance_fixtures::signal::Signal;
+
+        let folder =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/test-tmp/api-preview");
+        std::fs::create_dir_all(&folder).unwrap();
+        let wav_path = folder.join("warm_up.wav");
+        Signal::tone(440.0, 2.0, -6.0, 44_100)
+            .write_wav(&wav_path)
+            .unwrap();
+
+        let api = Api::new_silent(Database::open_in_memory().unwrap());
+        api.handle(Request::Scan {
+            folder: folder.to_string_lossy().into_owned(),
+        })
+        .unwrap();
+        let track = page(&api, 0, 10).tracks.into_iter().next().unwrap();
+
+        let missing = api.handle(Request::PreviewLoadAndPlay {
+            track_id: 999_999,
+            start_ms: None,
+        });
+        assert!(missing.is_err());
+
+        let Response::PreviewSetVolume(vol_state) = api
+            .handle(Request::PreviewSetVolume { volume: 0.55 })
+            .unwrap()
+        else {
+            panic!("expected PreviewSetVolume");
+        };
+        assert!((vol_state.volume - 0.55).abs() < 1e-6);
+
+        let Response::PreviewLoadAndPlay(loaded) = api
+            .handle(Request::PreviewLoadAndPlay {
+                track_id: track.id,
+                start_ms: Some(400),
+            })
+            .unwrap()
+        else {
+            panic!("expected PreviewLoadAndPlay");
+        };
+        assert_eq!(loaded.track_id, Some(track.id));
+        assert_eq!(loaded.title.as_deref(), Some(track.title.as_str()));
+        assert!(loaded.playing);
+        assert_eq!(loaded.duration_ms, 2_000);
+        assert!(loaded.position_ms >= 390);
+        assert!((loaded.volume - 0.55).abs() < 1e-6);
+
+        let Response::PreviewSeek(sought) = api
+            .handle(Request::PreviewSeek { position_ms: 1_250 })
+            .unwrap()
+        else {
+            panic!("expected PreviewSeek");
+        };
+        assert_eq!(sought.track_id, Some(track.id));
+        assert!(sought.playing);
+        assert!(sought.position_ms >= 1_240);
+
+        let Response::PreviewPause(paused) = api.handle(Request::PreviewPause).unwrap() else {
+            panic!("expected PreviewPause");
+        };
+        assert!(!paused.playing);
+        assert_eq!(paused.track_id, Some(track.id));
+
+        let Response::PreviewTogglePlay(resumed) = api.handle(Request::PreviewTogglePlay).unwrap()
+        else {
+            panic!("expected PreviewTogglePlay");
+        };
+        assert!(resumed.playing);
+        assert_eq!(resumed.track_id, Some(track.id));
+
+        api.handle(Request::MixLoad {
+            deck: MixDeck::A,
+            path: wav_path.to_string_lossy().into_owned(),
+        })
+        .unwrap();
+        api.handle(Request::MixPlay {
+            deck: MixDeck::A,
+            playing: true,
+        })
+        .unwrap();
+
+        let Response::PreviewStatus(after_mix) = api.handle(Request::PreviewStatus).unwrap() else {
+            panic!("expected PreviewStatus");
+        };
+        assert!(!after_mix.playing);
+        assert_eq!(after_mix.track_id, Some(track.id));
+    }
+
+    #[test]
+    fn preview_opens_tracks_inside_folders_ending_with_a_space() {
+        use resonance_fixtures::signal::Signal;
+
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/test-tmp/api-preview-space");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let canonical_root = std::fs::canonicalize(&root).unwrap();
+        let spaced_dir = canonical_root.join("Garage ");
+        std::fs::create_dir_all(&spaced_dir).unwrap();
+        Signal::tone(330.0, 0.5, -6.0, 44_100)
+            .write_wav(&spaced_dir.join("space_cut.wav"))
+            .unwrap();
+
+        let api = Api::new_silent(Database::open_in_memory().unwrap());
+        api.handle(Request::Scan {
+            folder: root.to_string_lossy().into_owned(),
+        })
+        .unwrap();
+        let track = page(&api, 0, 10).tracks.into_iter().next().unwrap();
+
+        let Response::PreviewLoadAndPlay(loaded) = api
+            .handle(Request::PreviewLoadAndPlay {
+                track_id: track.id,
+                start_ms: None,
+            })
+            .unwrap()
+        else {
+            panic!("expected PreviewLoadAndPlay");
+        };
+        assert_eq!(loaded.track_id, Some(track.id));
+        assert!(loaded.playing);
     }
 }

@@ -316,12 +316,43 @@ describe('Library', () => {
     await fireEvent.keyDown(grid, { key: 'Delete' });
     expect(onremovefromcollection).toHaveBeenCalledWith(1, [1, 2]);
   });
+
+  it('triggers preview from the row status button and double-click while keeping Enter for open', async () => {
+    const { pages } = fakeLibrary(3);
+    await pages.load();
+    const onopen = vi.fn();
+    const onpreview = vi.fn();
+
+    render(Library, {
+      pages,
+      previewTrackId: 1,
+      previewPlaying: true,
+      onopen,
+      onpreview,
+      onscan: vi.fn(),
+    });
+
+    const pauseRowZero = screen.getByRole('button', { name: 'Pause Track 0' });
+    expect(pauseRowZero.getAttribute('aria-pressed')).toBe('true');
+    await fireEvent.click(pauseRowZero);
+    expect(onpreview).toHaveBeenCalledWith(expect.objectContaining({ id: 1, title: 'Track 0' }));
+
+    const rows = screen.getAllByRole('row');
+    await fireEvent.dblClick(rows[2]!);
+    expect(onpreview).toHaveBeenCalledWith(expect.objectContaining({ id: 2, title: 'Track 1' }));
+    expect(onopen).not.toHaveBeenCalled();
+
+    const grid = screen.getByRole('grid', { name: 'Tracks' });
+    await fireEvent.keyDown(grid, { key: 'Enter' });
+    expect(onopen).toHaveBeenCalledOnce();
+  });
 });
 
 describe('Inspector and track formatting', () => {
   it('shows seeded artwork, audio format, two detail rows, favourite button and file facts for a track', async () => {
     const onclose = vi.fn();
     const ontogglefavourite = vi.fn();
+    const onpreview = vi.fn();
     const track = {
       ...fakeTrack(3),
       album: 'Night Bus',
@@ -331,7 +362,14 @@ describe('Inspector and track formatting', () => {
       comment: 'Vinyl rip',
     };
 
-    render(Inspector, { track, onclose, ontogglefavourite });
+    render(Inspector, {
+      track,
+      previewTrackId: track.id,
+      previewPlaying: false,
+      onclose,
+      onpreview,
+      ontogglefavourite,
+    });
 
     const aside = screen.getByRole('complementary', { name: 'Inspector' });
     expect(within(aside).getByRole('heading', { name: 'Track 3' })).toBeTruthy();
@@ -344,6 +382,11 @@ describe('Inspector and track formatting', () => {
     expect(aside.textContent).toContain('Northline');
     expect(aside.textContent).toContain('Vinyl rip');
     expect(aside.textContent).toContain('/music/3.flac');
+
+    const playBtn = within(aside).getByRole('button', { name: 'Play Track 3' });
+    expect(playBtn.getAttribute('aria-pressed')).toBe('false');
+    await fireEvent.click(playBtn);
+    expect(onpreview).toHaveBeenCalledWith(track);
 
     const favBtn = within(aside).getByRole('button', { name: 'Favourite track' });
     expect(favBtn.getAttribute('aria-pressed')).toBe('false');

@@ -96,6 +96,29 @@ pub enum Request {
     },
     /// The audio device and what each deck holds. Positions and meters come as binary frames.
     MixStatus,
+    /// Loads a library track onto the single-track preview channel and plays from `start_ms`.
+    PreviewLoadAndPlay {
+        #[ts(type = "number")]
+        track_id: i64,
+        #[serde(default)]
+        #[ts(optional = nullable, type = "number")]
+        start_ms: Option<u64>,
+    },
+    /// Toggles preview playback between playing and paused (restarting from 0 at EOF).
+    PreviewTogglePlay,
+    /// Pauses preview playback if playing.
+    PreviewPause,
+    /// Seeks the loaded preview track to `position_ms`.
+    PreviewSeek {
+        #[ts(type = "number")]
+        position_ms: u64,
+    },
+    /// Sets the linear output gain for preview playback (`0.0..=1.0`).
+    PreviewSetVolume {
+        volume: f32,
+    },
+    /// Current state of the single-track preview player.
+    PreviewStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -123,6 +146,12 @@ pub enum Response {
     MixLoad(MixState),
     MixPlay(MixState),
     MixStatus(MixState),
+    PreviewLoadAndPlay(PreviewState),
+    PreviewTogglePlay(PreviewState),
+    PreviewPause(PreviewState),
+    PreviewSeek(PreviewState),
+    PreviewSetVolume(PreviewState),
+    PreviewStatus(PreviewState),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -415,4 +444,20 @@ pub struct MixDeckState {
     pub path: Option<String>,
     pub duration_seconds: f64,
     pub playing: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct PreviewState {
+    #[ts(type = "number | null")]
+    pub track_id: Option<i64>,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub playing: bool,
+    #[ts(type = "number")]
+    pub position_ms: u64,
+    #[ts(type = "number")]
+    pub duration_ms: u64,
+    pub volume: f32,
+    pub generation: u32,
 }

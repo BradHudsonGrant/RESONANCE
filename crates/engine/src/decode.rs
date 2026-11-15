@@ -1,7 +1,6 @@
 //! Reading a file into samples. This runs on worker threads, never in the audio callback.
 
-use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::thread;
@@ -12,11 +11,13 @@ use rtrb::{Producer, RingBuffer};
 use symphonia::core::codecs::audio::{AudioDecoder, AudioDecoderOptions};
 use symphonia::core::errors::Error as DecodeError;
 use symphonia::core::formats::probe::Hint;
-use symphonia::core::formats::{FormatOptions, FormatReader, TrackType};
+use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, TrackType};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
+use symphonia::core::units::{Time, TimeBase, Timestamp};
 
 use crate::error::EngineError;
+use crate::reader::open_audio_reader;
 
 /// Seconds of decoded audio a deck keeps ahead of the callback. A decoder that stalls for less
 /// than this is never heard.
@@ -27,14 +28,19 @@ const FULL_WAIT: Duration = Duration::from_millis(5);
 
 /// An open file and its decoder, giving interleaved `f32` samples a packet at a time.
 pub(crate) struct Decoder {
+    path: PathBuf,
     format: Box<dyn FormatReader>,
     decoder: Box<dyn AudioDecoder>,
     track_id: u32,
+    time_base: Option<TimeBase>,
     pub sample_rate: u32,
     pub channels: usize,
     /// Frames in the track, when the container says.
     pub frames: Option<u64>,
     packet: Vec<f32>,
+    pending_seek_target_secs: Option<f64>,
+    fallback_skip_frames: u64,
+    at_end: bool,
 }
 
 impl Decoder {
@@ -43,7 +49,7 @@ impl Decoder {
             path: path.to_owned(),
             reason,
         };
-        let file = File::open(path).map_err(|error| unreadable(error.to_string()))?;
+        let file = open_audio_reader(path).map_err(|error| unreadable(error.to_string()))?;
         let mut hint = Hint::new();
         if let Some(extension) = path.extension().and_then(|extension| extension.to_str()) {
             hint.with_extension(extension);
@@ -75,25 +81,86 @@ impl Decoder {
             .filter(|count| *count > 0)
             .ok_or_else(|| unreadable("its channels are not stated".to_owned()))?;
         let track_id = track.id;
+        let time_base = track.time_base;
         let frames = track.num_frames;
         let decoder = symphonia::default::get_codecs()
             .make_audio_decoder(&parameters, &AudioDecoderOptions::default())
             .map_err(|error| unreadable(error.to_string()))?;
         Ok(Self {
+            path: path.to_owned(),
             format,
             decoder,
             track_id,
+            time_base,
             sample_rate,
             channels,
             frames,
             packet: Vec::new(),
+            pending_seek_target_secs: None,
+            fallback_skip_frames: 0,
+            at_end: false,
         })
+    }
+
+    pub fn duration_ms(&self) -> u64 {
+        self.frames.map_or(0, |frames| {
+            u64::try_from((u128::from(frames) * 1000) / u128::from(self.sample_rate.max(1)))
+                .unwrap_or(u64::MAX)
+        })
+    }
+
+    /// Seeks so the next sample yielded corresponds to `position_ms`.
+    pub fn seek_ms(&mut self, position_ms: u64) -> Result<(), EngineError> {
+        let target_frame =
+            u64::try_from((u128::from(position_ms) * u128::from(self.sample_rate)) / 1000)
+                .unwrap_or(u64::MAX);
+        self.pending_seek_target_secs = None;
+        self.fallback_skip_frames = 0;
+        if self.frames.is_some_and(|total| target_frame >= total) {
+            self.at_end = true;
+            return Ok(());
+        }
+        self.at_end = false;
+
+        let time = Time::from_millis_u64(position_ms);
+        match self.format.seek(
+            SeekMode::Accurate,
+            SeekTo::Time {
+                time,
+                track_id: Some(self.track_id),
+            },
+        ) {
+            Ok(sought) => {
+                self.decoder.reset();
+                let fallback = position_ms as f64 / 1000.0;
+                let target_secs = self
+                    .time_base
+                    .and_then(|tb| tb.calc_time(sought.required_ts))
+                    .map_or(fallback, time_to_secs);
+                self.pending_seek_target_secs = Some(target_secs);
+            }
+            Err(_) => {
+                *self = Self::open(&self.path)?;
+                self.fallback_skip_frames = target_frame;
+            }
+        }
+        Ok(())
+    }
+
+    fn packet_time_secs(&self, pts: Timestamp) -> f64 {
+        self.time_base.and_then(|tb| tb.calc_time(pts)).map_or_else(
+            || pts.get() as f64 / f64::from(self.sample_rate.max(1)),
+            time_to_secs,
+        )
     }
 
     /// The next packet's samples, interleaved, or `None` at the end of the track. A damaged packet
     /// is skipped, as a player would; any other failure ends the track.
     pub fn next_packet(&mut self) -> Option<&[f32]> {
-        loop {
+        if self.at_end {
+            return None;
+        }
+        let start_offset = loop {
             let packet = match self.format.next_packet() {
                 Ok(Some(packet)) => packet,
                 Ok(None) | Err(_) => return None,
@@ -101,16 +168,47 @@ impl Decoder {
             if packet.track_id != self.track_id {
                 continue;
             }
+            let pkt_ts = packet.pts;
             match self.decoder.decode(&packet) {
-                Ok(audio) => {
-                    audio.copy_to_vec_interleaved(&mut self.packet);
-                    return Some(&self.packet);
-                }
+                Ok(audio) => audio.copy_to_vec_interleaved(&mut self.packet),
                 Err(DecodeError::DecodeError(_)) => continue,
                 Err(_) => return None,
             }
-        }
+            let total_frames = self.packet.len() / self.channels;
+            if total_frames == 0 {
+                continue;
+            }
+            if let Some(target_secs) = self.pending_seek_target_secs {
+                let pkt_secs = self.packet_time_secs(pkt_ts);
+                if target_secs <= pkt_secs {
+                    self.pending_seek_target_secs = None;
+                    break 0;
+                }
+                let skip_frames =
+                    ((target_secs - pkt_secs) * f64::from(self.sample_rate)).round() as usize;
+                if skip_frames < total_frames {
+                    self.pending_seek_target_secs = None;
+                    break skip_frames * self.channels;
+                }
+                continue;
+            }
+            if self.fallback_skip_frames > 0 {
+                if self.fallback_skip_frames >= total_frames as u64 {
+                    self.fallback_skip_frames -= total_frames as u64;
+                    continue;
+                }
+                let skip = self.fallback_skip_frames as usize * self.channels;
+                self.fallback_skip_frames = 0;
+                break skip;
+            }
+            break 0;
+        };
+        Some(&self.packet[start_offset..])
     }
+}
+
+fn time_to_secs(time: Time) -> f64 {
+    time.as_nanos() as f64 / 1_000_000_000.0
 }
 
 /// The audio side's end of a deck's stream: stereo frames at the device's rate.
@@ -162,7 +260,7 @@ fn feed(mut decoder: Decoder, output_rate: u32, mut producer: Producer<f32>, don
 }
 
 /// Mono is copied to both sides; past two channels, the first two are kept.
-fn to_stereo(samples: &[f32], channels: usize, stereo: &mut Vec<f32>) {
+pub(crate) fn to_stereo(samples: &[f32], channels: usize, stereo: &mut Vec<f32>) {
     stereo.clear();
     for frame in samples.chunks_exact(channels) {
         let left = frame[0];

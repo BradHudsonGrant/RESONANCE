@@ -10,6 +10,7 @@
   import { TrackPages } from './lib/library/track-pages.svelte';
   import CommandBar, { type Command } from './lib/shell/CommandBar.svelte';
   import PlayerBar from './lib/shell/PlayerBar.svelte';
+  import { PreviewPlayer } from './lib/shell/preview.svelte';
   import SettingsSheet from './lib/shell/SettingsSheet.svelte';
   import Sidebar, { type SpaceName } from './lib/shell/Sidebar.svelte';
   import TopBar from './lib/shell/TopBar.svelte';
@@ -21,6 +22,7 @@
   const pages = new TrackPages((offset, limit, query) =>
     core.call('tracks', { offset, limit, query }),
   );
+  const preview = new PreviewPlayer(core);
   const sourcesClient: SourcesClient = {
     sources: () => core.call('sources'),
     subfolders: (source_id, parent) => core.call('source_subfolders', { source_id, parent }),
@@ -220,6 +222,17 @@
     return () => removeEventListener('resize', closeWhenDocked);
   });
 
+  $effect(() => () => preview.destroy());
+
+  let previousSpace: SpaceName = 'Library';
+  $effect(() => {
+    const next = space;
+    if (next === 'Mix' && previousSpace !== 'Mix' && preview.playing) {
+      void preview.pause();
+    }
+    previousSpace = next;
+  });
+
   $effect(() =>
     core.onLibraryChange(() => {
       sourcesRevision += 1;
@@ -265,6 +278,18 @@
     );
   }
 
+  function interactiveControl(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    return (
+      typing(target) ||
+      Boolean(
+        target.closest(
+          'button, [role="button"], [role="combobox"], [role="menuitem"], [role="menuitemcheckbox"], [role="option"], [role="tab"], [role="checkbox"], a[href]',
+        ),
+      )
+    );
+  }
+
   const keys: Record<string, () => void> = {
     '/': () => document.getElementById(commandInput)?.focus(),
     i: toggleInspector,
@@ -286,6 +311,19 @@
     } else if (command && (key === '1' || key === '4')) {
       event.preventDefault();
       keys[key]?.();
+    } else if (
+      event.key === ' ' &&
+      space === 'Library' &&
+      !command &&
+      !interactiveControl(event.target)
+    ) {
+      if (preview.trackId !== null) {
+        event.preventDefault();
+        void preview.togglePlay();
+      } else if (track) {
+        event.preventDefault();
+        void preview.loadAndPlay(track.id);
+      }
     } else if (!command && !typing(event.target) && keys[key]) {
       event.preventDefault();
       keys[key]();
@@ -294,6 +332,7 @@
 
   pages.load();
   void loadCollections();
+  void preview.refresh();
 </script>
 
 <svelte:window {onkeydown} />
@@ -345,10 +384,13 @@
         <Library
           {pages}
           bind:selected={pages.selected}
+          previewTrackId={preview.trackId}
+          previewPlaying={preview.playing}
           {collections}
           {activeCollection}
           loadFacets={() => core.call('library_facets')}
           onopen={showInspector}
+          onpreview={(item) => void preview.toggleOrPlayTrack(item.id)}
           onscan={openScan}
           ontogglefavourite={toggleFavourite}
           onclearsearch={clearSearch}
@@ -365,9 +407,12 @@
     <div class="inspector-dock">
       <Inspector
         {track}
+        previewTrackId={preview.trackId}
+        previewPlaying={preview.playing}
         {collections}
         {activeCollection}
         onclose={() => (inspectorHidden = true)}
+        onpreview={(item) => void preview.toggleOrPlayTrack(item.id)}
         ontogglefavourite={toggleFavourite}
         onaddtocollection={addTracksToCollection}
         onremovefromcollection={removeTracksFromCollection}
@@ -385,7 +430,25 @@
     </div>
 
     <div class="player">
-      <PlayerBar />
+      <PlayerBar
+        trackId={preview.trackId}
+        title={preview.title}
+        artist={preview.artist}
+        playing={preview.playing}
+        positionMs={preview.positionMs}
+        durationMs={preview.durationMs}
+        volume={preview.volume}
+        muted={preview.muted}
+        canPlay={preview.trackId !== null || track != null}
+        error={preview.error}
+        ontoggleplay={() => {
+          if (preview.trackId !== null) void preview.togglePlay();
+          else if (track) void preview.loadAndPlay(track.id);
+        }}
+        onseek={(ms) => void preview.seek(ms)}
+        onvolume={(vol) => void preview.setVolume(vol)}
+        ontogglemute={() => void preview.toggleMute()}
+      />
     </div>
   {/if}
 </div>
@@ -395,9 +458,12 @@
     <Inspector
       {track}
       inSheet
+      previewTrackId={preview.trackId}
+      previewPlaying={preview.playing}
       {collections}
       {activeCollection}
       onclose={() => (sheetOpen = false)}
+      onpreview={(item) => void preview.toggleOrPlayTrack(item.id)}
       ontogglefavourite={toggleFavourite}
       onaddtocollection={addTracksToCollection}
       onremovefromcollection={removeTracksFromCollection}

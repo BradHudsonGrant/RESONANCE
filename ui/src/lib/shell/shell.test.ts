@@ -1,9 +1,14 @@
 // @vitest-environment happy-dom
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import App from '../../App.svelte';
 import { getTheme, onThemeChange, setTheme } from '../design/theme';
+import { core } from '../ipc/core';
+import { fakeTrack } from '../library/fake-library';
+
+HTMLElement.prototype.showPopover ??= () => {};
+HTMLElement.prototype.hidePopover ??= () => {};
 import CommandBar, { type Command } from './CommandBar.svelte';
 import PlayerBar from './PlayerBar.svelte';
 import SettingsSheet from './SettingsSheet.svelte';
@@ -314,23 +319,27 @@ describe('TransitionDock', () => {
 });
 
 describe('PlayerBar', () => {
-  it('shows nothing playing, and names the milestone of every control', () => {
+  it('shows nothing playing when unloaded and keeps M7 mixer controls unavailable', () => {
     render(PlayerBar);
 
     expect(screen.getByText('Nothing playing')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Play' }).getAttribute('aria-disabled')).toBe('true');
-    for (const name of ['Pause', 'Curve', 'EQ', 'Headphone cue']) {
+    expect(screen.getByRole('slider', { name: 'Scrub' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Mute' }).getAttribute('aria-disabled')).toBeNull();
+    expect(screen.getByRole('slider', { name: 'Volume' }).hasAttribute('disabled')).toBe(false);
+
+    for (const name of ['Curve', 'EQ', 'Headphone cue']) {
       const button = screen.getByRole('button', { name });
       expect(button.getAttribute('aria-disabled')).toBe('true');
       expect(button.tabIndex).toBe(-1);
     }
-    for (const name of ['Scrub', 'A Vol', 'B Vol']) {
+    for (const name of ['A Vol', 'B Vol']) {
       expect(screen.getByRole('slider', { name }).hasAttribute('disabled')).toBe(true);
     }
 
     const tooltips = tooltipTexts();
     for (const text of [
-      'Preview playback arrives in M2',
+      'Select a track to preview',
       'Deck volume arrives in M7',
       'Crossfader curves arrive in M7',
       'EQ arrives in M7',
@@ -338,6 +347,59 @@ describe('PlayerBar', () => {
     ]) {
       expect(tooltips.some((tooltip) => tooltip?.includes(text))).toBe(true);
     }
+  });
+
+  it('shows loaded track metadata, time readouts and fires seek, volume and mute callbacks', async () => {
+    const ontoggleplay = vi.fn();
+    const onseek = vi.fn();
+    const onvolume = vi.fn();
+    const ontogglemute = vi.fn();
+
+    render(PlayerBar, {
+      trackId: 12,
+      title: 'Midnight Loop',
+      artist: 'Kofi Bell',
+      playing: true,
+      positionMs: 65_000,
+      durationMs: 240_000,
+      volume: 0.8,
+      muted: false,
+      canPlay: true,
+      ontoggleplay,
+      onseek,
+      onvolume,
+      ontogglemute,
+    });
+
+    expect(screen.getByText('Midnight Loop')).toBeTruthy();
+    expect(screen.getByText('Kofi Bell')).toBeTruthy();
+    expect(screen.getByText('1:05')).toBeTruthy();
+    expect(screen.getByText('4:00')).toBeTruthy();
+
+    const pauseBtn = screen.getByRole('button', { name: 'Pause' });
+    expect(pauseBtn.getAttribute('aria-pressed')).toBe('true');
+    await fireEvent.click(pauseBtn);
+    expect(ontoggleplay).toHaveBeenCalledOnce();
+
+    const scrub = screen.getByRole('slider', { name: 'Scrub' });
+    expect(scrub.hasAttribute('disabled')).toBe(false);
+    await fireEvent.input(scrub, { target: { value: '120000' } });
+    expect(onseek).toHaveBeenCalledWith(120_000);
+
+    const volumeSlider = screen.getByRole('slider', { name: 'Volume' });
+    await fireEvent.input(volumeSlider, { target: { value: '55' } });
+    expect(onvolume).toHaveBeenCalledWith(0.55);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Mute' }));
+    expect(ontogglemute).toHaveBeenCalledOnce();
+  });
+
+  it('surfaces preview errors as an alert in the transport area', () => {
+    render(PlayerBar, {
+      error: 'The file could not be read as audio.',
+    });
+
+    expect(screen.getByRole('alert').textContent).toBe('The file could not be read as audio.');
   });
 });
 
@@ -391,6 +453,10 @@ describe('SettingsSheet', () => {
 });
 
 describe('App shell', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   function shell(): HTMLElement {
     const element = document.querySelector<HTMLElement>('.app-shell');
     if (!element) throw new Error('the shell did not render');
@@ -474,5 +540,116 @@ describe('App shell', () => {
     } finally {
       menu.remove();
     }
+  });
+
+  it('toggles preview playback with Space only outside interactive controls and pauses when entering Mix', async () => {
+    const track = fakeTrack(0);
+    let playing = false;
+    let loaded = false;
+    const callSpy = vi
+      .spyOn(core, 'call')
+      .mockImplementation(async (command: string): Promise<never> => {
+        if (command === 'tracks') {
+          return { total: 1, library_total: 1, offset: 0, tracks: [track] } as never;
+        }
+        if (command === 'collections') return [] as never;
+        if (command === 'library_facets') {
+          return {
+            labels: [],
+            bpm_min: null,
+            bpm_max: null,
+            year_min: null,
+            year_max: null,
+          } as never;
+        }
+        if (command === 'preview_status') {
+          return {
+            track_id: loaded ? track.id : null,
+            title: loaded ? track.title : null,
+            artist: loaded ? track.artist : null,
+            playing,
+            position_ms: 0,
+            duration_ms: loaded ? 301_000 : 0,
+            volume: 1,
+            generation: loaded ? 1 : 0,
+          } as never;
+        }
+        if (command === 'preview_load_and_play') {
+          loaded = true;
+          playing = true;
+          return {
+            track_id: track.id,
+            title: track.title,
+            artist: track.artist,
+            playing: true,
+            position_ms: 0,
+            duration_ms: 301_000,
+            volume: 1,
+            generation: 1,
+          } as never;
+        }
+        if (command === 'preview_toggle_play') {
+          playing = !playing;
+          return {
+            track_id: track.id,
+            title: track.title,
+            artist: track.artist,
+            playing,
+            position_ms: 0,
+            duration_ms: 301_000,
+            volume: 1,
+            generation: 1,
+          } as never;
+        }
+        if (command === 'preview_pause') {
+          playing = false;
+          return {
+            track_id: track.id,
+            title: track.title,
+            artist: track.artist,
+            playing: false,
+            position_ms: 0,
+            duration_ms: 301_000,
+            volume: 1,
+            generation: 1,
+          } as never;
+        }
+        return undefined as never;
+      });
+
+    render(App);
+    const grid = await screen.findByRole('grid', { name: 'Tracks' });
+    grid.focus();
+    await fireEvent.keyDown(grid, { key: 'ArrowDown' });
+
+    // Space inside search box or button does not trigger preview commands.
+    const searchInput = screen.getByRole('combobox', { name: 'Commands' });
+    searchInput.focus();
+    await fireEvent.keyDown(searchInput, { key: ' ' });
+    const settingsBtn = screen.getByRole('button', { name: 'Settings' });
+    settingsBtn.focus();
+    await fireEvent.keyDown(settingsBtn, { key: ' ' });
+    expect(callSpy.mock.calls.some(([cmd]) => cmd === 'preview_load_and_play')).toBe(false);
+
+    // Space on grid loads and plays selected track, then toggles play/pause.
+    grid.focus();
+    await fireEvent.keyDown(window, { key: ' ' });
+    await vi.waitFor(() =>
+      expect(callSpy).toHaveBeenCalledWith('preview_load_and_play', { track_id: track.id }),
+    );
+    await vi.waitFor(() =>
+      expect(within(screen.getByRole('contentinfo', { name: 'Player' })).getByText(track.title)),
+    );
+
+    await fireEvent.keyDown(window, { key: ' ' });
+    await vi.waitFor(() => expect(callSpy).toHaveBeenCalledWith('preview_toggle_play'));
+    await fireEvent.keyDown(window, { key: ' ' });
+    await vi.waitFor(() =>
+      expect(callSpy.mock.calls.filter(([cmd]) => cmd === 'preview_toggle_play')).toHaveLength(2),
+    );
+
+    // Switching to Mix pauses active preview playback.
+    await fireEvent.keyDown(window, { key: '4' });
+    await vi.waitFor(() => expect(callSpy).toHaveBeenCalledWith('preview_pause'));
   });
 });

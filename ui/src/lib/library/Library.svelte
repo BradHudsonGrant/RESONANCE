@@ -17,10 +17,13 @@
   interface Props {
     pages: TrackPages;
     selected?: number | null;
+    previewTrackId?: number | null;
+    previewPlaying?: boolean;
     collections?: LibraryCollection[];
     activeCollection?: LibraryCollection | null;
     loadFacets?: () => Promise<LibraryFacets>;
     onopen?: () => void;
+    onpreview?: (track: LibraryTrack) => void;
     onscan: () => void;
     ontogglefavourite?: (track: LibraryTrack) => void;
     onclearsearch?: () => void;
@@ -63,10 +66,13 @@
   let {
     pages,
     selected = $bindable(null),
+    previewTrackId = null,
+    previewPlaying = false,
     collections = [],
     activeCollection = null,
     loadFacets,
     onopen,
+    onpreview,
     onscan,
     ontogglefavourite,
     onclearsearch,
@@ -254,9 +260,12 @@
       <TrackTable
         {pages}
         bind:selected
+        {previewTrackId}
+        {previewPlaying}
         {collections}
         {activeCollection}
         {onopen}
+        {onpreview}
         {ontogglefavourite}
         {onaddtocollection}
         {onremovefromcollection}

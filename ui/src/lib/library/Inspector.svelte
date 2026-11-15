@@ -14,9 +14,12 @@
   interface Props {
     track: LibraryTrack | undefined;
     inSheet?: boolean;
+    previewTrackId?: number | null;
+    previewPlaying?: boolean;
     collections?: LibraryCollection[];
     activeCollection?: LibraryCollection | null;
     onclose: () => void;
+    onpreview?: (track: LibraryTrack) => void;
     ontogglefavourite?: (track: LibraryTrack) => void;
     onaddtocollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
     onremovefromcollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
@@ -26,14 +29,20 @@
   let {
     track,
     inSheet = false,
+    previewTrackId = null,
+    previewPlaying = false,
     collections = [],
     activeCollection = null,
     onclose,
+    onpreview,
     ontogglefavourite,
     onaddtocollection,
     onremovefromcollection,
     oncreatecollectionandadd,
   }: Props = $props();
+
+  const isPreviewTrack = $derived(Boolean(track && previewTrackId === track.id));
+  const isPreviewPlaying = $derived(isPreviewTrack && previewPlaying);
 
   let menuOpen = $state(false);
   let menuAnchor = $state<HTMLElement | null>(null);
@@ -89,6 +98,17 @@
           <div class="hero-top">
             <h2 class="title">{track.title}</h2>
             <div class="tools">
+              <Tooltip text={isPreviewPlaying ? 'Pause preview' : 'Play preview'} side="left">
+                <Button
+                  variant="icon"
+                  active={isPreviewTrack}
+                  aria-label={isPreviewPlaying ? `Pause ${track.title}` : `Play ${track.title}`}
+                  aria-pressed={isPreviewPlaying}
+                  onclick={() => track && onpreview?.(track)}
+                >
+                  <Icon name={isPreviewPlaying ? 'pause' : 'play'} size="sm" filled />
+                </Button>
+              </Tooltip>
               <Tooltip
                 text={track.favourite ? 'Remove from favourites' : 'Add to favourites'}
                 side="left"
