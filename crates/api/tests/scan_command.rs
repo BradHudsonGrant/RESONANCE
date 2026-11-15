@@ -56,6 +56,7 @@ fn tracks(api: &Api) -> TrackPage {
         .handle(Request::Tracks {
             offset: 0,
             limit: 200,
+            query: None,
         })
         .unwrap()
     {

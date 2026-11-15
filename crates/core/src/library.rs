@@ -120,6 +120,32 @@ pub struct ScannedFile {
     pub tags: Vec<(TagField, String)>,
 }
 
+/// Title tag when non-blank, else the file's name without its extension.
+pub fn title_from_tags<'a>(path: &'a str, tags: &'a [(TagField, String)]) -> &'a str {
+    let title_tag = tags
+        .iter()
+        .find(|(field, _)| *field == TagField::Title)
+        .map(|(_, value)| value.trim())
+        .filter(|title| !title.is_empty());
+    match title_tag {
+        Some(title) => title,
+        None => {
+            let name = path.rsplit('/').next().unwrap_or(path);
+            name.rsplit_once('.').map_or(name, |(stem, _)| stem).trim()
+        }
+    }
+}
+
+/// Positive finite BPM parsed from a tag list, accepting decimal commas.
+pub fn bpm_from_tags(tags: &[(TagField, String)]) -> Option<f64> {
+    let raw = tags
+        .iter()
+        .find(|(field, _)| *field == TagField::Bpm)
+        .map(|(_, value)| value.as_str())?;
+    let bpm: f64 = raw.trim().replace(',', ".").parse().ok()?;
+    (bpm.is_finite() && bpm > 0.0).then_some(bpm)
+}
+
 impl ScannedFile {
     pub fn tag(&self, field: TagField) -> Option<&str> {
         self.tags
@@ -131,25 +157,13 @@ impl ScannedFile {
     /// The title tag, or the file's name without its extension when the tag is missing or blank,
     /// so every track has something to be listed by.
     pub fn title(&self) -> &str {
-        match self.tag(TagField::Title).map(str::trim) {
-            Some(title) if !title.is_empty() => title,
-            _ => {
-                let name = self.path.rsplit('/').next().unwrap_or(&self.path);
-                name.rsplit_once('.').map_or(name, |(stem, _)| stem).trim()
-            }
-        }
+        title_from_tags(&self.path, &self.tags)
     }
 
     /// The BPM tag as a number. Software writes it as `128`, `128.00` or, in some locales,
     /// `127,5`. Zero is how some of it writes "unknown", so it reads as no tempo.
     pub fn bpm(&self) -> Option<f64> {
-        let bpm: f64 = self
-            .tag(TagField::Bpm)?
-            .trim()
-            .replace(',', ".")
-            .parse()
-            .ok()?;
-        (bpm.is_finite() && bpm > 0.0).then_some(bpm)
+        bpm_from_tags(&self.tags)
     }
 
     pub fn key(&self) -> Option<Key> {

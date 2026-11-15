@@ -12,9 +12,10 @@
     track: LibraryTrack | undefined;
     inSheet?: boolean;
     onclose: () => void;
+    ontogglefavourite?: (track: LibraryTrack) => void;
   }
 
-  let { track, inSheet = false, onclose }: Props = $props();
+  let { track, inSheet = false, onclose, ontogglefavourite }: Props = $props();
 
   interface DetailCell {
     label: string;
@@ -54,14 +55,17 @@
           <div class="hero-top">
             <h2 class="title">{track.title}</h2>
             <div class="tools">
-              <Tooltip text="Favourites arrive in M2" side="left">
+              <Tooltip
+                text={track.favourite ? 'Remove from favourites' : 'Add to favourites'}
+                side="left"
+              >
                 <Button
                   variant="icon"
                   aria-label="Favourite track"
-                  aria-disabled="true"
-                  tabindex={-1}
+                  aria-pressed={track.favourite}
+                  onclick={() => track && ontogglefavourite?.(track)}
                 >
-                  <Icon name="star" size="sm" />
+                  <Icon name="star" size="sm" filled={track.favourite} />
                 </Button>
               </Tooltip>
               <Tooltip text="Track actions arrive in M2" side="left">

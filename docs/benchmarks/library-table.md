@@ -20,27 +20,27 @@ Machine: ROG Zephyrus G16, Core Ultra 9 285H, 64 GB RAM, Windows 11 Pro. The pag
 
 Five runs straight after loading the page. Each pass is 600 frames.
 
-| Run | Pass | Median frame | 99th percentile | Longest frame | Missed frames | Frames with a loading row |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 | Fling | 6.2 ms | 8.3 ms | 10.5 ms | 2 | 0 |
-| 1 | Jumps | 6.2 ms | 7.6 ms | 8.5 ms | 0 | 536 |
-| 2 | Fling | 6.2 ms | 7.2 ms | 9.0 ms | 0 | 0 |
-| 2 | Jumps | 6.2 ms | 6.5 ms | 62.1 ms | 3 | 528 |
-| 3 | Fling | 6.2 ms | 12.4 ms | 99.6 ms | 6 | 0 |
-| 3 | Jumps | 6.2 ms | 12.5 ms | 40.6 ms | 10 | 539 |
-| 4 | Fling | 6.2 ms | 6.4 ms | 6.4 ms | 0 | 0 |
-| 4 | Jumps | 6.2 ms | 6.4 ms | 6.4 ms | 0 | 544 |
-| 5 | Fling | 6.2 ms | 6.4 ms | 6.5 ms | 0 | 0 |
-| 5 | Jumps | 6.2 ms | 6.4 ms | 6.4 ms | 0 | 522 |
+| Run | Pass  | Median frame | 99th percentile | Longest frame | Missed frames | Frames with a loading row |
+| --- | ----- | ------------ | --------------- | ------------- | ------------- | ------------------------- |
+| 1   | Fling | 6.2 ms       | 8.3 ms          | 10.5 ms       | 2             | 0                         |
+| 1   | Jumps | 6.2 ms       | 7.6 ms          | 8.5 ms        | 0             | 536                       |
+| 2   | Fling | 6.2 ms       | 7.2 ms          | 9.0 ms        | 0             | 0                         |
+| 2   | Jumps | 6.2 ms       | 6.5 ms          | 62.1 ms       | 3             | 528                       |
+| 3   | Fling | 6.2 ms       | 12.4 ms         | 99.6 ms       | 6             | 0                         |
+| 3   | Jumps | 6.2 ms       | 12.5 ms         | 40.6 ms       | 10            | 539                       |
+| 4   | Fling | 6.2 ms       | 6.4 ms          | 6.4 ms        | 0             | 0                         |
+| 4   | Jumps | 6.2 ms       | 6.4 ms          | 6.4 ms        | 0             | 544                       |
+| 5   | Fling | 6.2 ms       | 6.4 ms          | 6.5 ms        | 0             | 0                         |
+| 5   | Jumps | 6.2 ms       | 6.4 ms          | 6.4 ms        | 0             | 522                       |
 
 Every rendered row was filled 24 to 31 ms after the last jump. A jump lands on rows nobody has asked for yet, so a row is blank until its page arrives, four or five frames later.
 
 The table's own work per frame:
 
-| Scroll | Median | 99th percentile | Longest |
-| --- | --- | --- | --- |
-| Even steps of 62 px | 0.4 ms | 2.3 ms | 4.1 ms |
-| Jumps | 0.5 ms | 1.4 ms | 3.6 ms |
+| Scroll              | Median | 99th percentile | Longest |
+| ------------------- | ------ | --------------- | ------- |
+| Even steps of 62 px | 0.4 ms | 2.3 ms          | 4.1 ms  |
+| Jumps               | 0.5 ms | 1.4 ms          | 3.6 ms  |
 
 A page of 200 rows is about 94 kB and came back from the core in 5.5 to 7.1 ms at the top of the library, 9.3 to 10.2 ms at row 50,000 and 12.9 to 13.7 ms at the end, five reads each, measured from the page over the socket.
 
@@ -67,18 +67,18 @@ The controls are removed before measuring. Each run waits one second, then calls
 
 The control is loaded only in benchmark mode. A normal production rebuild was searched for the control and measurement markers; neither was present.
 
-| Run | Pass | Median frame | 99th percentile | Longest frame | Missed frames | Frames with a loading row |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 | Fling | 6.3 ms | 6.4 ms | 18.7 ms | 2 | 0 |
-| 1 | Jumps | 6.3 ms | 6.4 ms | 6.5 ms | 0 | 535 |
-| 2 | Fling | 6.3 ms | 6.4 ms | 6.5 ms | 0 | 0 |
-| 2 | Jumps | 6.3 ms | 12.5 ms | 12.6 ms | 10 | 538 |
-| 3 | Fling | 6.3 ms | 6.4 ms | 6.5 ms | 0 | 0 |
-| 3 | Jumps | 6.3 ms | 6.4 ms | 6.4 ms | 0 | 529 |
-| 4 | Fling | 6.3 ms | 12.6 ms | 12.6 ms | 13 | 0 |
-| 4 | Jumps | 6.3 ms | 12.5 ms | 12.6 ms | 18 | 533 |
-| 5 | Fling | 6.3 ms | 12.5 ms | 12.6 ms | 6 | 0 |
-| 5 | Jumps | 6.3 ms | 6.5 ms | 12.6 ms | 3 | 536 |
+| Run | Pass  | Median frame | 99th percentile | Longest frame | Missed frames | Frames with a loading row |
+| --- | ----- | ------------ | --------------- | ------------- | ------------- | ------------------------- |
+| 1   | Fling | 6.3 ms       | 6.4 ms          | 18.7 ms       | 2             | 0                         |
+| 1   | Jumps | 6.3 ms       | 6.4 ms          | 6.5 ms        | 0             | 535                       |
+| 2   | Fling | 6.3 ms       | 6.4 ms          | 6.5 ms        | 0             | 0                         |
+| 2   | Jumps | 6.3 ms       | 12.5 ms         | 12.6 ms       | 10            | 538                       |
+| 3   | Fling | 6.3 ms       | 6.4 ms          | 6.5 ms        | 0             | 0                         |
+| 3   | Jumps | 6.3 ms       | 6.4 ms          | 6.4 ms        | 0             | 529                       |
+| 4   | Fling | 6.3 ms       | 12.6 ms         | 12.6 ms       | 13            | 0                         |
+| 4   | Jumps | 6.3 ms       | 12.5 ms         | 12.6 ms       | 18            | 533                       |
+| 5   | Fling | 6.3 ms       | 12.5 ms         | 12.6 ms       | 6             | 0                         |
+| 5   | Jumps | 6.3 ms       | 6.5 ms          | 12.6 ms       | 3             | 536                       |
 
 After the last jump, every rendered row was filled in 49.1, 36.9, 37.0, 0.0 and 30.5 ms respectively.
 
@@ -88,9 +88,9 @@ The budget is not met. Across 6,000 scrolling frames, 52 counted as missed frame
 
 With the 100,000-track library still open after the five runs, a Windows process snapshot covered the native app and its descendants: seven processes in all.
 
-| Counter | Sum |
-| --- | --- |
-| Working set | 455.03 MiB |
+| Counter                  | Sum        |
+| ------------------------ | ---------- |
+| Working set              | 455.03 MiB |
 | Private committed memory | 298.22 MiB |
 
 Summed working sets count shared pages more than once. Private committed memory measures a different thing from resident memory. These figures leave the idle-memory budget open; it needs an idle measurement with shared resident pages counted once.
@@ -110,12 +110,12 @@ At 17:22:18.246 UTC, a CSS change replaced the row container's promoted transfor
 All medians were 6.3 ms. No fling frame had a loading row. Durations in the table are milliseconds; the loading-row count includes the extra rows beyond the view, as before.
 
 | Run | Fling p99 / longest | Jumps p99 / longest | Missed frames, fling / jumps | Jump frames with a loading row | Filled after last jump |
-| --- | --- | --- | --- | --- | --- |
-| 1 | 12.6 / 18.9 | 12.5 / 12.6 | 18 / 24 | 527 | 42.1 |
-| 2 | 12.6 / 12.7 | 12.5 / 12.6 | 13 / 11 | 533 | 0.0 |
-| 3 | 6.4 / 12.6 | 6.4 / 6.6 | 3 / 0 | 517 | 0.0 |
-| 4 | 6.4 / 6.5 | 6.4 / 6.5 | 0 / 0 | 525 | 30.6 |
-| 5 | 6.4 / 12.5 | 6.4 / 12.4 | 4 / 2 | 523 | 0.0 |
+| --- | ------------------- | ------------------- | ---------------------------- | ------------------------------ | ---------------------- |
+| 1   | 12.6 / 18.9         | 12.5 / 12.6         | 18 / 24                      | 527                            | 42.1                   |
+| 2   | 12.6 / 12.7         | 12.5 / 12.6         | 13 / 11                      | 533                            | 0.0                    |
+| 3   | 6.4 / 12.6          | 6.4 / 6.6           | 3 / 0                        | 517                            | 0.0                    |
+| 4   | 6.4 / 6.5           | 6.4 / 6.5           | 0 / 0                        | 525                            | 30.6                   |
+| 5   | 6.4 / 12.5          | 6.4 / 12.4          | 4 / 2                        | 523                            | 0.0                    |
 
 This run had 75 missed frames out of 6,000, compared with 52 in the baseline, and one interval still exceeded 16 ms. The change showed no gain and was reverted. The budget remains open.
 
@@ -126,12 +126,12 @@ At 17:29:38.229 UTC, a second change keyed rows by their library index modulo th
 The release app ran five pairs of 600-frame passes with DevTools closed, at 1440 by 900 CSS pixels, 1.25 device pixel ratio and 6.3 ms refresh. The controls were absent and no error was recorded. All medians were 6.3 ms, and no fling frame had a loading row. Durations are milliseconds.
 
 | Run | Fling p99 / longest | Jumps p99 / longest | Missed frames, fling / jumps | Jump frames with a loading row | Filled after last jump |
-| --- | --- | --- | --- | --- | --- |
-| 1 | 6.6 / 18.7 | 12.5 / 12.6 | 4 / 17 | 525 | 17.4 |
-| 2 | 6.5 / 12.7 | 12.4 / 12.5 | 4 / 13 | 538 | 0.0 |
-| 3 | 12.6 / 12.6 | 12.5 / 12.7 | 12 / 18 | 538 | 17.1 |
-| 4 | 6.5 / 12.6 | 6.5 / 6.6 | 4 / 0 | 528 | 24.7 |
-| 5 | 12.6 / 12.7 | 12.5 / 12.6 | 17 / 12 | 541 | 30.3 |
+| --- | ------------------- | ------------------- | ---------------------------- | ------------------------------ | ---------------------- |
+| 1   | 6.6 / 18.7          | 12.5 / 12.6         | 4 / 17                       | 525                            | 17.4                   |
+| 2   | 6.5 / 12.7          | 12.4 / 12.5         | 4 / 13                       | 538                            | 0.0                    |
+| 3   | 12.6 / 12.6         | 12.5 / 12.7         | 12 / 18                      | 538                            | 17.1                   |
+| 4   | 6.5 / 12.6          | 6.5 / 6.6           | 4 / 0                        | 528                            | 24.7                   |
+| 5   | 12.6 / 12.7         | 12.5 / 12.6         | 17 / 12                      | 541                            | 30.3                   |
 
 This run had 101 missed frames out of 6,000 and one interval over 16 ms. Fewer text writes did not produce a measured timing gain. The budget remains open.
 
@@ -142,12 +142,12 @@ At 17:36:25.787 UTC, another candidate kept modulo row reuse but advanced the fi
 The same release build protocol measured five pairs of 600-frame passes with DevTools closed, at 1440 by 900 CSS pixels, 1.25 device pixel ratio and 6.3 ms refresh. The controls were absent and no error was recorded. All medians were 6.3 ms, and no fling frame had a loading row. Durations are milliseconds.
 
 | Run | Fling p99 / longest | Jumps p99 / longest | Missed frames, fling / jumps | Jump frames with a loading row | Filled after last jump |
-| --- | --- | --- | --- | --- | --- |
-| 1 | 6.4 / 18.9 | 6.4 / 12.6 | 2 / 1 | 553 | 18.2 |
-| 2 | 12.5 / 12.5 | 6.4 / 12.6 | 6 / 1 | 533 | 74.1 |
-| 3 | 12.5 / 12.6 | 12.5 / 12.6 | 10 / 29 | 530 | 30.3 |
-| 4 | 6.4 / 6.4 | 12.4 / 12.6 | 0 / 10 | 529 | 30.1 |
-| 5 | 12.5 / 12.6 | 6.4 / 12.4 | 11 / 1 | 534 | 17.8 |
+| --- | ------------------- | ------------------- | ---------------------------- | ------------------------------ | ---------------------- |
+| 1   | 6.4 / 18.9          | 6.4 / 12.6          | 2 / 1                        | 553                            | 18.2                   |
+| 2   | 12.5 / 12.5         | 6.4 / 12.6          | 6 / 1                        | 533                            | 74.1                   |
+| 3   | 12.5 / 12.6         | 12.5 / 12.6         | 10 / 29                      | 530                            | 30.3                   |
+| 4   | 6.4 / 6.4           | 12.4 / 12.6         | 0 / 10                       | 529                            | 30.1                   |
+| 5   | 12.5 / 12.6         | 6.4 / 12.4          | 11 / 1                       | 534                            | 17.8                   |
 
 This run had 71 missed frames out of 6,000 and one interval over 16 ms. The buffer showed no timing gain over the baseline. The budget remains open.
 
@@ -159,18 +159,18 @@ None of the three changes measured better than the baseline, so the table keeps 
 
 Machine: the same ROG Zephyrus G16 on mains power, RTX 5090 Laptop GPU, WebView2 157.0.4341.46 at 1440 by 900 CSS pixels, device pixel ratio 1.25. The measured refresh interval was 4.2 ms (240 Hz). The run used the same release protocol above, inside the M1 shell grid (256 px sidebar, 382 px inspector, command bar, dock and player bar), with benchmark controls removed and DevTools closed.
 
-| Run | Pass | Median frame | 99th percentile | Longest frame | Missed frames | Frames with a loading row |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 | Fling | 4.2 ms | 4.6 ms | 8.4 ms | 5 | 0 |
-| 1 | Jumps | 4.2 ms | 4.3 ms | 8.4 ms | 4 | 536 |
-| 2 | Fling | 4.2 ms | 8.3 ms | 8.5 ms | 7 | 0 |
-| 2 | Jumps | 4.2 ms | 8.4 ms | 8.5 ms | 11 | 540 |
-| 3 | Fling | 4.2 ms | 4.4 ms | 8.4 ms | 5 | 0 |
-| 3 | Jumps | 4.2 ms | 8.4 ms | 8.5 ms | 17 | 533 |
-| 4 | Fling | 4.2 ms | 8.4 ms | 8.5 ms | 13 | 0 |
-| 4 | Jumps | 4.2 ms | 8.3 ms | 8.5 ms | 9 | 534 |
-| 5 | Fling | 4.2 ms | 8.3 ms | 8.4 ms | 7 | 0 |
-| 5 | Jumps | 4.2 ms | 8.4 ms | 8.5 ms | 10 | 530 |
+| Run | Pass  | Median frame | 99th percentile | Longest frame | Missed frames | Frames with a loading row |
+| --- | ----- | ------------ | --------------- | ------------- | ------------- | ------------------------- |
+| 1   | Fling | 4.2 ms       | 4.6 ms          | 8.4 ms        | 5             | 0                         |
+| 1   | Jumps | 4.2 ms       | 4.3 ms          | 8.4 ms        | 4             | 536                       |
+| 2   | Fling | 4.2 ms       | 8.3 ms          | 8.5 ms        | 7             | 0                         |
+| 2   | Jumps | 4.2 ms       | 8.4 ms          | 8.5 ms        | 11            | 540                       |
+| 3   | Fling | 4.2 ms       | 4.4 ms          | 8.4 ms        | 5             | 0                         |
+| 3   | Jumps | 4.2 ms       | 8.4 ms          | 8.5 ms        | 17            | 533                       |
+| 4   | Fling | 4.2 ms       | 8.4 ms          | 8.5 ms        | 13            | 0                         |
+| 4   | Jumps | 4.2 ms       | 8.3 ms          | 8.5 ms        | 9             | 534                       |
+| 5   | Fling | 4.2 ms       | 8.3 ms          | 8.4 ms        | 7             | 0                         |
+| 5   | Jumps | 4.2 ms       | 8.4 ms          | 8.5 ms        | 10            | 530                       |
 
 After the last jump, every rendered row was filled in 16.2, 16.0, 19.9, 12.1 and 15.8 ms respectively.
 
@@ -180,27 +180,27 @@ Across 6,000 scrolling frames, no frame exceeded 8.5 ms, well inside the 16 ms c
 
 Same machine and release protocol on mains power (`RTX 5090 Laptop GPU`, WebView2 `157.0.4341.46`, `1440 × 900` CSS pixels, device pixel ratio `1.25`, `4.2 ms` refresh at 240 Hz), now running the nine-column M1 `TrackTable` and `Library` header/filter bar from [#69](https://github.com/BradHudsonGrant/RESONANCE/pull/69). The table box is `802 × 404` CSS pixels (`1,003 × 505` device pixels) with 13 rows visible.
 
-| Run | Pass | Median frame | 99th percentile | Longest frame | Missed frames | Frames with a loading row |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 | Fling | 4.2 ms | 4.3 ms | 8.4 ms | 2 | 0 |
-| 1 | Jumps | 4.2 ms | 8.4 ms | 8.4 ms | 11 | 544 |
-| 2 | Fling | 4.2 ms | 8.3 ms | 8.5 ms | 9 | 0 |
-| 2 | Jumps | 4.2 ms | 8.3 ms | 8.4 ms | 8 | 539 |
-| 3 | Fling | 4.2 ms | 8.3 ms | 8.4 ms | 6 | 0 |
-| 3 | Jumps | 4.2 ms | 8.4 ms | 8.4 ms | 16 | 524 |
-| 4 | Fling | 4.2 ms | 8.3 ms | 8.5 ms | 16 | 0 |
-| 4 | Jumps | 4.2 ms | 8.3 ms | 8.4 ms | 9 | 521 |
-| 5 | Fling | 4.2 ms | 4.3 ms | 8.4 ms | 3 | 0 |
-| 5 | Jumps | 4.2 ms | 8.3 ms | 8.5 ms | 7 | 530 |
+| Run | Pass  | Median frame | 99th percentile | Longest frame | Missed frames | Frames with a loading row |
+| --- | ----- | ------------ | --------------- | ------------- | ------------- | ------------------------- |
+| 1   | Fling | 4.2 ms       | 4.3 ms          | 8.4 ms        | 2             | 0                         |
+| 1   | Jumps | 4.2 ms       | 8.4 ms          | 8.4 ms        | 11            | 544                       |
+| 2   | Fling | 4.2 ms       | 8.3 ms          | 8.5 ms        | 9             | 0                         |
+| 2   | Jumps | 4.2 ms       | 8.3 ms          | 8.4 ms        | 8             | 539                       |
+| 3   | Fling | 4.2 ms       | 8.3 ms          | 8.4 ms        | 6             | 0                         |
+| 3   | Jumps | 4.2 ms       | 8.4 ms          | 8.4 ms        | 16            | 524                       |
+| 4   | Fling | 4.2 ms       | 8.3 ms          | 8.5 ms        | 16            | 0                         |
+| 4   | Jumps | 4.2 ms       | 8.3 ms          | 8.4 ms        | 9             | 521                       |
+| 5   | Fling | 4.2 ms       | 4.3 ms          | 8.4 ms        | 3             | 0                         |
+| 5   | Jumps | 4.2 ms       | 8.3 ms          | 8.5 ms        | 7             | 530                       |
 
 After the last jump, every rendered row was filled in 16.2, 20.2, 24.3, 16.1 and 19.9 ms respectively.
 
 The nine-column table's own synchronous UI-thread work per step (1,000 steps each):
 
-| Scroll | Median | 99th percentile | Longest |
-| --- | --- | --- | --- |
-| Even steps of 62 px | 0.1 ms | 1.5 ms | 3.3 ms |
-| Jumps | 0.2 ms | 1.7 ms | 8.1 ms |
+| Scroll              | Median | 99th percentile | Longest |
+| ------------------- | ------ | --------------- | ------- |
+| Even steps of 62 px | 0.1 ms | 1.5 ms          | 3.3 ms  |
+| Jumps               | 0.2 ms | 1.7 ms          | 8.1 ms  |
 
 ### Stationary check and GPU trace
 
@@ -211,3 +211,50 @@ A Chromium trace with the `gpu` category enabled over a 240 Hz `measureTableScro
 ### Conclusion
 
 Across five release runs (`6,000` scrolling frames on 100,000 rows), every pass kept a `4.2 ms` median at 240 Hz and no frame exceeded `8.5 ms`, inside the `16 ms` ceiling. The `87` single-refresh slips (`1.45%` of frames) sit in `DXGISwapChainImageBacking::Present` inside the GPU process while the UI thread is idle, so [architecture.md](../architecture.md#performance-budgets) and `resonance bench` judge refresh-rate holding on the median frame alongside the `16 ms` ceiling.
+
+## 15 November 2026, M2 search, filters, sort and scroll on 100,000 rows
+
+Machine: Intel Core Ultra 9 285H, `64 GB` RAM, Microsoft Windows 11 Pro. Headless Microsoft Edge `157.0.4341.60` ran the UI at `1440 × 900` CSS pixels (`1.25` device pixel ratio, `4.2 ms` refresh interval at 240 Hz) through Vite in `benchmark` mode against a release `resonance` process serving a `100,000`-track synthetic library (`50` tracks marked favourite). Query timings measure full WebSocket JSON round-trips from the page over `/core` across `20` warm calls after one cold call (`library_facets` used `10` warm calls).
+
+| Query case                                                 | Hits    | Cold    | Median  | 95th percentile |
+| ---------------------------------------------------------- | ------- | ------- | ------- | --------------- |
+| Unfiltered page 0 (`limit: 200`)                           | 100,000 | 6.7 ms  | 5.7 ms  | 6.8 ms          |
+| FTS5 broad prefix (`"Aro"`)                                | 4,170   | 21.2 ms | 22.2 ms | 23.0 ms         |
+| FTS5 phrase (`"Island Field"`)                             | 263     | 8.8 ms  | 7.7 ms  | 8.6 ms          |
+| FTS5 two-word prefix (`"Aro Island"`)                      | 262     | 7.0 ms  | 6.8 ms  | 7.6 ms          |
+| FTS5 zero matches                                          | 0       | 2.0 ms  | 1.0 ms  | 2.2 ms          |
+| `Favourites` pill                                          | 50      | 2.4 ms  | 2.9 ms  | 3.3 ms          |
+| `Recent` pill                                              | 100,000 | 9.4 ms  | 9.1 ms  | 9.7 ms          |
+| BPM filter (`124–128`)                                     | 5,082   | 20.6 ms | 20.6 ms | 21.5 ms         |
+| Key filter (`8A`)                                          | 3,736   | 13.1 ms | 13.2 ms | 14.4 ms         |
+| Multi-filter drawer (BPM, 2 keys, years, label, 2 formats) | 1       | 24.6 ms | 23.8 ms | 25.4 ms         |
+| Zero-match BPM range (`195–200`), Title sort               | 0       | 2.3 ms  | 0.9 ms  | 1.2 ms          |
+| Sort by `Title` asc (page 0)                               | 100,000 | 4.6 ms  | 5.5 ms  | 6.5 ms          |
+| Sort by `Title` asc (`offset: 50,000`)                     | 100,000 | 7.7 ms  | 7.3 ms  | 8.5 ms          |
+| Sort by `BPM` desc (page 0)                                | 100,000 | 5.4 ms  | 5.6 ms  | 7.9 ms          |
+| Sort by `Key` asc (page 0)                                 | 100,000 | 4.3 ms  | 4.2 ms  | 4.7 ms          |
+| Combined FTS5, BPM, key and `BPM` asc sort                 | 19      | 19.4 ms | 18.5 ms | 19.8 ms         |
+| `library_facets` (labels, BPM and year bounds)             | —       | 12.9 ms | 12.7 ms | 13.5 ms         |
+
+End-to-end live search in `CommandBar` (from input fill to rendered DOM update, including the `60 ms` non-empty input debounce) took `100.8 ms` for `"Island Field"`, `117.3 ms` for `"zzznomatch"` and `46.9 ms` when clearing back to empty.
+
+Five `measureTableScroll()` runs on the updated `TrackTable` (sortable column headers and status-column favourite buttons, `600` fling frames and `600` jump frames per run at `4.2 ms` display refresh):
+
+| Run | Pass  | Median frame | 99th percentile | Longest frame | Missed frames | Frames with a loading row |
+| --- | ----- | ------------ | --------------- | ------------- | ------------- | ------------------------- |
+| 1   | Fling | 4.2 ms       | 8.4 ms          | 8.6 ms        | 11            | 0                         |
+| 1   | Jumps | 4.2 ms       | 4.4 ms          | 4.5 ms        | 0             | 534                       |
+| 2   | Fling | 4.2 ms       | 8.3 ms          | 8.4 ms        | 8             | 0                         |
+| 2   | Jumps | 4.2 ms       | 8.3 ms          | 8.5 ms        | 18            | 538                       |
+| 3   | Fling | 4.2 ms       | 8.4 ms          | 8.4 ms        | 17            | 0                         |
+| 3   | Jumps | 4.2 ms       | 4.3 ms          | 4.5 ms        | 0             | 530                       |
+| 4   | Fling | 4.2 ms       | 8.3 ms          | 8.4 ms        | 10            | 0                         |
+| 4   | Jumps | 4.2 ms       | 8.3 ms          | 8.5 ms        | 12            | 524                       |
+| 5   | Fling | 4.2 ms       | 8.3 ms          | 8.4 ms        | 14            | 0                         |
+| 5   | Jumps | 4.2 ms       | 8.3 ms          | 8.4 ms        | 13            | 538                       |
+
+After the last jump, every rendered row filled in `30.5`, `26.0`, `0.0`, `41.6` and `38.2 ms` respectively.
+
+### M2 conclusion
+
+Every measured search, filter, sort, facet and `50,000`-row deep-page query finished in `0.9` to `23.8 ms` median (`<= 25.4 ms` 95th percentile), inside the `< 50 ms` search budget. Across `6,000` scrolling frames on `100,000` tracks, every pass held a `4.2 ms` median with no frame above `8.6 ms`, inside the `16 ms` ceiling.

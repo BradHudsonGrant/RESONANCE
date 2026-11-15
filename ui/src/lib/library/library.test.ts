@@ -3,6 +3,7 @@ import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CoreError } from '../ipc/client';
+import type { TrackQuery } from '../ipc/bindings/TrackQuery';
 import { fakeLibrary, fakeTrack } from './fake-library';
 import { audioSummary, trackSeed } from './format';
 import Inspector from './Inspector.svelte';
@@ -65,7 +66,17 @@ describe('Library', () => {
   });
 
   it('toggles filter pills and returns to all tracks when an active pill is clicked again', async () => {
-    const { pages } = fakeLibrary(12);
+    const queries: TrackQuery[] = [];
+    const pages = new TrackPages((offset, limit, query) => {
+      if (query) queries.push(query);
+      const count = query?.pill === 'favourites' ? 2 : 12;
+      return Promise.resolve({
+        total: count,
+        library_total: 12,
+        offset,
+        tracks: Array.from({ length: Math.min(limit, count) }, (_, i) => fakeTrack(offset + i)),
+      });
+    });
     await pages.load();
     render(Library, { pages, onscan: vi.fn() });
 
@@ -81,11 +92,91 @@ describe('Library', () => {
     expect(screen.getByRole('heading', { name: 'Analysed arrives in M5' })).toBeTruthy();
 
     await fireEvent.click(favouritesPill);
-    expect(screen.getByRole('heading', { name: 'Favourites arrives in M2' })).toBeTruthy();
+    expect(favouritesPill.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('grid', { name: 'Tracks' })).toBeTruthy();
+    expect(queries.at(-1)?.pill).toBe('favourites');
 
     await fireEvent.click(favouritesPill);
     expect(allPill.getAttribute('aria-pressed')).toBe('true');
-    expect(screen.getByRole('grid', { name: 'Tracks' })).toBeTruthy();
+    expect(queries.at(-1)?.pill).toBe('all');
+  });
+
+  it('cycles column sort headers, toggles row favourites and opens the filter drawer', async () => {
+    const queries: TrackQuery[] = [];
+    const pages = new TrackPages((offset, limit, query) => {
+      if (query) queries.push(query);
+      return Promise.resolve({
+        total: 4,
+        library_total: 4,
+        offset,
+        tracks: Array.from({ length: Math.min(limit, 4) }, (_, i) => fakeTrack(offset + i)),
+      });
+    });
+    await pages.load();
+    const ontogglefavourite = vi.fn();
+    const onclearsearch = vi.fn();
+    const loadFacets = vi.fn().mockResolvedValue({
+      bpm_min: 120,
+      bpm_max: 132,
+      year_min: 2020,
+      year_max: 2024,
+      labels: ['Northline'],
+      formats: ['flac'],
+    });
+
+    render(Library, {
+      pages,
+      onscan: vi.fn(),
+      ontogglefavourite,
+      onclearsearch,
+      loadFacets,
+    });
+
+    const bpmBtn = screen.getByRole('button', { name: 'BPM' });
+    await fireEvent.click(bpmBtn);
+    expect(queries.at(-1)).toMatchObject({ sort: 'bpm', direction: 'asc' });
+    expect(bpmBtn.closest('[role="columnheader"]')?.getAttribute('aria-sort')).toBe('ascending');
+
+    await fireEvent.click(bpmBtn);
+    expect(queries.at(-1)).toMatchObject({ sort: 'bpm', direction: 'desc' });
+    expect(bpmBtn.closest('[role="columnheader"]')?.getAttribute('aria-sort')).toBe('descending');
+
+    await fireEvent.click(bpmBtn);
+    expect(queries.at(-1)).toMatchObject({ sort: 'index', direction: 'asc' });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Favourite Track 0' }));
+    expect(ontogglefavourite).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    expect(loadFacets).toHaveBeenCalledOnce();
+    const drawer = screen.getByRole('dialog', { name: 'Filters' });
+    await fireEvent.click(within(drawer).getByRole('button', { name: '8A (Am)' }));
+    expect(queries.at(-1)?.keys).toEqual(['8A']);
+
+    await fireEvent.click(within(drawer).getByRole('button', { name: 'Clear' }));
+    expect(queries.at(-1)?.keys).toBeNull();
+  });
+
+  it('shows a distinct no-matches empty state when filtered results are empty and clears all filters', async () => {
+    const pages = new TrackPages((_offset, _limit, query) =>
+      Promise.resolve({
+        total: query?.text ? 0 : 3,
+        library_total: 3,
+        offset: 0,
+        tracks: query?.text ? [] : [fakeTrack(0), fakeTrack(1), fakeTrack(2)],
+      }),
+    );
+    await pages.load();
+    await pages.setQuery({ text: 'missing', sort: 'title', direction: 'asc' });
+    const onclearsearch = vi.fn();
+
+    render(Library, { pages, onscan: vi.fn(), onclearsearch });
+
+    expect(screen.getByRole('heading', { name: 'No tracks match' })).toBeTruthy();
+    await fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(onclearsearch).toHaveBeenCalledOnce();
+    expect(pages.query.text).toBeUndefined();
+    expect(pages.query.sort).toBe('title');
   });
 
   it('opens the folder scan when the empty library offers to add music', async () => {
@@ -124,8 +215,9 @@ describe('Library', () => {
 });
 
 describe('Inspector and track formatting', () => {
-  it('shows seeded artwork, audio format, two detail rows and file facts for a track', async () => {
+  it('shows seeded artwork, audio format, two detail rows, favourite button and file facts for a track', async () => {
     const onclose = vi.fn();
+    const ontogglefavourite = vi.fn();
     const track = {
       ...fakeTrack(3),
       album: 'Night Bus',
@@ -135,7 +227,7 @@ describe('Inspector and track formatting', () => {
       comment: 'Vinyl rip',
     };
 
-    render(Inspector, { track, onclose });
+    render(Inspector, { track, onclose, ontogglefavourite });
 
     const aside = screen.getByRole('complementary', { name: 'Inspector' });
     expect(within(aside).getByRole('heading', { name: 'Track 3' })).toBeTruthy();
@@ -148,6 +240,11 @@ describe('Inspector and track formatting', () => {
     expect(aside.textContent).toContain('Northline');
     expect(aside.textContent).toContain('Vinyl rip');
     expect(aside.textContent).toContain('/music/3.flac');
+
+    const favBtn = within(aside).getByRole('button', { name: 'Favourite track' });
+    expect(favBtn.getAttribute('aria-pressed')).toBe('false');
+    await fireEvent.click(favBtn);
+    expect(ontogglefavourite).toHaveBeenCalledWith(track);
 
     await fireEvent.click(within(aside).getByRole('button', { name: 'Hide the inspector' }));
     expect(onclose).toHaveBeenCalledOnce();

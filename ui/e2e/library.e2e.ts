@@ -158,3 +158,66 @@ test('subfolder toggles update the library, and a watched source picks up new an
     rmSync(addedTrack, { force: true });
   }
 });
+
+test('instant search, filter drawer, favourites and column sorting filter the real library', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1586, height: 992 });
+  await page.goto('/');
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible({ timeout: 10_000 });
+
+  const table = page.getByRole('grid', { name: 'Tracks' });
+  const search = page.getByRole('combobox', { name: 'Commands' });
+
+  await search.fill('Ada');
+  await expect(page.getByText('2 tracks', { exact: true })).toBeVisible();
+  await expect(table.getByText('Ada Marsh - First Light')).toBeVisible();
+  await expect(table.getByText('Kofi Bell - Third Rail')).toHaveCount(0);
+
+  await search.press('Escape');
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible();
+
+  await search.fill('unmatchedphrase');
+  await expect(page.getByRole('heading', { name: 'No tracks match' })).toBeVisible();
+  await page.getByRole('button', { name: 'Clear filters' }).click();
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible();
+
+  await table.getByText('Ada Marsh - First Light').click();
+  const inspector = page.getByRole('complementary', { name: 'Inspector' });
+  await inspector.getByRole('button', { name: 'Favourite track' }).click();
+  await expect(inspector.getByRole('button', { name: 'Favourite track' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+
+  const pills = page.getByRole('toolbar', { name: 'Track filters' });
+  await pills.getByRole('button', { name: 'Favourites' }).click();
+  await expect(page.getByText('1 track', { exact: true })).toBeVisible();
+  await expect(table.getByText('Ada Marsh - First Light')).toBeVisible();
+  await pills.getByRole('button', { name: 'Favourites' }).click();
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Filters' }).click();
+  const drawer = page.getByRole('dialog', { name: 'Filters' });
+  await drawer.getByRole('checkbox', { name: 'FLAC' }).check();
+  await expect(page.getByText('1 track', { exact: true })).toBeVisible();
+  await expect(table.getByText('Ada Marsh - Second Wind')).toBeVisible();
+  await drawer.getByRole('button', { name: 'Clear' }).click();
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible();
+  await drawer.getByRole('button', { name: 'Done' }).click();
+  await expect(drawer).toBeHidden();
+
+  const titleHeader = table.getByRole('columnheader', { name: 'Title' });
+  await titleHeader.getByRole('button', { name: 'Title' }).click();
+  await expect(titleHeader).toHaveAttribute('aria-sort', 'ascending');
+  await expect(table.locator('.body [role="row"]').first()).toContainText(
+    'Ada Marsh - First Light',
+  );
+
+  await titleHeader.getByRole('button', { name: 'Title' }).click();
+  await expect(titleHeader).toHaveAttribute('aria-sort', 'descending');
+  await expect(table.locator('.body [role="row"]').first()).toContainText('Zara Lin - Sixth Sense');
+
+  await titleHeader.getByRole('button', { name: 'Title' }).click();
+  await expect(titleHeader).toHaveAttribute('aria-sort', 'none');
+});

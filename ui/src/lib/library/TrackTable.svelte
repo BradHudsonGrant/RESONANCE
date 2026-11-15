@@ -1,8 +1,12 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
 
   import TableCell from '../design/TableCell.svelte';
   import TableRow from '../design/TableRow.svelte';
+  import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
+  import type { SortDirection } from '../ipc/bindings/SortDirection';
+  import type { TrackSortField } from '../ipc/bindings/TrackSortField';
   import { columnWidths, compactColumnWidths, dataColumns, tableMinWidth } from './columns';
   import type { TrackPages } from './track-pages.svelte';
 
@@ -12,9 +16,19 @@
     selected?: number | null;
     /** Enter or a double click on a row. */
     onopen?: () => void;
+    ontogglefavourite?: (track: LibraryTrack) => void;
+    onsort?: (sort: TrackSortField, direction: SortDirection) => void;
   }
 
-  let { pages, selected = $bindable(null), onopen }: Props = $props();
+  const columnSortField: Record<string, TrackSortField> = {
+    title: 'title',
+    artist: 'artist',
+    bpm: 'bpm',
+    key: 'key',
+    time: 'duration',
+  };
+
+  let { pages, selected = $bindable(null), onopen, ontogglefavourite, onsort }: Props = $props();
 
   // Rows drawn beyond the edges of the view, so a fast scroll does not open a gap.
   const OVERSCAN = 8;
@@ -87,6 +101,45 @@
     if (selected !== null) reveal(selected);
   });
 
+  let lastScrollReset = untrack(() => pages.scrollResetCount);
+  $effect(() => {
+    const resetCount = pages.scrollResetCount;
+    if (resetCount !== lastScrollReset) {
+      lastScrollReset = resetCount;
+      scrollTop = 0;
+      if (viewport) viewport.scrollTop = 0;
+    }
+  });
+
+  const activeSort = $derived<TrackSortField>(pages.query.sort ?? 'index');
+  const activeDirection = $derived<SortDirection>(pages.query.direction ?? 'asc');
+
+  function headerSort(field: TrackSortField): 'ascending' | 'descending' | 'none' {
+    if (field === 'index') {
+      return activeSort === 'index' && activeDirection === 'desc' ? 'descending' : 'none';
+    }
+    if (activeSort !== field) return 'none';
+    return activeDirection === 'desc' ? 'descending' : 'ascending';
+  }
+
+  function cycleSort(field: TrackSortField) {
+    if (field === 'index') {
+      if (activeSort === 'index' && activeDirection === 'asc') {
+        onsort?.('index', 'desc');
+      } else {
+        onsort?.('index', 'asc');
+      }
+      return;
+    }
+    if (activeSort !== field) {
+      onsort?.(field, 'asc');
+    } else if (activeDirection === 'asc') {
+      onsort?.(field, 'desc');
+    } else {
+      onsort?.('index', 'asc');
+    }
+  }
+
   function reveal(index: number) {
     if (!viewport) return;
     const top = index * rowHeight;
@@ -129,9 +182,35 @@
         event.preventDefault();
         toggleChecked(track.id);
       }
+    } else if (event.key.toLowerCase() === 'f' && selected !== null) {
+      const track = pages.track(selected);
+      if (track && ontogglefavourite) {
+        event.preventDefault();
+        ontogglefavourite(track);
+      }
     }
   }
 </script>
+
+{#snippet headerButton(label: string, field: TrackSortField, numeric = false)}
+  {@const sortState = headerSort(field)}
+  <button
+    type="button"
+    class={['sort-btn', { numeric, sorted: sortState !== 'none' }]}
+    onclick={() => cycleSort(field)}
+  >
+    {#if sortState !== 'none'}
+      <svg class="sort-arrow" viewBox="0 0 10 10" width="9" height="9" aria-hidden="true">
+        {#if sortState === 'ascending'}
+          <path d="M2 6.5 5 3.2 8 6.5" fill="none" stroke="currentColor" stroke-width="1.4" />
+        {:else}
+          <path d="M2 3.5 5 6.8 8 3.5" fill="none" stroke="currentColor" stroke-width="1.4" />
+        {/if}
+      </svg>
+    {/if}
+    <span>{label}</span>
+  </button>
+{/snippet}
 
 <div
   class="table"
@@ -163,9 +242,22 @@
           ></span>
         </TableCell>
         <TableCell header compact><span class="visually-hidden">Status</span></TableCell>
-        <TableCell header numeric>#</TableCell>
+        <TableCell header numeric ariaSort={headerSort('index')}>
+          {@render headerButton('#', 'index', true)}
+        </TableCell>
         {#each dataColumns as column (column.key)}
-          <TableCell header numeric={column.numeric}>{column.label}</TableCell>
+          {@const field = columnSortField[column.key]}
+          <TableCell
+            header
+            numeric={column.numeric}
+            ariaSort={field ? headerSort(field) : undefined}
+          >
+            {#if field}
+              {@render headerButton(column.label, field, column.numeric)}
+            {:else}
+              {column.label}
+            {/if}
+          </TableCell>
         {/each}
         <TableCell header compact>
           <span class="visually-hidden">Actions</span>
@@ -221,17 +313,45 @@
               </button>
             </TableCell>
             <TableCell compact>
-              {#if isSelected}
-                <svg
-                  class="status-icon"
-                  viewBox="0 0 14 14"
-                  width="14"
-                  height="14"
-                  aria-hidden="true"
-                >
-                  <path d="M3.5 2.4 11.5 7 3.5 11.6Z" fill="currentColor" />
-                </svg>
-              {/if}
+              <div class="status-cell">
+                {#if isSelected}
+                  <svg
+                    class="status-icon"
+                    viewBox="0 0 14 14"
+                    width="14"
+                    height="14"
+                    aria-hidden="true"
+                  >
+                    <path d="M3.5 2.4 11.5 7 3.5 11.6Z" fill="currentColor" />
+                  </svg>
+                {/if}
+                {#if track}
+                  <button
+                    type="button"
+                    class={[
+                      'status-star',
+                      { fav: track.favourite, hiddenOnSelected: isSelected && !track.favourite },
+                    ]}
+                    aria-label={`Favourite ${track.title}`}
+                    aria-pressed={track.favourite}
+                    tabindex={-1}
+                    onclick={(event) => {
+                      event.stopPropagation();
+                      ontogglefavourite?.(track);
+                    }}
+                  >
+                    <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+                      <path
+                        d="m8 1.8 1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6Z"
+                        fill={track.favourite ? 'currentColor' : 'none'}
+                        stroke="currentColor"
+                        stroke-width="1.35"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </button>
+                {/if}
+              </div>
             </TableCell>
             <TableCell numeric size="sm" tone="muted">
               {track ? index + 1 : ''}
@@ -357,8 +477,88 @@
     opacity: 0.4;
   }
 
+  .status-cell {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--control-height-xs);
+    height: var(--control-height-xs);
+  }
+
   .status-icon {
     color: var(--color-text);
+  }
+
+  .status-star {
+    position: absolute;
+    inset: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-xs);
+    background: transparent;
+    color: var(--color-muted);
+    opacity: 0;
+    cursor: pointer;
+    transition:
+      opacity var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out);
+  }
+
+  .status-star.fav {
+    color: var(--color-text);
+    opacity: 1;
+  }
+
+  .status-star.hiddenOnSelected {
+    opacity: 0;
+  }
+
+  :global(.row:hover) .status-star,
+  .status-star:focus-visible {
+    opacity: 1;
+    color: var(--color-text);
+  }
+
+  :global(.row:hover) .status-icon {
+    opacity: 0;
+  }
+
+  .sort-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    width: calc(100% + var(--space-4));
+    height: var(--table-header-height);
+    margin: 0 calc(var(--space-2) * -1);
+    padding: 0 var(--space-2);
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    transition: color var(--duration-fast) var(--ease-out);
+  }
+
+  .sort-btn:not(.numeric) {
+    flex-direction: row-reverse;
+    justify-content: flex-end;
+  }
+
+  .sort-btn.numeric {
+    justify-content: flex-end;
+  }
+
+  .sort-btn:hover,
+  .sort-btn.sorted {
+    color: var(--color-text);
+  }
+
+  .sort-arrow {
+    flex: 0 0 auto;
   }
 
   .more {

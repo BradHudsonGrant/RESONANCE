@@ -11,12 +11,17 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use command::{
-    AppInfo, IdentifyReport, LibraryTrack, MixDeck, MixDeckState, MixDevice, MixState, Request,
-    Response, ScanReport, TrackAudio, TrackKey, TrackPage, UnreadableFile,
+    AppInfo, FavouriteState, IdentifyReport, LibraryFacets, LibraryTrack, MixDeck, MixDeckState,
+    MixDevice, MixState, Request, Response, ScanReport, SortDirection, TrackAudio, TrackFilterPill,
+    TrackFormat, TrackKey, TrackPage, TrackQuery, TrackSortField, UnreadableFile,
 };
 use error::ApiError;
 use identity::{IdentityWorker, run_identify_pass, to_command_report};
-use resonance_core::library::TagField;
+use resonance_core::library::{AudioFormat, TagField};
+use resonance_core::search::{
+    FilterPill as CoreFilterPill, SortDirection as CoreSortDirection, TrackQuery as CoreTrackQuery,
+    TrackSortField as CoreTrackSortField,
+};
 use resonance_db::{Database, TrackRow};
 use resonance_engine::{DeckId, Mix, MixStatus};
 use resonance_library::watch::SourceWatcher;
@@ -149,7 +154,18 @@ impl Api {
             Request::AppInfo => Ok(Response::AppInfo(AppInfo {
                 version: env!("CARGO_PKG_VERSION").to_owned(),
             })),
-            Request::Tracks { offset, limit } => self.tracks(offset, limit).map(Response::Tracks),
+            Request::Tracks {
+                offset,
+                limit,
+                query,
+            } => self.tracks(offset, limit, query).map(Response::Tracks),
+            Request::SetTrackFavourite {
+                track_id,
+                favourite,
+            } => self
+                .set_track_favourite(track_id, favourite)
+                .map(Response::SetTrackFavourite),
+            Request::LibraryFacets => self.library_facets().map(Response::LibraryFacets),
             Request::Scan { folder } => self.scan(Path::new(&folder)).map(Response::Scan),
             Request::Identify => self.identify().map(Response::Identify),
             Request::Sources => self.sources().map(Response::Sources),
@@ -184,7 +200,13 @@ impl Api {
         }
     }
 
-    fn tracks(&self, offset: u32, limit: u32) -> Result<TrackPage, ApiError> {
+    fn tracks(
+        &self,
+        offset: u32,
+        limit: u32,
+        query: Option<TrackQuery>,
+    ) -> Result<TrackPage, ApiError> {
+        let core_query = core_track_query(query);
         // A panic while the lock was held leaves nothing half-written: reads hold it, and a
         // write is one transaction that SQLite rolls back.
         let library = self
@@ -192,16 +214,66 @@ impl Api {
             .library
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        let total = library
+        let library_total = library
             .track_count()
             .map_err(ApiError::library_unreadable)?;
+        let total = if core_query.is_narrowed() {
+            library
+                .query_track_count(&core_query)
+                .map_err(ApiError::library_unreadable)?
+        } else {
+            library_total
+        };
         let rows = library
-            .tracks_page(offset, limit)
+            .query_tracks_page(&core_query, offset, limit)
             .map_err(ApiError::library_unreadable)?;
         Ok(TrackPage {
             total,
+            library_total,
             offset,
             tracks: rows.iter().map(library_track).collect(),
+        })
+    }
+
+    fn set_track_favourite(
+        &self,
+        track_id: i64,
+        favourite: bool,
+    ) -> Result<FavouriteState, ApiError> {
+        let mut library = self
+            .core
+            .library
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let found = library
+            .set_track_favourite(track_id, favourite)
+            .map_err(ApiError::library_unreadable)?;
+        if !found {
+            return Err(ApiError::bad_request(format!(
+                "Track {track_id} is no longer in the library."
+            )));
+        }
+        Ok(FavouriteState {
+            track_id,
+            favourite,
+        })
+    }
+
+    fn library_facets(&self) -> Result<LibraryFacets, ApiError> {
+        let library = self
+            .core
+            .library
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let facets = library
+            .library_facets()
+            .map_err(ApiError::library_unreadable)?;
+        Ok(LibraryFacets {
+            labels: facets.labels,
+            bpm_min: facets.bpm_min,
+            bpm_max: facets.bpm_max,
+            year_min: facets.year_min,
+            year_max: facets.year_max,
         })
     }
 
@@ -284,11 +356,57 @@ fn mix_state(status: MixStatus) -> MixState {
     }
 }
 
+fn core_track_query(query: Option<TrackQuery>) -> CoreTrackQuery {
+    let Some(query) = query else {
+        return CoreTrackQuery::default();
+    };
+    CoreTrackQuery {
+        text: query.text,
+        pill: match query.pill.unwrap_or_default() {
+            TrackFilterPill::All => CoreFilterPill::All,
+            TrackFilterPill::Favourites => CoreFilterPill::Favourites,
+            TrackFilterPill::Recent => CoreFilterPill::Recent,
+        },
+        bpm_min: query.bpm_min,
+        bpm_max: query.bpm_max,
+        keys: query.keys.unwrap_or_default(),
+        year_min: query.year_min,
+        year_max: query.year_max,
+        label: query.label,
+        formats: query
+            .formats
+            .unwrap_or_default()
+            .into_iter()
+            .map(|format| match format {
+                TrackFormat::Mp3 => AudioFormat::Mp3,
+                TrackFormat::Flac => AudioFormat::Flac,
+                TrackFormat::Aiff => AudioFormat::Aiff,
+                TrackFormat::Wav => AudioFormat::Wav,
+                TrackFormat::M4a => AudioFormat::M4a,
+            })
+            .collect(),
+        sort: match query.sort.unwrap_or_default() {
+            TrackSortField::Index => CoreTrackSortField::Index,
+            TrackSortField::Title => CoreTrackSortField::Title,
+            TrackSortField::Artist => CoreTrackSortField::Artist,
+            TrackSortField::Bpm => CoreTrackSortField::Bpm,
+            TrackSortField::Key => CoreTrackSortField::Key,
+            TrackSortField::Duration => CoreTrackSortField::Duration,
+            TrackSortField::Added => CoreTrackSortField::Added,
+        },
+        direction: match query.direction.unwrap_or_default() {
+            SortDirection::Asc => CoreSortDirection::Asc,
+            SortDirection::Desc => CoreSortDirection::Desc,
+        },
+    }
+}
+
 fn library_track(row: &TrackRow) -> LibraryTrack {
     let file = &row.file;
     let tag = |field| file.tag(field).map(str::to_owned);
     LibraryTrack {
         id: row.track_id,
+        favourite: row.favourite,
         title: file.title().to_owned(),
         artist: tag(TagField::Artist),
         album: tag(TagField::Album),
@@ -354,7 +472,14 @@ mod tests {
     }
 
     fn page(api: &Api, offset: u32, limit: u32) -> TrackPage {
-        match api.handle(Request::Tracks { offset, limit }).unwrap() {
+        match api
+            .handle(Request::Tracks {
+                offset,
+                limit,
+                query: None,
+            })
+            .unwrap()
+        {
             Response::Tracks(page) => page,
             other => panic!("expected tracks, got {other:?}"),
         }
@@ -492,5 +617,94 @@ mod tests {
             "unexpected location: {}",
             after.tracks[0].location
         );
+    }
+
+    #[test]
+    fn tracks_query_filters_sorts_facets_and_favourites_work_through_the_api() {
+        let api = api_with(&[
+            file(
+                "a.flac",
+                &[
+                    (TagField::Title, "Zebra"),
+                    (TagField::Bpm, "128"),
+                    (TagField::Key, "Am"),
+                    (TagField::Label, "Virgin"),
+                    (TagField::Year, "2020"),
+                ],
+            ),
+            file(
+                "b.flac",
+                &[
+                    (TagField::Title, "Alpha"),
+                    (TagField::Bpm, "124"),
+                    (TagField::Key, "11A"),
+                    (TagField::Label, "Anjunadeep"),
+                    (TagField::Year, "2023"),
+                ],
+            ),
+        ]);
+
+        let sorted = match api
+            .handle(Request::Tracks {
+                offset: 0,
+                limit: 10,
+                query: Some(TrackQuery {
+                    sort: Some(TrackSortField::Title),
+                    direction: Some(SortDirection::Asc),
+                    ..TrackQuery::default()
+                }),
+            })
+            .unwrap()
+        {
+            Response::Tracks(page) => page,
+            other => panic!("expected tracks, got {other:?}"),
+        };
+        assert_eq!(sorted.library_total, 2);
+        assert_eq!(sorted.total, 2);
+        assert_eq!(sorted.tracks[0].title, "Alpha");
+        assert!(!sorted.tracks[0].favourite);
+
+        let fav = api
+            .handle(Request::SetTrackFavourite {
+                track_id: sorted.tracks[0].id,
+                favourite: true,
+            })
+            .unwrap();
+        assert_eq!(
+            fav,
+            Response::SetTrackFavourite(FavouriteState {
+                track_id: sorted.tracks[0].id,
+                favourite: true,
+            })
+        );
+
+        let filtered = match api
+            .handle(Request::Tracks {
+                offset: 0,
+                limit: 10,
+                query: Some(TrackQuery {
+                    pill: Some(TrackFilterPill::Favourites),
+                    keys: Some(vec!["11A".to_owned()]),
+                    ..TrackQuery::default()
+                }),
+            })
+            .unwrap()
+        {
+            Response::Tracks(page) => page,
+            other => panic!("expected tracks, got {other:?}"),
+        };
+        assert_eq!(filtered.library_total, 2);
+        assert_eq!(filtered.total, 1);
+        assert!(filtered.tracks[0].favourite);
+
+        let facets = match api.handle(Request::LibraryFacets).unwrap() {
+            Response::LibraryFacets(facets) => facets,
+            other => panic!("expected facets, got {other:?}"),
+        };
+        assert_eq!(facets.labels, vec!["Anjunadeep", "Virgin"]);
+        assert_eq!(facets.bpm_min, Some(124.0));
+        assert_eq!(facets.bpm_max, Some(128.0));
+        assert_eq!(facets.year_min, Some(2020));
+        assert_eq!(facets.year_max, Some(2023));
     }
 }

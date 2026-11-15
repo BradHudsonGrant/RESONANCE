@@ -65,6 +65,59 @@ impl Key {
         names[usize::from(self.hour - 1)]
     }
 
+    /// Zero-padded Camelot code such as `08A`, so lexicographical sort follows the wheel.
+    pub fn sort_code(self) -> String {
+        let ring = match self.mode {
+            Mode::Minor => 'A',
+            Mode::Major => 'B',
+        };
+        format!("{:02}{ring}", self.hour)
+    }
+
+    /// Common Camelot and musical spellings recognised as this key when filtering stored tags.
+    pub fn aliases(self) -> Vec<String> {
+        let mut out = Vec::new();
+        let ring = match self.mode {
+            Mode::Minor => 'A',
+            Mode::Major => 'B',
+        };
+        let ring_lower = ring.to_ascii_lowercase();
+        out.push(format!("{}{ring}", self.hour));
+        out.push(format!("{}{ring_lower}", self.hour));
+        if self.hour < 10 {
+            out.push(format!("0{}{ring}", self.hour));
+            out.push(format!("0{}{ring_lower}", self.hour));
+        }
+
+        let steps = i16::from(self.hour).saturating_sub(8).rem_euclid(12);
+        let tonic_of_major = (steps * 7).rem_euclid(12);
+        let pitch = match self.mode {
+            Mode::Major => tonic_of_major,
+            Mode::Minor => (tonic_of_major - 3).rem_euclid(12),
+        };
+        let suffixes: &[&str] = match self.mode {
+            Mode::Minor => &[
+                "m", "min", "minor", " min", " minor", " Minor", " MIN", " MINOR", "-m", "-min",
+                "-minor", "_m", "_min", "_minor",
+            ],
+            Mode::Major => &[
+                "", "M", "maj", "major", " maj", " major", " Major", " MAJ", " MAJOR", "-maj",
+                "-major", "_maj", "_major",
+            ],
+        };
+
+        for &spelling in pitch_spellings(pitch) {
+            let lower = spelling.to_lowercase();
+            for suffix in suffixes {
+                out.push(format!("{spelling}{suffix}"));
+                if lower != spelling {
+                    out.push(format!("{lower}{suffix}"));
+                }
+            }
+        }
+        out
+    }
+
     pub fn all() -> impl Iterator<Item = Key> {
         [Mode::Minor, Mode::Major]
             .into_iter()
@@ -114,6 +167,24 @@ impl Key {
         let steps = (i16::from(tonic_of_major) * 7).rem_euclid(12);
         let hour = u8::try_from((steps + 7).rem_euclid(12) + 1).ok()?;
         Some(Key { hour, mode })
+    }
+}
+
+fn pitch_spellings(pitch: i16) -> &'static [&'static str] {
+    match pitch.rem_euclid(12) {
+        0 => &["C", "B#", "B♯"],
+        1 => &["Db", "C#", "D♭", "C♯"],
+        2 => &["D"],
+        3 => &["Eb", "D#", "E♭", "D♯"],
+        4 => &["E", "Fb", "F♭"],
+        5 => &["F", "E#", "E♯"],
+        6 => &["F#", "Gb", "F♯", "G♭"],
+        7 => &["G"],
+        8 => &["Ab", "G#", "A♭", "G♯"],
+        9 => &["A"],
+        10 => &["Bb", "A#", "B♭", "A♯"],
+        11 => &["B", "Cb", "C♭"],
+        _ => &[],
     }
 }
 
@@ -237,5 +308,32 @@ mod tests {
     #[test]
     fn display_shows_the_code_and_the_name() {
         assert_eq!("F#m".parse::<Key>().unwrap().to_string(), "11A (F#m)");
+    }
+
+    #[test]
+    fn every_alias_of_every_key_parses_back_to_itself() {
+        for key in Key::all() {
+            let aliases = key.aliases();
+            assert!(!aliases.is_empty());
+            for alias in aliases {
+                let parsed: Key = alias
+                    .parse()
+                    .unwrap_or_else(|err| panic!("alias {alias:?} for {key} failed: {err}"));
+                assert_eq!(
+                    parsed, key,
+                    "alias {alias:?} parsed to {parsed} instead of {key}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sort_codes_follow_camelot_wheel_order() {
+        let codes: Vec<String> = Key::all().map(Key::sort_code).collect();
+        assert_eq!(codes[0], "01A");
+        assert_eq!(codes[1], "02A");
+        assert_eq!(codes[11], "12A");
+        assert_eq!(codes[12], "01B");
+        assert!(codes[1] < codes[9]);
     }
 }

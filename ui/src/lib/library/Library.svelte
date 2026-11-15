@@ -4,18 +4,26 @@
   import GridDots from '../design/GridDots.svelte';
   import Icon, { type IconName } from '../design/Icon.svelte';
   import Tooltip from '../design/Tooltip.svelte';
+  import type { LibraryFacets } from '../ipc/bindings/LibraryFacets';
+  import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
+  import type { TrackFilterPill } from '../ipc/bindings/TrackFilterPill';
+  import type { TrackQuery } from '../ipc/bindings/TrackQuery';
+  import FilterDrawer from './FilterDrawer.svelte';
   import { trackCount } from './format';
-  import type { TrackPages } from './track-pages.svelte';
+  import { countActiveDrawerFilters, type TrackPages } from './track-pages.svelte';
   import TrackTable from './TrackTable.svelte';
 
   interface Props {
     pages: TrackPages;
     selected?: number | null;
+    loadFacets?: () => Promise<LibraryFacets>;
     onopen?: () => void;
     onscan: () => void;
+    ontogglefavourite?: (track: LibraryTrack) => void;
+    onclearsearch?: () => void;
   }
 
-  type FilterId = 'all' | 'analysed' | 'unanalysed' | 'favourites' | 'recent';
+  type FilterId = TrackFilterPill | 'analysed' | 'unanalysed';
 
   interface Pill {
     id: FilterId;
@@ -41,26 +49,77 @@
       arrives: 'M5',
       note: 'Unanalysed tracks will show here once audio analysis lands in M5.',
     },
-    {
-      id: 'favourites',
-      label: 'Favourites',
-      icon: 'star',
-      arrives: 'M2',
-      note: 'Favourites arrive with library filters in M2.',
-    },
-    {
-      id: 'recent',
-      label: 'Recent',
-      icon: 'recent',
-      arrives: 'M2',
-      note: 'Recently added tracks arrive with library filters in M2.',
-    },
+    { id: 'favourites', label: 'Favourites', icon: 'star' },
+    { id: 'recent', label: 'Recent', icon: 'recent' },
   ];
 
-  let { pages, selected = $bindable(null), onopen, onscan }: Props = $props();
-  let activeFilter = $state<FilterId>('all');
+  let {
+    pages,
+    selected = $bindable(null),
+    loadFacets,
+    onopen,
+    onscan,
+    ontogglefavourite,
+    onclearsearch,
+  }: Props = $props();
 
+  let m5Gate = $state<'analysed' | 'unanalysed' | null>(null);
+  let drawerOpen = $state(false);
+  let facets = $state<LibraryFacets | null>(null);
+
+  const activeFilter = $derived<FilterId>(m5Gate ?? pages.query.pill ?? 'all');
   const activePill = $derived(pills.find((pill) => pill.id === activeFilter) ?? pills[0]!);
+  const drawerFilterCount = $derived(countActiveDrawerFilters(pages.query));
+
+  function selectPill(pill: Pill) {
+    if (pill.id === 'analysed' || pill.id === 'unanalysed') {
+      if (m5Gate === pill.id) {
+        m5Gate = null;
+      } else {
+        m5Gate = pill.id;
+      }
+      return;
+    }
+    m5Gate = null;
+    const current = pages.query.pill ?? 'all';
+    const next: TrackFilterPill = current === pill.id ? 'all' : pill.id;
+    void pages.setQuery({ ...pages.query, pill: next });
+  }
+
+  function clearDrawerFilters() {
+    void pages.setQuery({
+      ...pages.query,
+      bpm_min: null,
+      bpm_max: null,
+      keys: null,
+      year_min: null,
+      year_max: null,
+      label: null,
+      formats: null,
+    });
+  }
+
+  function clearAllFilters() {
+    m5Gate = null;
+    onclearsearch?.();
+    const keepSort: TrackQuery =
+      pages.query.sort || pages.query.direction
+        ? { sort: pages.query.sort, direction: pages.query.direction }
+        : {};
+    void pages.setQuery(keepSort);
+  }
+
+  function openDrawer() {
+    drawerOpen = true;
+    if (!loadFacets) return;
+    void loadFacets()
+      .then((next) => {
+        facets = next;
+      })
+      .catch(() => {
+        // Leave stale facets untouched if the library read fails cleanly.
+      });
+  }
 </script>
 
 <section class="library" aria-label="Library">
@@ -68,32 +127,44 @@
     <div class="title-row">
       <div class="title-group">
         <h1 class="heading">Library</h1>
-        {#if pages.state.kind === 'ready' && pages.total > 0}
+        {#if pages.state.kind === 'ready' && pages.libraryTotal > 0}
           <span class="count numeric">{trackCount(pages.total)}</span>
         {/if}
       </div>
-      {#if pages.state.kind === 'ready' && pages.total > 0}
+      {#if pages.state.kind === 'ready' && pages.libraryTotal > 0}
         <div class="actions">
           <Button variant="quiet" onclick={onscan}>Scan folder</Button>
-          <Tooltip text="Filters arrive in M2" side="left">
-            <Button variant="icon" size="lg" aria-label="Filters" aria-disabled="true">
-              <Icon name="sliders" size="sm" />
-            </Button>
-          </Tooltip>
+          <div class="filter-action">
+            <Tooltip
+              text={drawerFilterCount > 0 ? `Filters (${drawerFilterCount} active)` : 'Filters'}
+              side="left"
+            >
+              <Button
+                variant="icon"
+                size="lg"
+                aria-label="Filters"
+                aria-pressed={drawerOpen || drawerFilterCount > 0}
+                onclick={openDrawer}
+              >
+                <Icon name="sliders" size="sm" />
+              </Button>
+            </Tooltip>
+            {#if drawerFilterCount > 0}
+              <span class="filter-count numeric" aria-hidden="true">{drawerFilterCount}</span>
+            {/if}
+          </div>
         </div>
       {/if}
     </div>
 
-    {#if pages.state.kind !== 'ready' || pages.total > 0}
+    {#if pages.state.kind !== 'ready' || pages.libraryTotal > 0}
       <div class="pills" role="toolbar" aria-label="Track filters">
         {#each pills as pill (pill.id)}
           <FilterPill
             label={pill.label}
             icon={pill.icon}
             active={activeFilter === pill.id}
-            onclick={() => {
-              activeFilter = activeFilter === pill.id ? 'all' : pill.id;
-            }}
+            onclick={() => selectPill(pill)}
           />
         {/each}
       </div>
@@ -114,7 +185,7 @@
         <p>{pages.state.message}</p>
         <Button onclick={() => pages.load()}>Try again</Button>
       </div>
-    {:else if pages.total === 0}
+    {:else if pages.libraryTotal === 0}
       <div class="empty">
         <GridDots spacing={24}>
           <div class="empty-card">
@@ -128,13 +199,33 @@
       <div class="state">
         <h2>{activePill.label} arrives in {activePill.arrives}</h2>
         <p>{activePill.note}</p>
-        <Button onclick={() => (activeFilter = 'all')}>Show all tracks</Button>
+        <Button onclick={() => (m5Gate = null)}>Show all tracks</Button>
+      </div>
+    {:else if pages.total === 0}
+      <div class="state">
+        <h2>No tracks match</h2>
+        <p>Try clearing the search text or adjusting your filters.</p>
+        <Button onclick={clearAllFilters}>Clear filters</Button>
       </div>
     {:else}
-      <TrackTable {pages} bind:selected {onopen} />
+      <TrackTable
+        {pages}
+        bind:selected
+        {onopen}
+        {ontogglefavourite}
+        onsort={(sort, direction) => void pages.setQuery({ ...pages.query, sort, direction })}
+      />
     {/if}
   </div>
 </section>
+
+<FilterDrawer
+  bind:open={drawerOpen}
+  query={pages.query}
+  {facets}
+  onchange={(next) => void pages.setQuery(next)}
+  onclear={clearDrawerFilters}
+/>
 
 <style>
   .library {
@@ -184,6 +275,39 @@
     align-items: center;
     align-self: center;
     gap: var(--space-2);
+  }
+
+  .filter-action {
+    position: relative;
+    display: inline-flex;
+  }
+
+  .filter-count {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border: var(--border-width) solid var(--color-background);
+    border-radius: var(--radius-pill);
+    background: var(--color-text);
+    color: var(--color-background);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    line-height: 1;
+    pointer-events: none;
+  }
+
+  @media (forced-colors: active) {
+    .filter-count {
+      background: Highlight;
+      color: HighlightText;
+      forced-color-adjust: none;
+    }
   }
 
   .pills {
