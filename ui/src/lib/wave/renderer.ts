@@ -94,6 +94,56 @@ const UNIFORMS = [
 export type Rgb = [number, number, number];
 type Locations = Record<(typeof UNIFORMS)[number], WebGLUniformLocation | null>;
 
+function nextTask(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function nextFrame(): Promise<number> {
+  return new Promise(requestAnimationFrame);
+}
+
+const CONTEXT_OPTIONS: WebGLContextAttributes = {
+  antialias: false,
+  alpha: false,
+  powerPreference: 'low-power',
+};
+
+function startProgram(gl: WebGL2RenderingContext): {
+  program: WebGLProgram;
+  shaders: WebGLShader[];
+} {
+  const program = gl.createProgram();
+  const shaders: WebGLShader[] = [];
+  for (const [type, source] of [
+    [gl.VERTEX_SHADER, VERTEX],
+    [gl.FRAGMENT_SHADER, FRAGMENT],
+  ] as const) {
+    const shader = gl.createShader(type);
+    if (!shader) throw new Error('The wave could not make a shader.');
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    gl.attachShader(program, shader);
+    shaders.push(shader);
+  }
+  gl.linkProgram(program);
+  return { program, shaders };
+}
+
+function finishProgram(
+  gl: WebGL2RenderingContext,
+  program: WebGLProgram,
+  shaders: readonly WebGLShader[],
+) {
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    for (const shader of shaders) {
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        throw new Error(gl.getShaderInfoLog(shader) ?? 'The wave shader did not compile.');
+      }
+    }
+    throw new Error(gl.getProgramInfoLog(program) ?? 'The wave shaders did not link.');
+  }
+}
+
 /** Draws the surface as points in one draw call. */
 export class WaveRenderer {
   readonly #gl: WebGL2RenderingContext;
@@ -105,32 +155,54 @@ export class WaveRenderer {
 
   /** Null when the browser has no WebGL2, so the caller can leave the space empty. */
   static on(canvas: HTMLCanvasElement): WaveRenderer | null {
-    const gl = canvas.getContext('webgl2', {
-      antialias: false,
-      alpha: false,
-      powerPreference: 'low-power',
-    });
-    return gl ? new WaveRenderer(gl) : null;
+    const gl = canvas.getContext('webgl2', CONTEXT_OPTIONS);
+    if (!gl) return null;
+    const { program, shaders } = startProgram(gl);
+    finishProgram(gl, program, shaders);
+    return new WaveRenderer(gl, program);
   }
 
-  private constructor(gl: WebGL2RenderingContext) {
-    this.#gl = gl;
-    const program = gl.createProgram();
-    for (const [type, source] of [
-      [gl.VERTEX_SHADER, VERTEX],
-      [gl.FRAGMENT_SHADER, FRAGMENT],
-    ] as const) {
-      const shader = gl.createShader(type);
-      if (!shader) throw new Error('The wave could not make a shader.');
-      gl.shaderSource(shader, source);
-      gl.compileShader(shader);
-      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS))
-        throw new Error(gl.getShaderInfoLog(shader) ?? 'The wave shader did not compile.');
-      gl.attachShader(program, shader);
+  /**
+   * Opens the WebGL2 context after the first frame has presented and waits for parallel shader
+   * compilation across animation frames, so neither GPU-process startup nor HLSL linking blocks
+   * the main thread.
+   */
+  static async prepare(
+    canvas: HTMLCanvasElement,
+    shouldAbort: () => boolean = () => false,
+  ): Promise<WaveRenderer | null> {
+    if (typeof requestAnimationFrame !== 'function') return null;
+    const aborted = () => shouldAbort() || !canvas.isConnected;
+    await nextFrame();
+    await nextTask();
+    if (aborted()) return null;
+
+    const gl = canvas.getContext('webgl2', CONTEXT_OPTIONS);
+    if (!gl) return null;
+    const lose = () => {
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+      return null;
+    };
+
+    await nextTask();
+    if (aborted()) return lose();
+
+    const parallel = gl.getExtension('KHR_parallel_shader_compile');
+    const { program, shaders } = startProgram(gl);
+    for (;;) {
+      await nextFrame();
+      if (aborted()) return lose();
+      if (!parallel || gl.getProgramParameter(program, parallel.COMPLETION_STATUS_KHR)) break;
     }
-    gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS))
-      throw new Error(gl.getProgramInfoLog(program) ?? 'The wave shaders did not link.');
+
+    await nextTask();
+    if (aborted()) return lose();
+    finishProgram(gl, program, shaders);
+    return new WaveRenderer(gl, program);
+  }
+
+  private constructor(gl: WebGL2RenderingContext, program: WebGLProgram) {
+    this.#gl = gl;
     gl.useProgram(program);
     this.#at = Object.fromEntries(
       UNIFORMS.map((name) => [name, gl.getUniformLocation(program, name)]),
