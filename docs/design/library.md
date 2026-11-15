@@ -14,19 +14,19 @@ The table is the library. It starts right under the filter pills, with no collec
 
 A virtualised table: a 31 px header and 33 px rows, with 1 px lines between rows. Only the visible rows and a small margin are drawn, so 100,000 rows scroll within the 16 ms frame budget ([#40](https://github.com/BradHudsonGrant/RESONANCE/issues/40)). Column widths and drop rules live in `ui/src/lib/library/columns.ts`.
 
-| Column | Width | Drawn as | Drops | Built in |
-| --- | --- | --- | --- | --- |
-| Tick box | 30 px | 16 px box, 3 px corners, control border | never | #52 |
-| Status | 22 px | 14 px icon: play on the playing row, star on a favourite, tick when analysed | never | #52 for play, M2 for star, M5 for tick |
-| # | 36 px | 12 px mono, right aligned, Muted | never | #52 |
-| Title | `minmax(150px, 1.8fr)` | 13 px sans 500, Text, cut with an ellipsis | never | #52 |
-| Waveform | 140 px, 88 px when narrow | `Waveform mode="inline"` | narrows below 740 px, hides below 640 px | #52, peaks from M5 |
-| Artist | `minmax(120px, 1.3fr)` | 13 px sans, Text 2 | never | #52 |
-| BPM | 58 px | 13 px mono, right aligned | never | #52, analysed in M5 |
-| Key | 52 px | 13 px mono | never | #52, analysed in M5 |
-| Energy | 54 px | `MeterBar` | hides below 820 px | #52, analysed in M5 |
-| Time | 56 px | 13 px mono, right aligned, Text 2 | never | #52 |
-| Actions | 32 px | 24 px more button | never | #52 |
+| Column   | Width                     | Drawn as                                                            | Drops                                    | Built in                  |
+| -------- | ------------------------- | ------------------------------------------------------------------- | ---------------------------------------- | ------------------------- |
+| Tick box | 30 px                     | 16 px box, 3 px corners, control border                             | never                                    | #52                       |
+| Status   | 22 px                     | 14 px icon: play on the playing or selected row, tick when analysed | never                                    | #52 for play, M5 for tick |
+| #        | 36 px                     | 12 px mono, right aligned, Muted                                    | never                                    | #52                       |
+| Title    | `minmax(150px, 1.8fr)`    | 13 px sans 500, Text, cut with an ellipsis                          | never                                    | #52                       |
+| Waveform | 140 px, 88 px when narrow | `Waveform mode="inline"`                                            | narrows below 740 px, hides below 640 px | #52, peaks from M5        |
+| Artist   | `minmax(120px, 1.3fr)`    | 13 px sans, Text 2                                                  | never                                    | #52                       |
+| BPM      | 58 px                     | 13 px mono, right aligned                                           | never                                    | #52, analysed in M5       |
+| Key      | 52 px                     | 13 px mono                                                          | never                                    | #52, analysed in M5       |
+| Energy   | 54 px                     | `MeterBar`                                                          | hides below 820 px                       | #52, analysed in M5       |
+| Time     | 56 px                     | 13 px mono, right aligned, Text 2                                   | never                                    | #52                       |
+| Actions  | 56 px                     | 24 px favourite button and 24 px more button                        | never                                    | #52 for more, M2 for star |
 
 The table is a container (`container-type: inline-size`), so it drops columns by its own width, whatever narrowed it: the window, the sidebar or the inspector. Below 820 px Energy goes first, and energy stays in the inspector. Below 740 px the waveform narrows to 88 px. Below 640 px it goes, and the track's waveform stays in the dock. Every other column stays at every size.
 

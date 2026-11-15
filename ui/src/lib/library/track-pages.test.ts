@@ -288,4 +288,21 @@ describe('TrackPages', () => {
     expect(sentTexts).toEqual([null, 'a', 'abc']);
     expect(pages.track(0)?.title).toBe('Hit:abc');
   });
+
+  it('checks whether all cached tracks are ticked without allocating when none are ticked', async () => {
+    const pages = new TrackPages(() =>
+      Promise.resolve({
+        total: 2,
+        library_total: 2,
+        offset: 0,
+        tracks: [fakeTrack(0), fakeTrack(1)],
+      }),
+    );
+
+    expect(pages.allLoadedChecked(new Set())).toBe(false);
+    await pages.load();
+    expect(pages.allLoadedChecked(new Set())).toBe(false);
+    expect(pages.allLoadedChecked(new Set([1]))).toBe(false);
+    expect(pages.allLoadedChecked(new Set([1, 2]))).toBe(true);
+  });
 });

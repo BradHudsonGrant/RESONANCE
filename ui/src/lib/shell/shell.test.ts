@@ -178,7 +178,18 @@ describe('Sidebar', () => {
     });
     expect(tooltipTexts().some((text) => text?.includes('Library · Warm Up'))).toBe(true);
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Actions for Warm Up' }));
+    const actionsBtn = screen.getByRole('button', { name: 'Actions for Warm Up' });
+    await fireEvent.click(actionsBtn);
+    const renameItem = screen.getByRole('menuitem', { name: 'Rename' });
+    const deleteItem = screen.getByRole('menuitem', { name: 'Delete' });
+    expect(document.activeElement).toBe(renameItem);
+    await fireEvent.keyDown(window, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(deleteItem);
+    await fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(actionsBtn);
+
+    await fireEvent.click(actionsBtn);
     await fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
     const renameField = screen.getByRole('textbox', { name: 'Rename collection' });
     await fireEvent.input(renameField, { target: { value: 'Opener' } });
@@ -445,5 +456,23 @@ describe('App shell', () => {
     expect(screen.getByRole('button', { name: 'Library' }).getAttribute('aria-current')).toBe(
       'page',
     );
+  });
+
+  it('ignores single-key shell shortcuts while a menu is open', async () => {
+    render(App);
+    const menu = document.createElement('div');
+    menu.setAttribute('role', 'menu');
+    document.body.appendChild(menu);
+    try {
+      for (const key of ['i', 'd', '[', '4']) await fireEvent.keyDown(window, { key });
+      expect(shell().dataset.sidebar).toBeUndefined();
+      expect(shell().dataset.dock).toBeUndefined();
+      expect(shell().dataset.inspector).toBeUndefined();
+      expect(screen.getByRole('button', { name: 'Library' }).getAttribute('aria-current')).toBe(
+        'page',
+      );
+    } finally {
+      menu.remove();
+    }
   });
 });

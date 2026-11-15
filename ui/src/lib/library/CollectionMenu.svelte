@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
 
   import Button from '../design/Button.svelte';
   import Icon from '../design/Icon.svelte';
@@ -38,6 +38,7 @@
 
   let menuEl = $state<HTMLDivElement | undefined>();
   let nameInput = $state<HTMLInputElement | undefined>();
+  let newCollectionBtn = $state<HTMLButtonElement | undefined>();
   let creating = $state(false);
   let newName = $state('');
   let errorMsg = $state<string | null>(null);
@@ -104,6 +105,15 @@
       // Fallback safely when running under environments without Popover API support.
     }
     updatePosition();
+    untrack(() => {
+      if (menuEl && !menuEl.contains(document.activeElement)) {
+        menuEl
+          .querySelector<HTMLElement>(
+            '[role="menuitem"]:not(:disabled), [role="menuitemcheckbox"]:not(:disabled)',
+          )
+          ?.focus();
+      }
+    });
 
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Node | null;
@@ -119,10 +129,46 @@
           creating = false;
           newName = '';
           errorMsg = null;
+          void tick().then(() => newCollectionBtn?.focus());
         } else {
           onClose();
         }
+        return;
       }
+
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      const inInput = document.activeElement instanceof HTMLInputElement;
+      if (inInput && (event.key === 'Home' || event.key === 'End')) return;
+      if (
+        event.key !== 'ArrowDown' &&
+        event.key !== 'ArrowUp' &&
+        event.key !== 'Home' &&
+        event.key !== 'End'
+      ) {
+        return;
+      }
+      const items = Array.from(
+        menuEl?.querySelectorAll<HTMLElement>(
+          '[role="menuitem"]:not(:disabled), [role="menuitemcheckbox"]:not(:disabled)',
+        ) ?? [],
+      );
+      if (items.length === 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const current =
+        document.activeElement instanceof HTMLElement ? items.indexOf(document.activeElement) : -1;
+      let next: number;
+      if (event.key === 'Home') {
+        next = 0;
+      } else if (event.key === 'End') {
+        next = items.length - 1;
+      } else if (event.key === 'ArrowDown') {
+        next = current < 0 ? 0 : (current + 1) % items.length;
+      } else {
+        next = current <= 0 ? items.length - 1 : current - 1;
+      }
+      items[next]?.focus();
+      items[next]?.scrollIntoView?.({ block: 'nearest' });
     };
 
     window.addEventListener('pointerdown', onPointerDown, true);
@@ -280,6 +326,7 @@
         </form>
       {:else}
         <button
+          bind:this={newCollectionBtn}
           type="button"
           class="item"
           role="menuitem"
@@ -352,7 +399,6 @@
   .item:hover:not(:disabled),
   .item:focus-visible:not(:disabled) {
     background: var(--color-surface-2);
-    outline: none;
   }
 
   .item-label {

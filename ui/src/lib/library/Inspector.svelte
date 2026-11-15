@@ -45,6 +45,12 @@
     menuOpen = true;
   }
 
+  function closeMenu() {
+    const anchor = menuAnchor;
+    menuOpen = false;
+    if (anchor?.isConnected) anchor.focus();
+  }
+
   interface DetailCell {
     label: string;
     value: string | null | undefined;
@@ -252,7 +258,7 @@
   onAdd={onaddtocollection}
   onRemove={onremovefromcollection}
   onCreateAndAdd={oncreatecollectionandadd}
-  onClose={() => (menuOpen = false)}
+  onClose={closeMenu}
 />
 
 <style>

@@ -21,7 +21,7 @@
 </script>
 
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
 
   import Button from '../design/Button.svelte';
   import Icon from '../design/Icon.svelte';
@@ -124,6 +124,11 @@
     } else {
       rowMenuPos = { top: 8, left: 8 };
     }
+    untrack(() => {
+      if (rowMenuEl && !rowMenuEl.contains(document.activeElement)) {
+        rowMenuEl.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus();
+      }
+    });
 
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Node | null;
@@ -134,8 +139,40 @@
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
+        event.stopPropagation();
+        const anchor = menuAnchor;
         menuCollectionId = null;
+        if (anchor?.isConnected) anchor.focus();
+        return;
       }
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      if (
+        event.key !== 'ArrowDown' &&
+        event.key !== 'ArrowUp' &&
+        event.key !== 'Home' &&
+        event.key !== 'End'
+      ) {
+        return;
+      }
+      const items = Array.from(
+        rowMenuEl?.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? [],
+      );
+      if (items.length === 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const current =
+        document.activeElement instanceof HTMLElement ? items.indexOf(document.activeElement) : -1;
+      let next: number;
+      if (event.key === 'Home') {
+        next = 0;
+      } else if (event.key === 'End') {
+        next = items.length - 1;
+      } else if (event.key === 'ArrowDown') {
+        next = current < 0 ? 0 : (current + 1) % items.length;
+      } else {
+        next = current <= 0 ? items.length - 1 : current - 1;
+      }
+      items[next]?.focus();
     };
     window.addEventListener('pointerdown', onPointerDown, true);
     window.addEventListener('keydown', onKeyDown, true);
@@ -206,7 +243,9 @@
   }
 
   function askDelete(col: LibraryCollection) {
+    const anchor = menuAnchor;
     menuCollectionId = null;
+    if (anchor?.isConnected) anchor.focus();
     deleteTarget = col;
     deleteOpen = true;
   }
@@ -305,6 +344,13 @@
                     creating = false;
                     createName = '';
                     createError = null;
+                    void tick().then(() =>
+                      document
+                        .querySelector<HTMLElement>(
+                          '.collections-head [aria-label="New collection"]',
+                        )
+                        ?.focus(),
+                    );
                   }
                 }}
               />
@@ -331,6 +377,9 @@
                             event.preventDefault();
                             editingId = null;
                             renameError = null;
+                            void tick().then(() => {
+                              if (menuAnchor?.isConnected) menuAnchor.focus();
+                            });
                           }
                         }}
                       />
@@ -522,9 +571,14 @@
   }
 
   .space.sub-active[aria-current='page'] {
+    border-color: transparent;
     background: transparent;
     color: var(--color-text-2);
     font-weight: var(--weight-medium);
+  }
+
+  .space.sub-active[aria-current='page']:hover {
+    color: var(--color-text);
   }
 
   .space.sub-active[aria-current='page']::before {
@@ -716,7 +770,6 @@
   .row-menu-item:hover,
   .row-menu-item:focus-visible {
     background: var(--color-surface-2);
-    outline: none;
   }
 
   .confirm-copy {
@@ -751,6 +804,15 @@
     .space[aria-disabled='true'] {
       color: GrayText;
     }
+
+    .collection-row.active {
+      outline: var(--border-width) solid Highlight;
+    }
+
+    .collection-row.active::before {
+      background: Highlight;
+      forced-color-adjust: none;
+    }
   }
 
   /* The shell sets --sidebar-state from the window size, or from the user's own choice. */
@@ -782,6 +844,16 @@
       justify-content: center;
       width: var(--control-height-nav);
       padding: 0;
+    }
+
+    .space.sub-active[aria-current='page'] {
+      border-color: var(--color-border);
+      background: var(--color-raised);
+      color: var(--color-text);
+    }
+
+    .space.sub-active[aria-current='page']::before {
+      display: block;
     }
   }
 </style>
