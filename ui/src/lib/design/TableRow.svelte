@@ -24,6 +24,7 @@
 
 <style>
   .row {
+    position: relative;
     display: grid;
     grid-auto-flow: column;
     grid-auto-columns: 1fr;
@@ -42,10 +43,22 @@
 
   .selected,
   .selected:not(.header):not(.disabled):hover {
+    border-bottom-color: transparent;
     border-radius: var(--radius-sm);
     background: var(--color-raised);
     outline: var(--border-width) solid var(--color-border-control);
     outline-offset: calc(-1 * var(--border-width));
+  }
+
+  .selected:not(.header)::before {
+    position: absolute;
+    top: var(--space-1-5);
+    bottom: var(--space-1-5);
+    left: 0;
+    width: var(--selection-bar-width);
+    border-radius: var(--radius-xs);
+    background: var(--color-accent);
+    content: '';
   }
 
   .disabled {

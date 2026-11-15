@@ -4,26 +4,24 @@
   import { onThemeChange } from '../design/theme';
 
   interface Props {
-    mode: 'inline' | 'crossfade' | 'deck' | 'curve';
-    peaks?: Float32Array | readonly number[] | null;
+    mode: 'inline' | 'crossfade' | 'curve';
+    peaks: Float32Array | readonly number[];
     secondaryPeaks?: Float32Array | readonly number[] | null;
+    durationSec: number;
     progress?: number;
     mixPoint?: number;
-    durationSec?: number;
     playing?: boolean;
-    seed?: number;
     label?: string;
   }
 
   let {
-    mode = 'inline',
-    peaks = null,
+    mode,
+    peaks,
     secondaryPeaks = null,
-    progress = 0.42,
+    durationSec,
+    progress = 0,
     mixPoint = 0.6,
-    durationSec = 422,
     playing = false,
-    seed = 1,
     label,
   }: Props = $props();
 
@@ -31,28 +29,17 @@
   let canvas: HTMLCanvasElement;
   let mounted = $state(false);
 
-  function seededPeak(trackSeed: number, index: number, total: number): number {
-    const pos = index / Math.max(1, total - 1);
-    const envelope = Math.sin(pos * Math.PI) ** 0.45;
-    const phrase = 0.65 + 0.35 * Math.sin(pos * Math.PI * 6 + trackSeed * 1.7);
-    const fine = Math.abs(Math.sin(index * 12.9898 + trackSeed * 78.233) * 43758.5453) % 1;
-    return Math.min(1, Math.max(0.08, envelope * phrase * (0.38 + 0.62 * fine)));
-  }
-
   function samplePeak(
     source: Float32Array | readonly number[] | null,
-    fallbackSeed: number,
     index: number,
     total: number,
   ): number {
-    if (source && source.length > 0) {
-      const at = Math.min(
-        source.length - 1,
-        Math.floor((index / Math.max(1, total)) * source.length),
-      );
-      return Math.min(1, Math.max(0.05, Math.abs(source[at] ?? 0)));
-    }
-    return seededPeak(fallbackSeed, index, total);
+    if (!source || source.length === 0) return 0;
+    const at = Math.min(
+      source.length - 1,
+      Math.floor((index / Math.max(1, total)) * source.length),
+    );
+    return Math.min(1, Math.max(0.05, Math.abs(source[at] ?? 0)));
   }
 
   function formatTimestamp(seconds: number): string {
@@ -72,7 +59,7 @@
     const computed = getComputedStyle(canvas).color;
     canvas.style.color = '';
     canvas.style.forcedColorAdjust = '';
-    return computed || '#888888';
+    return computed;
   }
 
   function paint() {
@@ -94,6 +81,7 @@
     }
 
     ctx.clearRect(0, 0, width, height);
+    if (peaks.length === 0) return;
 
     const textColor = resolveColor('--color-text');
     const text2Color = resolveColor('--color-text-2');
@@ -112,7 +100,7 @@
 
       ctx.fillStyle = textColor;
       for (let i = 0; i < count; i++) {
-        const amp = samplePeak(peaks, seed, i, count);
+        const amp = samplePeak(peaks, i, count);
         const barH = Math.max(barPx, Math.round(amp * (height - 4 * barPx)));
         const x = i * stepPx;
         ctx.fillRect(x, baselineY - barH, barPx, barH);
@@ -128,16 +116,18 @@
         const t = i / Math.max(1, count - 1);
         const envA = 1 / (1 + Math.exp((t - mixPoint) * 10));
         const envB = 1 - envA;
-        const ampA = samplePeak(peaks, seed, i, count) * envA;
-        const ampB = samplePeak(secondaryPeaks, seed + 17, i, count) * envB;
+        const ampA = samplePeak(peaks, i, count) * envA;
+        const ampB = samplePeak(secondaryPeaks, i, count) * envB;
 
         const hA = Math.max(barPx, Math.round(ampA * (midY - 2 * barPx)));
-        const hB = Math.max(barPx, Math.round(ampB * (midY - 2 * barPx)));
+        const hB = ampB > 0 ? Math.max(barPx, Math.round(ampB * (midY - 2 * barPx))) : 0;
 
         ctx.fillStyle = t <= progress ? textColor : text2Color;
         ctx.fillRect(x, midY - hA, barPx, hA);
-        ctx.fillStyle = text2Color;
-        ctx.fillRect(x, midY, barPx, hB);
+        if (hB > 0) {
+          ctx.fillStyle = text2Color;
+          ctx.fillRect(x, midY, barPx, hB);
+        }
       }
 
       const strokePx = Math.max(1, Math.round(1.5 * dpr));
@@ -177,16 +167,10 @@
     for (let i = 0; i < count; i++) {
       const x = i * stepPx;
       const t = i / Math.max(1, count - 1);
-      const amp = samplePeak(peaks, seed, i, count);
+      const amp = samplePeak(peaks, i, count);
       const halfH = Math.max(barPx, Math.round(amp * (midY - barPx)));
       ctx.fillStyle = t <= progress ? textColor : text2Color;
       ctx.fillRect(x, midY - halfH, barPx, halfH * 2);
-    }
-
-    if (mode === 'deck') {
-      const playX = Math.round(Math.min(1, Math.max(0, progress)) * (width - barPx));
-      ctx.fillStyle = playing ? accentColor : textColor;
-      ctx.fillRect(playX, 0, barPx, height);
     }
   }
 
@@ -195,10 +179,10 @@
     void mode;
     void peaks;
     void secondaryPeaks;
+    void durationSec;
     void progress;
     void mixPoint;
     void playing;
-    void seed;
     paint();
   });
 
@@ -221,7 +205,7 @@
   </div>
   {#if mode === 'curve'}
     <div class="timestamps numeric" aria-hidden="true">
-      {#each curveTimestamps as stamp (stamp)}
+      {#each curveTimestamps as stamp, index (`${index}-${stamp}`)}
         <span>{stamp}</span>
       {/each}
     </div>
@@ -249,13 +233,11 @@
     height: var(--waveform-inline-height);
   }
 
-  .crossfade,
-  .deck {
+  .crossfade {
     width: 100%;
   }
 
-  .crossfade .stage,
-  .deck .stage {
+  .crossfade .stage {
     height: var(--dock-waveform-height);
   }
 

@@ -8,6 +8,7 @@
     /** Fills its container instead of stopping at the medium width. */
     stretch?: boolean;
     label?: string;
+    hideLabel?: boolean;
     valueText?: string;
     disabled?: boolean;
     onInput?: (value: number) => void;
@@ -21,6 +22,7 @@
     size = 'md',
     stretch = false,
     label,
+    hideLabel = false,
     valueText,
     disabled = false,
     onInput,
@@ -36,7 +38,7 @@
 </script>
 
 <label class={['scrub', `size-${size}`, { stretch, disabled }]}>
-  {#if label}
+  {#if label && !hideLabel}
     <span class="label">{label}</span>
   {/if}
   <span class="track-wrap">

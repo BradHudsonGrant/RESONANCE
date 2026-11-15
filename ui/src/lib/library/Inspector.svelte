@@ -1,11 +1,12 @@
 <script lang="ts">
-  import X from '@lucide/svelte/icons/x';
-
   import Button from '../design/Button.svelte';
   import Icon from '../design/Icon.svelte';
+  import ModularDivider from '../design/ModularDivider.svelte';
+  import MonoLabel from '../design/MonoLabel.svelte';
+  import Thumb from '../design/Thumb.svelte';
   import Tooltip from '../design/Tooltip.svelte';
   import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
-  import { duration, fileSize, sampleRate, tempo } from './format';
+  import { audioSummary, duration, fileSize, tempo, trackSeed } from './format';
 
   interface Props {
     track: LibraryTrack | undefined;
@@ -15,80 +16,156 @@
 
   let { track, inSheet = false, onclose }: Props = $props();
 
-  interface Field {
+  interface DetailCell {
     label: string;
     value: string | null | undefined;
     numeric?: boolean;
   }
 
-  function keyText(track: LibraryTrack): string | null {
-    if (track.key) return `${track.key.camelot}  ${track.key.name}`;
-    return track.key_tag;
+  function keyText(item: LibraryTrack): string | null {
+    if (item.key) return `${item.key.camelot} · ${item.key.name}`;
+    return item.key_tag;
   }
 
-  function fields(track: LibraryTrack): Field[] {
-    const audio = track.audio;
+  function primaryRow(item: LibraryTrack): DetailCell[] {
     return [
-      { label: 'Album', value: track.album },
-      { label: 'Album artist', value: track.album_artist },
-      { label: 'Genre', value: track.genre },
-      { label: 'Year', value: track.year, numeric: true },
-      { label: 'Label', value: track.label },
-      { label: 'Track number', value: track.track_number, numeric: true },
-      { label: 'BPM', value: tempo(track.bpm), numeric: true },
-      { label: 'Key', value: keyText(track), numeric: true },
-      { label: 'Time', value: duration(audio?.duration_ms), numeric: true },
-      { label: 'Format', value: track.format.toUpperCase() },
-      {
-        label: 'Sample rate',
-        value: audio?.sample_rate ? sampleRate(audio.sample_rate) : null,
-        numeric: true,
-      },
-      {
-        label: 'Bit depth',
-        value: audio?.bit_depth ? `${audio.bit_depth}-bit` : null,
-        numeric: true,
-      },
-      {
-        label: 'Bitrate',
-        value: audio?.bitrate_kbps ? `${audio.bitrate_kbps} kbps` : null,
-        numeric: true,
-      },
-      { label: 'Channels', value: audio?.channels?.toString(), numeric: true },
-      { label: 'Size', value: fileSize(track.size_bytes), numeric: true },
-      { label: 'Comment', value: track.comment },
-    ].filter((field) => field.value);
+      { label: 'BPM', value: tempo(item.bpm) || null, numeric: true },
+      { label: 'Key', value: keyText(item), numeric: true },
+      { label: 'Time', value: duration(item.audio?.duration_ms) || null, numeric: true },
+      { label: 'Release', value: item.year, numeric: true },
+    ];
+  }
+
+  function secondaryRow(item: LibraryTrack): DetailCell[] {
+    return [
+      { label: 'Genre', value: item.genre },
+      { label: 'Album', value: item.album },
+      { label: 'Label', value: item.label },
+    ];
   }
 </script>
 
 <aside class={['inspector', { 'in-sheet': inSheet }]} aria-label="Inspector">
-  <div class="close">
-    <Tooltip text="Hide the inspector" shortcut="I" side="left">
-      <Button variant="icon" aria-label="Hide the inspector" onclick={onclose}>
-        <Icon icon={X} size="sm" />
-      </Button>
-    </Tooltip>
-  </div>
   {#if track}
     <div class="body">
-      <h2 class="title">{track.title}</h2>
-      <p class={['artist', { unknown: !track.artist }]}>{track.artist ?? 'No artist tag'}</p>
+      <div class="hero">
+        <Thumb size="lg" seed={trackSeed(track.location)} alt="{track.title} artwork" />
+        <div class="identity">
+          <div class="hero-top">
+            <h2 class="title">{track.title}</h2>
+            <div class="tools">
+              <Tooltip text="Favourites arrive in M2" side="left">
+                <Button
+                  variant="icon"
+                  aria-label="Favourite track"
+                  aria-disabled="true"
+                  tabindex={-1}
+                >
+                  <Icon name="star" size="sm" />
+                </Button>
+              </Tooltip>
+              <Tooltip text="Track actions arrive in M2" side="left">
+                <Button variant="icon" aria-label="More actions" aria-disabled="true" tabindex={-1}>
+                  <Icon name="more" size="sm" />
+                </Button>
+              </Tooltip>
+              <Tooltip text="Hide the inspector" shortcut="I" side="left">
+                <Button variant="icon" aria-label="Hide the inspector" onclick={onclose}>
+                  <Icon name="close" size="sm" />
+                </Button>
+              </Tooltip>
+            </div>
+          </div>
+          <p class={['artist', { unknown: !track.artist }]}>{track.artist ?? 'No artist tag'}</p>
+          <p class="format numeric">{audioSummary(track.format, track.audio)}</p>
+        </div>
+      </div>
+
       {#if !track.audio}
         <p class="warning">
           The file could not be read as audio, so its length and quality are unknown.
         </p>
       {/if}
-      <dl>
-        {#each fields(track) as field (field.label)}
-          <dt>{field.label}</dt>
-          <dd class={{ numeric: field.numeric }}>{field.value}</dd>
-        {/each}
-        <dt>Location</dt>
-        <dd class="location">{track.location}</dd>
-      </dl>
+
+      <ModularDivider />
+
+      <div class="details">
+        <div class="detail-row primary">
+          {#each primaryRow(track) as cell (cell.label)}
+            <div class="cell">
+              <MonoLabel text={cell.label} size="xs" tone="muted" />
+              <span class={['value', { numeric: cell.numeric, missing: !cell.value }]}>
+                {cell.value ?? '—'}
+              </span>
+            </div>
+          {/each}
+        </div>
+
+        <div class="detail-row secondary">
+          {#each secondaryRow(track) as cell (cell.label)}
+            <div class="cell">
+              <MonoLabel text={cell.label} size="xs" tone="muted" />
+              <span class={['value', { numeric: cell.numeric, missing: !cell.value }]}>
+                {cell.value ?? '—'}
+              </span>
+            </div>
+          {/each}
+        </div>
+      </div>
+
+      <ModularDivider />
+
+      <div class="file-facts">
+        <div class="detail-row compact">
+          <div class="cell">
+            <MonoLabel text="Format" size="xs" tone="muted" />
+            <span class="value numeric">{track.format.toUpperCase()}</span>
+          </div>
+          <div class="cell">
+            <MonoLabel text="Size" size="xs" tone="muted" />
+            <span class="value numeric">{fileSize(track.size_bytes)}</span>
+          </div>
+          {#if track.album_artist}
+            <div class="cell">
+              <MonoLabel text="Album artist" size="xs" tone="muted" />
+              <span class="value">{track.album_artist}</span>
+            </div>
+          {/if}
+          {#if track.track_number}
+            <div class="cell">
+              <MonoLabel text="Track" size="xs" tone="muted" />
+              <span class="value numeric">{track.track_number}</span>
+            </div>
+          {/if}
+        </div>
+
+        {#if track.comment}
+          <div class="cell">
+            <MonoLabel text="Comment" size="xs" tone="muted" />
+            <p class="comment">{track.comment}</p>
+          </div>
+        {/if}
+
+        <div class="cell">
+          <MonoLabel text="Location" size="xs" tone="muted" />
+          <p class="location numeric">{track.location}</p>
+        </div>
+      </div>
     </div>
   {:else}
-    <p class="empty">Select a track to see its details here.</p>
+    <div class="empty-wrap">
+      <div class="empty-head">
+        <MonoLabel text="Inspector" size="xs" tone="muted" />
+        <Tooltip text="Hide the inspector" shortcut="I" side="left">
+          <Button variant="icon" aria-label="Hide the inspector" onclick={onclose}>
+            <Icon name="close" size="sm" />
+          </Button>
+        </Tooltip>
+      </div>
+      <p class="empty">
+        Select a track in the table to read its tags, audio format and file location.
+      </p>
+    </div>
   {/if}
 </aside>
 
@@ -109,78 +186,160 @@
     background: transparent;
   }
 
-  .inspector.in-sheet .close {
-    top: 0;
-    right: 0;
+  .body {
+    display: grid;
+    align-content: start;
+    gap: var(--space-4);
+    min-height: 0;
+    padding: var(--space-5);
+    overflow-y: auto;
   }
 
   .inspector.in-sheet .body {
     padding: 0;
   }
 
-  .inspector.in-sheet .empty {
-    padding: 0 var(--control-height-md) 0 0;
+  .hero {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: var(--space-4);
   }
 
-  .close {
-    position: absolute;
-    top: var(--space-3);
-    right: var(--space-3);
+  .identity {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+    min-height: var(--thumb-lg);
   }
 
-  .body {
-    min-height: 0;
-    padding: var(--space-4);
-    overflow-y: auto;
+  .hero-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-2);
   }
 
   .title {
-    padding-right: var(--control-height-md);
-    font-size: var(--text-lg);
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: var(--text-xl);
+    font-weight: var(--weight-semibold);
+    line-height: var(--leading-snug);
+    letter-spacing: var(--tracking-tight);
     overflow-wrap: anywhere;
   }
 
+  .tools {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: var(--space-0-5);
+    margin: calc(-1 * var(--space-1)) calc(-1 * var(--space-1-5)) 0 0;
+  }
+
   .artist {
-    margin: var(--space-1) 0 0;
+    margin: 0;
     color: var(--color-text-2);
+    font-size: var(--text-base);
+    overflow-wrap: anywhere;
   }
 
   .unknown {
     color: var(--color-muted);
   }
 
+  .format {
+    margin: auto 0 0;
+    padding-bottom: var(--space-0-5);
+    color: var(--color-text-2);
+    font-size: var(--text-sm);
+    line-height: var(--leading-mono);
+  }
+
   .warning {
-    margin: var(--space-3) 0 0;
-    color: var(--color-text-2);
-    font-size: var(--text-sm);
-  }
-
-  dl {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: var(--space-1) var(--space-4);
-    margin: var(--space-4) 0 0;
-    font-size: var(--text-sm);
-  }
-
-  dt {
-    color: var(--color-text-2);
-  }
-
-  dd {
     margin: 0;
+    color: var(--color-text-2);
+    font-size: var(--text-sm);
+  }
+
+  .details,
+  .file-facts {
+    display: grid;
+    gap: var(--space-3-5);
+  }
+
+  .detail-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+
+  .detail-row.secondary {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr);
+  }
+
+  .detail-row.compact {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .cell {
+    display: grid;
+    align-content: start;
+    gap: var(--space-1);
+    min-width: 0;
+  }
+
+  .value {
+    color: var(--color-text);
+    font-size: var(--text-md);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .missing {
+    color: var(--color-muted);
+  }
+
+  .comment {
+    margin: 0;
+    color: var(--color-text-2);
+    font-size: var(--text-sm);
     overflow-wrap: anywhere;
   }
 
   .location {
-    grid-column: 1 / -1;
-    color: var(--color-text-2);
+    margin: 0;
+    color: var(--color-muted);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    word-break: break-all;
     user-select: text;
+  }
+
+  .empty-wrap {
+    display: grid;
+    align-content: start;
+    gap: var(--space-2);
+    padding: var(--space-5);
+  }
+
+  .inspector.in-sheet .empty-wrap {
+    padding: 0;
+  }
+
+  .empty-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
   }
 
   .empty {
     margin: 0;
-    padding: var(--space-4) var(--control-height-md) var(--space-4) var(--space-4);
-    color: var(--color-text-2);
+    color: var(--color-muted);
+    font-size: var(--text-md);
   }
 </style>

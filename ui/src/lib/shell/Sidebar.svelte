@@ -32,11 +32,13 @@
     activeSpace: SpaceName;
     /** Missing until the library has been read. */
     trackCount: number | null;
+    /** Pauses the ambient dot wave while Mix is playing. */
+    wavePaused?: boolean;
     onSelectSpace: (space: SpaceName) => void;
     onCollapse: (collapsed: boolean) => void;
   }
 
-  let { activeSpace, trackCount, onSelectSpace, onCollapse }: Props = $props();
+  let { activeSpace, trackCount, wavePaused = false, onSelectSpace, onCollapse }: Props = $props();
 
   // Only the first space still to come takes focus, so Tab does not stop on every placeholder.
   const firstToCome = spaces.find((space) => space.arrives)?.name;
@@ -120,7 +122,7 @@
       <MonoLabel text="Active set" tone="secondary" />
       <p class="waiting">No set yet. Sets arrive in M10.</p>
     </div>
-    <Wave variant="sidebar" />
+    <Wave variant="sidebar" paused={wavePaused} />
   </div>
 </nav>
 

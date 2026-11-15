@@ -1,18 +1,27 @@
 // @vitest-environment happy-dom
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CoreError } from '../ipc/client';
-import { fakeLibrary } from './fake-library';
+import { fakeLibrary, fakeTrack } from './fake-library';
+import { audioSummary, trackSeed } from './format';
+import Inspector from './Inspector.svelte';
 import Library from './Library.svelte';
 import { TrackPages } from './track-pages.svelte';
 
+HTMLElement.prototype.showPopover ??= () => {};
+HTMLElement.prototype.hidePopover ??= () => {};
+
 describe('Library', () => {
-  it('shows the tracks of a scanned library, a few rows at a time', async () => {
+  it('shows the Library header, track count and a virtualised slice of 100,000 rows', async () => {
     const { pages } = fakeLibrary(100_000);
     await pages.load();
 
     render(Library, { pages, onscan: vi.fn() });
+
+    expect(screen.getByRole('heading', { name: 'Library' })).toBeTruthy();
+    expect(screen.getByText('100,000 tracks')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeTruthy();
 
     const grid = screen.getByRole('grid', { name: 'Tracks' });
     expect(grid.getAttribute('aria-rowcount')).toBe('100001');
@@ -20,10 +29,11 @@ describe('Library', () => {
     expect(screen.getAllByRole('row').length).toBeLessThan(60);
   });
 
-  it('moves the selection with the arrow keys', async () => {
+  it('moves the selection with the arrow keys, opens on Enter and ticks rows with X or click', async () => {
     const { pages } = fakeLibrary(50);
     await pages.load();
-    render(Library, { pages, onscan: vi.fn() });
+    const onopen = vi.fn();
+    render(Library, { pages, onopen, onscan: vi.fn() });
     const grid = screen.getByRole('grid', { name: 'Tracks' });
 
     await fireEvent.keyDown(grid, { key: 'ArrowDown' });
@@ -35,6 +45,16 @@ describe('Library', () => {
     expect(selected).toHaveLength(1);
     expect(selected[0]?.textContent).toContain('Track 1');
 
+    const tick = within(selected[0]!).getByRole('checkbox', { name: 'Tick Track 1' });
+    expect(tick.getAttribute('aria-checked')).toBe('false');
+    await fireEvent.keyDown(grid, { key: 'x' });
+    expect(tick.getAttribute('aria-checked')).toBe('true');
+    await fireEvent.click(tick);
+    expect(tick.getAttribute('aria-checked')).toBe('false');
+
+    await fireEvent.keyDown(grid, { key: 'Enter' });
+    expect(onopen).toHaveBeenCalledOnce();
+
     await fireEvent.keyDown(grid, { key: 'ArrowUp' });
     await fireEvent.keyDown(grid, { key: 'ArrowUp' });
 
@@ -42,6 +62,30 @@ describe('Library', () => {
       .getAllByRole('row')
       .filter((row) => row.getAttribute('aria-selected') === 'true');
     expect(top[0]?.textContent).toContain('Track 0');
+  });
+
+  it('toggles filter pills and returns to all tracks when an active pill is clicked again', async () => {
+    const { pages } = fakeLibrary(12);
+    await pages.load();
+    render(Library, { pages, onscan: vi.fn() });
+
+    const toolbar = screen.getByRole('toolbar', { name: 'Track filters' });
+    const allPill = within(toolbar).getByRole('button', { name: 'All tracks' });
+    const analysedPill = within(toolbar).getByRole('button', { name: 'Analysed' });
+    const favouritesPill = within(toolbar).getByRole('button', { name: 'Favourites' });
+
+    expect(allPill.getAttribute('aria-pressed')).toBe('true');
+    await fireEvent.click(analysedPill);
+    expect(analysedPill.getAttribute('aria-pressed')).toBe('true');
+    expect(allPill.getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByRole('heading', { name: 'Analysed arrives in M5' })).toBeTruthy();
+
+    await fireEvent.click(favouritesPill);
+    expect(screen.getByRole('heading', { name: 'Favourites arrives in M2' })).toBeTruthy();
+
+    await fireEvent.click(favouritesPill);
+    expect(allPill.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('grid', { name: 'Tracks' })).toBeTruthy();
   });
 
   it('opens the folder scan when the empty library offers to add music', async () => {
@@ -57,6 +101,15 @@ describe('Library', () => {
     expect(onscan).toHaveBeenCalledOnce();
   });
 
+  it('shows a busy loading state while reading the library', () => {
+    const pages = new TrackPages(() => new Promise(() => {}));
+    pages.load();
+
+    render(Library, { pages, onscan: vi.fn() });
+
+    expect(screen.getByRole('status').textContent).toContain('Reading the library');
+  });
+
   it('says what went wrong and offers to try again', async () => {
     const pages = new TrackPages(() =>
       Promise.reject(new CoreError('disconnected', 'The core is not running.')),
@@ -67,5 +120,63 @@ describe('Library', () => {
 
     expect(screen.getByRole('alert').textContent).toContain('The core is not running.');
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+  });
+});
+
+describe('Inspector and track formatting', () => {
+  it('shows seeded artwork, audio format, two detail rows and file facts for a track', async () => {
+    const onclose = vi.fn();
+    const track = {
+      ...fakeTrack(3),
+      album: 'Night Bus',
+      album_artist: 'Ada Marsh',
+      track_number: '4',
+      label: 'Northline',
+      comment: 'Vinyl rip',
+    };
+
+    render(Inspector, { track, onclose });
+
+    const aside = screen.getByRole('complementary', { name: 'Inspector' });
+    expect(within(aside).getByRole('heading', { name: 'Track 3' })).toBeTruthy();
+    expect(within(aside).getByRole('img', { name: 'Track 3 artwork' })).toBeTruthy();
+    expect(aside.textContent).toContain('FLAC · 44.1 kHz · 16-bit');
+    expect(aside.textContent).toContain('124.0');
+    expect(aside.textContent).toContain('8A · Am');
+    expect(aside.textContent).toContain('5:01');
+    expect(aside.textContent).toContain('Night Bus');
+    expect(aside.textContent).toContain('Northline');
+    expect(aside.textContent).toContain('Vinyl rip');
+    expect(aside.textContent).toContain('/music/3.flac');
+
+    await fireEvent.click(within(aside).getByRole('button', { name: 'Hide the inspector' }));
+    expect(onclose).toHaveBeenCalledOnce();
+  });
+
+  it('explains when audio properties are missing and renders a quiet empty state', () => {
+    const unreadable = { ...fakeTrack(0), artist: null, audio: null, format: 'mp3' };
+    const { unmount } = render(Inspector, { track: unreadable, onclose: vi.fn() });
+
+    expect(screen.getByText('No artist tag')).toBeTruthy();
+    expect(screen.getByText(/could not be read as audio/)).toBeTruthy();
+    unmount();
+
+    render(Inspector, { track: undefined, onclose: vi.fn() });
+    expect(screen.getByText(/Select a track in the table/)).toBeTruthy();
+  });
+
+  it('derives stable track seeds and readable lossless or lossy summaries', () => {
+    expect(trackSeed('/a/first.wav')).toBe(trackSeed('/a/first.wav'));
+    expect(trackSeed('/a/first.wav')).not.toBe(trackSeed('/a/second.wav'));
+    expect(
+      audioSummary('mp3', {
+        duration_ms: 1000,
+        sample_rate: 48_000,
+        channels: 2,
+        bit_depth: null,
+        bitrate_kbps: 320,
+      }),
+    ).toBe('MP3 · 48 kHz · 320 kbps');
+    expect(audioSummary('wav', null)).toBe('WAV');
   });
 });

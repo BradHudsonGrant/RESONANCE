@@ -18,7 +18,7 @@ void main() {
 
 // Each fragment finds the bins under its column and compares its distance from the centre line
 // with their peak and RMS. Columns are whole device pixels and nothing is blended, so the bars are
-// one pixel wide with hard edges.
+// one pixel wide with hard edges. Played bars use Text; upcoming bars use Text 2.
 const FRAGMENT = `#version 300 es
 precision highp float;
 precision highp int;
@@ -28,6 +28,8 @@ uniform float uBinCount;
 uniform float uFirstColumn;
 uniform float uBinsPerColumn;
 uniform float uPlayheadColumn;
+uniform float uPlayheadCapHalf;
+uniform float uPlayheadCapHeight;
 uniform vec3 uBackground;
 uniform vec3 uPeak;
 uniform vec3 uRms;
@@ -40,7 +42,10 @@ const int MOST_BINS = ${MOST_BINS_PER_COLUMN};
 void main() {
   vec2 p = gl_FragCoord.xy - uLane.xy;
   float column = floor(p.x);
-  if (column == uPlayheadColumn) {
+  if (
+    column == uPlayheadColumn ||
+    (abs(column - uPlayheadColumn) <= uPlayheadCapHalf && p.y >= uLane.w - uPlayheadCapHeight)
+  ) {
     outColor = vec4(uPlayhead, 1.0);
     return;
   }
@@ -51,15 +56,17 @@ void main() {
   for (int i = 0; i < MOST_BINS; i++) {
     int bin = first + i;
     if (bin > last) break;
-    if (bin < 0 || float(bin) >= uBinCount) continue;
+    if (bin < 0 || float(bin >= 0 ? bin : 0) >= uBinCount) continue;
     level = max(level, texelFetch(uBins, ivec2(bin % ROW, bin / ROW), 0).rg);
   }
   float halfHeight = uLane.w * 0.5;
   float fromCentre = abs(floor(p.y) + 0.5 - halfHeight) / halfHeight;
+  bool played = column < uPlayheadColumn;
+  vec3 peakTone = played ? uRms : uPeak;
+  vec3 rmsTone = played ? uRms : mix(uPeak, uRms, 0.35);
   vec3 colour = uBackground;
-  if (fromCentre < level.r) colour = uPeak;
-  if (fromCentre < level.g) colour = uRms;
-  if (column < uPlayheadColumn) colour = mix(uBackground, colour, 0.6);
+  if (fromCentre < level.r) colour = peakTone;
+  if (fromCentre < level.g) colour = rmsTone;
   outColor = vec4(colour, 1.0);
 }`;
 
@@ -70,6 +77,8 @@ const UNIFORMS = [
   'uFirstColumn',
   'uBinsPerColumn',
   'uPlayheadColumn',
+  'uPlayheadCapHalf',
+  'uPlayheadCapHeight',
   'uBackground',
   'uPeak',
   'uRms',
@@ -81,6 +90,7 @@ type Locations = Record<(typeof UNIFORMS)[number], WebGLUniformLocation | null>;
 
 export interface Palette {
   background: Rgb;
+  divider: Rgb;
   peak: Rgb;
   rms: Rgb;
   playhead: Rgb;
@@ -115,7 +125,8 @@ export class MixRenderer {
   #dpr = 1;
   palette: Palette = {
     background: [0, 0, 0],
-    peak: [1, 1, 1],
+    divider: [0.2, 0.2, 0.2],
+    peak: [0.7, 0.7, 0.7],
     rms: [1, 1, 1],
     playhead: [1, 0, 0],
     meterTrack: [0.2, 0.2, 0.2],
@@ -168,9 +179,9 @@ export class MixRenderer {
     const texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG8, 1, 1, 0, gl.RG, gl.UNSIGNED_BYTE, new Uint8Array(2));
     return { texture, binCount: 0, binsPerSecond: 1 };
   }
@@ -206,31 +217,34 @@ export class MixRenderer {
 
   draw(a: LaneState, b: LaneState): void {
     const gl = this.#gl;
-    const gap = Math.round(8 * this.#dpr);
-    const meterBar = Math.round(6 * this.#dpr);
-    const meterWidth = 2 * meterBar + 3 * gap;
+    const divider = Math.max(1, Math.round(this.#dpr));
+    const meterPad = Math.round(8 * this.#dpr);
+    const meterBar = Math.round(4 * this.#dpr);
+    const meterGap = Math.round(4 * this.#dpr);
+    const meterWidth = 2 * meterBar + meterGap + 2 * meterPad;
     const laneWidth = Math.max(1, this.#width - meterWidth);
-    const laneHeight = Math.max(2, Math.floor((this.#height - gap) / 2));
+    const laneHeight = Math.max(2, Math.floor((this.#height - divider) / 2));
     const [r, g, bl] = this.palette.background;
     gl.disable(gl.SCISSOR_TEST);
     gl.viewport(0, 0, this.#width, this.#height);
     gl.clearColor(r, g, bl, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
     // Deck A sits on top. GL counts rows from the bottom.
-    this.#drawLane(0, a, laneHeight + gap, laneWidth, laneHeight);
+    this.#drawLane(0, a, laneHeight + divider, laneWidth, laneHeight);
     this.#drawLane(1, b, 0, laneWidth, laneHeight);
     gl.enable(gl.SCISSOR_TEST);
-    const meterLeft = laneWidth + gap;
-    this.#drawMeter(meterLeft, laneHeight + gap, meterBar, laneHeight, a.meterLeft);
+    this.#fill(0, laneHeight, this.#width, divider, this.palette.divider);
+    const meterLeft = laneWidth + meterPad;
+    this.#drawMeter(meterLeft, laneHeight + divider, meterBar, laneHeight, a.meterLeft);
     this.#drawMeter(
-      meterLeft + meterBar + gap,
-      laneHeight + gap,
+      meterLeft + meterBar + meterGap,
+      laneHeight + divider,
       meterBar,
       laneHeight,
       a.meterRight,
     );
     this.#drawMeter(meterLeft, 0, meterBar, laneHeight, b.meterLeft);
-    this.#drawMeter(meterLeft + meterBar + gap, 0, meterBar, laneHeight, b.meterRight);
+    this.#drawMeter(meterLeft + meterBar + meterGap, 0, meterBar, laneHeight, b.meterRight);
   }
 
   #drawLane(deck: 0 | 1, state: LaneState, bottom: number, width: number, height: number): void {
@@ -239,6 +253,8 @@ export class MixRenderer {
     const lane = this.#lanes[deck];
     const binsPerColumn = (lane.binsPerSecond * SECONDS_IN_VIEW) / width;
     const playheadColumn = Math.floor(width / 2);
+    const capSize = Math.max(3, Math.round(5 * this.#dpr));
+    const capHalf = Math.floor((capSize - 1) / 2);
     // Columns are counted from the start of the track, so a column always shows the same bins
     // and the picture moves in whole pixels.
     const playheadAt = Math.floor((state.positionSeconds * lane.binsPerSecond) / binsPerColumn);
@@ -249,6 +265,8 @@ export class MixRenderer {
     gl.uniform1f(at.uFirstColumn, playheadAt - playheadColumn);
     gl.uniform1f(at.uBinsPerColumn, binsPerColumn);
     gl.uniform1f(at.uPlayheadColumn, playheadColumn);
+    gl.uniform1f(at.uPlayheadCapHalf, capHalf);
+    gl.uniform1f(at.uPlayheadCapHeight, capSize);
     const p = this.palette;
     gl.uniform3f(at.uBackground, p.background[0], p.background[1], p.background[2]);
     gl.uniform3f(at.uPeak, p.peak[0], p.peak[1], p.peak[2]);
