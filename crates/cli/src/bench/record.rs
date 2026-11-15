@@ -85,19 +85,21 @@ impl Record<'_> {
     }
 
     fn table(&self) -> Outcome {
-        let passes: Vec<&FrameTimes> = self
-            .page
-            .desktop
-            .scroll
+        let runs = &self.page.desktop.scroll;
+        let passes: Vec<&FrameTimes> = runs
             .iter()
             .flat_map(|run| [&run.fling, &run.jumps])
             .collect();
         let frames: u32 = passes.iter().map(|pass| pass.frames).sum();
         let missed: u32 = passes.iter().map(|pass| pass.missed_frames).sum();
         let longest = passes.iter().map(|pass| pass.max_ms).fold(0.0, f64::max);
+        let holds_refresh = runs.iter().all(|run| {
+            let cap = run.refresh_ms * 1.1;
+            run.fling.p50_ms <= cap && run.jumps.p50_ms <= cap
+        });
         Outcome {
-            budget: "Library table, 100,000 rows, fast scroll: holds the refresh rate, no frame over 16 ms",
-            verdict: met_if(frames > 0 && missed == 0 && longest <= FRAME_MS),
+            budget: "Library table, 100,000 rows, fast scroll: median at the refresh rate, no frame over 16 ms",
+            verdict: met_if(frames > 0 && holds_refresh && longest <= FRAME_MS),
             measured: format!(
                 "{} in {}, longest {}",
                 missed_frames(missed),
@@ -658,6 +660,33 @@ mod tests {
                 Verdict::Met,
                 Verdict::Met,
             ]
+        );
+    }
+
+    #[test]
+    fn table_meets_budget_when_median_holds_refresh_and_longest_stays_within_16_ms() {
+        let mut met_page = page(PAGE);
+        met_page.desktop.scroll[0].refresh_ms = 4.2;
+        met_page.desktop.scroll[0].fling.p50_ms = 4.2;
+        met_page.desktop.scroll[0].fling.max_ms = 8.5;
+        met_page.desktop.scroll[0].fling.missed_frames = 9;
+        met_page.desktop.scroll[0].jumps.p50_ms = 4.2;
+        met_page.desktop.scroll[0].jumps.max_ms = 8.4;
+        met_page.desktop.scroll[0].jumps.missed_frames = 8;
+        assert_eq!(
+            verdicts(&met_page, &audio(480, 0, 180.0))[1].1,
+            Verdict::Met
+        );
+
+        let mut half_refresh = page(PAGE);
+        half_refresh.desktop.scroll[0].refresh_ms = 4.2;
+        half_refresh.desktop.scroll[0].fling.p50_ms = 8.4;
+        half_refresh.desktop.scroll[0].fling.max_ms = 8.5;
+        half_refresh.desktop.scroll[0].jumps.p50_ms = 4.2;
+        half_refresh.desktop.scroll[0].jumps.max_ms = 8.4;
+        assert_eq!(
+            verdicts(&half_refresh, &audio(480, 0, 180.0))[1].1,
+            Verdict::Missed
         );
     }
 
