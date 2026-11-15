@@ -165,8 +165,9 @@ impl ScannedFile {
 }
 
 /// Where the old app parked files it had replaced, converted or rejected. They sit inside music
-/// folders, and scanning them would bring every one back as a track.
-const QUARANTINE_FOLDERS: [&str; 4] = [
+/// folders, and scanning them would bring every one back as a track. They seed the editable
+/// ignored-folder list in a fresh library.
+pub const DEFAULT_IGNORED_FOLDERS: [&str; 4] = [
     "_replaced",
     "_wrong_match",
     "_trash",
@@ -177,12 +178,111 @@ const QUARANTINE_FOLDERS: [&str; 4] = [
 /// An explicit source below that folder can still be scanned.
 pub const SCAN_IGNORE_MARKER: &str = ".resonance-ignore";
 
-/// Whether a scan stays out of a folder with this name, at any depth.
+/// Whether a scan stays out of a folder with this name under the default ignore list.
 pub fn is_ignored_folder(name: &str) -> bool {
+    is_ignored_folder_with(name, &DEFAULT_IGNORED_FOLDERS)
+}
+
+/// Whether a scan stays out of a folder with this name, given the library's editable list of
+/// ignored folder names. Hidden dot-folders are always skipped.
+pub fn is_ignored_folder_with<S: AsRef<str>>(name: &str, ignored_folders: &[S]) -> bool {
     name.starts_with('.')
-        || QUARANTINE_FOLDERS
+        || ignored_folders
             .iter()
-            .any(|quarantine| name.eq_ignore_ascii_case(quarantine))
+            .any(|ignored| name.eq_ignore_ascii_case(ignored.as_ref()))
+}
+
+/// Cleans user-supplied folder names for the editable ignore list. Blank entries, dot-folders and
+/// entries containing path separators are dropped, and case-insensitive duplicates keep their
+/// first spelling.
+pub fn normalise_ignored_folders<S: AsRef<str>>(names: &[S]) -> Vec<String> {
+    let mut cleaned: Vec<String> = Vec::new();
+    for raw in names {
+        let trimmed = raw.as_ref().trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('.')
+            || trimmed.contains('/')
+            || trimmed.contains('\\')
+        {
+            continue;
+        }
+        if !cleaned
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(trimmed))
+        {
+            cleaned.push(trimmed.to_owned());
+        }
+    }
+    cleaned
+}
+
+/// Normalises a relative subfolder path to forward slashes without stripping trailing spaces from
+/// folder names, because real music folders on Windows can end with a space.
+pub fn normalise_subfolder_path(relative: &str) -> Option<String> {
+    let mut parts = Vec::new();
+    for part in relative.split(['/', '\\']) {
+        if part.is_empty() {
+            continue;
+        }
+        if part == "." || part == ".." {
+            return None;
+        }
+        parts.push(part);
+    }
+    (!parts.is_empty()).then(|| parts.join("/"))
+}
+
+/// Normalises, sorts and deduplicates a source's excluded relative subfolder paths.
+pub fn normalise_excluded_subfolders<S: AsRef<str>>(paths: &[S]) -> Vec<String> {
+    let mut cleaned: Vec<String> = paths
+        .iter()
+        .filter_map(|path| normalise_subfolder_path(path.as_ref()))
+        .collect();
+    cleaned.sort();
+    cleaned.dedup();
+    cleaned
+}
+
+/// Whether `relative_folder` (or one of its ancestors inside the source) has been switched off.
+pub fn is_subfolder_excluded<S: AsRef<str>>(
+    relative_folder: &str,
+    excluded_subfolders: &[S],
+) -> bool {
+    let Some(folder) = normalise_subfolder_path(relative_folder) else {
+        return false;
+    };
+    excluded_subfolders.iter().any(|entry| {
+        let Some(excluded) = normalise_subfolder_path(entry.as_ref()) else {
+            return false;
+        };
+        folder == excluded
+            || folder
+                .strip_prefix(&excluded)
+                .is_some_and(|rest| rest.starts_with('/'))
+    })
+}
+
+/// Whether an asset's relative path inside its source belongs in the library under that source's
+/// current subfolder settings and the library's ignored folder names.
+pub fn is_asset_path_included<S1: AsRef<str>, S2: AsRef<str>>(
+    asset_path: &str,
+    include_subfolders: bool,
+    excluded_subfolders: &[S1],
+    ignored_folders: &[S2],
+) -> bool {
+    let Some((parent, _file_name)) = asset_path.rsplit_once('/') else {
+        return true;
+    };
+    if !include_subfolders {
+        return false;
+    }
+    if parent
+        .split('/')
+        .any(|segment| !segment.is_empty() && is_ignored_folder_with(segment, ignored_folders))
+    {
+        return false;
+    }
+    !is_subfolder_excluded(parent, excluded_subfolders)
 }
 
 /// The folder directly under `source` that holds `inside`.
@@ -374,5 +474,83 @@ mod tests {
             folder_under_source_holding(source, Path::new("music")),
             None
         );
+    }
+
+    #[test]
+    fn editable_ignored_folders_clean_duplicates_and_keep_dot_folders_always_ignored() {
+        let cleaned = normalise_ignored_folders(&[
+            "  Samples  ",
+            "samples",
+            "",
+            ".git",
+            "../up",
+            "sub/path",
+            r"sub\path",
+            "_trash",
+        ]);
+
+        assert_eq!(cleaned, vec!["Samples", "_trash"]);
+        assert!(is_ignored_folder_with("SAMPLES", &cleaned));
+        assert!(is_ignored_folder_with(".hidden", &cleaned));
+        assert!(!is_ignored_folder_with("_replaced", &cleaned));
+    }
+
+    #[test]
+    fn subfolder_paths_keep_trailing_spaces_and_reject_traversal() {
+        assert_eq!(
+            normalise_subfolder_path(r"\Garage \140/"),
+            Some("Garage /140".to_owned())
+        );
+        assert_eq!(normalise_subfolder_path(""), None);
+        assert_eq!(normalise_subfolder_path("House/../Samples"), None);
+        assert_eq!(normalise_subfolder_path("."), None);
+    }
+
+    #[test]
+    fn excluding_a_subfolder_excludes_its_children_but_not_lookalike_siblings() {
+        let excluded = normalise_excluded_subfolders(&["House", r"Garage \Old"]);
+
+        assert!(is_subfolder_excluded("House", &excluded));
+        assert!(is_subfolder_excluded("House/Deep/2025", &excluded));
+        assert!(is_subfolder_excluded("Garage /Old/Clips", &excluded));
+        assert!(!is_subfolder_excluded("Houseparty", &excluded));
+        assert!(!is_subfolder_excluded("Garage/Old", &excluded));
+    }
+
+    #[test]
+    fn asset_inclusion_follows_subfolder_toggle_exclusions_and_ignore_list() {
+        let excluded = ["Samples"];
+        let ignored = ["_trash", "Podcasts"];
+
+        assert!(is_asset_path_included(
+            "root.flac",
+            false,
+            &excluded,
+            &ignored
+        ));
+        assert!(!is_asset_path_included(
+            "House/deep.flac",
+            false,
+            &excluded,
+            &ignored
+        ));
+        assert!(is_asset_path_included(
+            "House/deep.flac",
+            true,
+            &excluded,
+            &ignored
+        ));
+        assert!(!is_asset_path_included(
+            "Samples/Loops/kick.wav",
+            true,
+            &excluded,
+            &ignored
+        ));
+        assert!(!is_asset_path_included(
+            "House/podcasts/ep1.mp3",
+            true,
+            &excluded,
+            &ignored
+        ));
     }
 }

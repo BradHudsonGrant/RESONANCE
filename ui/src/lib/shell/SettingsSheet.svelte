@@ -5,8 +5,21 @@
   import SegmentedTabs, { type SegmentedTabItem } from '../design/SegmentedTabs.svelte';
   import Sheet from '../design/Sheet.svelte';
   import { getTheme, setTheme, type Theme } from '../design/theme';
+  import SourcesSettings, { type SourcesClient } from '../library/SourcesSettings.svelte';
 
-  let { open = $bindable(false) }: { open: boolean } = $props();
+  interface Props {
+    open: boolean;
+    sourcesClient?: SourcesClient;
+    sourcesRevision?: number;
+    onsourceschanged?: () => void;
+  }
+
+  let {
+    open = $bindable(false),
+    sourcesClient,
+    sourcesRevision = 0,
+    onsourceschanged,
+  }: Props = $props();
 
   const themeTabs: SegmentedTabItem[] = [
     { id: 'dark', label: 'Dark' },
@@ -37,7 +50,12 @@
       <div class="section-head">
         <MonoLabel text="Library sources" tone="secondary" />
       </div>
-      <p class="waiting">Library sources arrive in M2.</p>
+      <SourcesSettings
+        client={sourcesClient}
+        active={open}
+        revision={sourcesRevision}
+        onchanged={onsourceschanged}
+      />
     </section>
 
     <ModularDivider />

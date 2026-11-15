@@ -154,4 +154,33 @@ describe('Core', () => {
 
     await expect(info).resolves.toEqual({ version: '0.1.0' });
   });
+
+  it('delivers unsolicited library_changed notifications to listeners until unsubscribed', async () => {
+    const { core, sockets } = coreWithSockets();
+    const revisions: number[] = [];
+    const stop = core.onLibraryChange((revision) => revisions.push(revision));
+
+    const info = core.call('app_info');
+    sockets[0]!.opens();
+    await settled();
+    sockets[0]!.receives({
+      id: null,
+      response: { command: 'library_changed', result: { revision: 3 } },
+      error: null,
+    });
+    stop();
+    sockets[0]!.receives({
+      id: null,
+      response: { command: 'library_changed', result: { revision: 4 } },
+      error: null,
+    });
+    sockets[0]!.receives({
+      id: 1,
+      response: { command: 'app_info', result: { version: '0.2.0' } },
+      error: null,
+    });
+
+    expect(revisions).toEqual([3]);
+    await expect(info).resolves.toEqual({ version: '0.2.0' });
+  });
 });

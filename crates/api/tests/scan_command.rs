@@ -164,3 +164,62 @@ fn scanning_stays_out_of_the_folder_holding_the_app_data() {
     assert_eq!(report.found, 1);
     assert_eq!(tracks(&api).tracks[0].title, "track");
 }
+
+#[tokio::test]
+async fn source_commands_and_background_watcher_keep_the_library_in_step() {
+    let music = folder("api-sources-watch");
+    fs::create_dir_all(music.join("House")).unwrap();
+    fs::create_dir_all(music.join("Samples")).unwrap();
+    tone(&music.join("House/First.wav"));
+    tone(&music.join("Samples/Loop.wav"));
+
+    let api = Api::with_watch_quiet_window(
+        Database::open_in_memory().unwrap(),
+        std::time::Duration::from_millis(50),
+    );
+    let mut revisions = api.watch_revisions();
+
+    scan(&api, &music);
+    assert_eq!(tracks(&api).total, 2);
+
+    let sources = match api.handle(Request::Sources).unwrap() {
+        Response::Sources(list) => list,
+        other => panic!("expected sources, got {other:?}"),
+    };
+    assert_eq!(sources.sources.len(), 1);
+    let source_id = sources.sources[0].id;
+    assert!(sources.sources[0].watching_active);
+
+    // Exclude Samples via UpdateSource; track count drops to 1 immediately.
+    let after_exclude = match api
+        .handle(Request::UpdateSource {
+            source_id,
+            include_subfolders: true,
+            watch: true,
+            excluded_subfolders: vec!["Samples".to_owned()],
+        })
+        .unwrap()
+    {
+        Response::UpdateSource(list) => list,
+        other => panic!("expected updated sources, got {other:?}"),
+    };
+    assert_eq!(after_exclude.sources[0].track_count, 1);
+    assert_eq!(tracks(&api).total, 1);
+
+    // Write a new file into House while watching is on; background watcher adds it and bumps revision.
+    tone(&music.join("House/Second.wav"));
+    tokio::time::timeout(std::time::Duration::from_secs(3), revisions.changed())
+        .await
+        .expect("watch revision arrives")
+        .expect("sender stays open");
+    assert_eq!(*revisions.borrow_and_update(), 1);
+    assert_eq!(tracks(&api).total, 2);
+
+    // Removing the source clears its tracks and stops watching.
+    let after_remove = match api.handle(Request::RemoveSource { source_id }).unwrap() {
+        Response::RemoveSource(list) => list,
+        other => panic!("expected sources after remove, got {other:?}"),
+    };
+    assert!(after_remove.sources.is_empty());
+    assert_eq!(tracks(&api).total, 0);
+}

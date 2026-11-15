@@ -1,3 +1,6 @@
+import { copyFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { expect, test } from '@playwright/test';
 
 import { musicFolder } from './core';
@@ -102,4 +105,46 @@ test('a folder that is not there is reported, and the library stays as it was', 
   await expect(
     page.getByRole('grid', { name: 'Tracks' }).getByText('Ada Marsh - First Light'),
   ).toBeVisible();
+});
+
+test('subfolder toggles update the library, and a watched source picks up new files', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1586, height: 992 });
+  await page.goto('/');
+  await expect(page.getByText('5 tracks')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  const card = dialog.getByRole('region', { name: musicFolder });
+  await expect(card).toContainText('5 tracks');
+  await expect(card).toContainText('Watching');
+
+  await card.getByRole('button', { name: 'Subfolders' }).click();
+  await card.getByRole('checkbox', { name: 'Include Garage' }).click();
+  await expect(card).toContainText('3 tracks');
+  await expect(card).toContainText('1 off');
+  await dialog.getByRole('button', { name: 'Done' }).click();
+
+  await expect(page.getByText('3 tracks', { exact: true })).toBeVisible();
+  const table = page.getByRole('grid', { name: 'Tracks' });
+  await expect(table.getByText('Kofi Bell - Third Rail')).toHaveCount(0);
+  await expect(table.getByText('Ada Marsh - First Light')).toBeVisible();
+
+  const addedTrack = join(musicFolder, 'House', 'Zara Lin - Sixth Sense.wav');
+  try {
+    copyFileSync(join(musicFolder, 'House', 'Ada Marsh - First Light.wav'), addedTrack);
+    await expect(page.getByText('4 tracks', { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(table.getByText('Zara Lin - Sixth Sense')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await card.getByRole('checkbox', { name: 'Include Garage' }).click();
+    await expect(card).toContainText('6 tracks');
+    await dialog.getByRole('button', { name: 'Done' }).click();
+
+    await expect(page.getByText('6 tracks', { exact: true })).toBeVisible();
+    await expect(table.getByText('Kofi Bell - Third Rail')).toBeVisible();
+  } finally {
+    rmSync(addedTrack, { force: true });
+  }
 });

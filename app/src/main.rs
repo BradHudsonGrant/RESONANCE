@@ -13,7 +13,7 @@ use resonance_api::error::ApiError;
 use resonance_db::{Database, FILE_NAME};
 use tauri::utils::config::AppDirectoriesOverride;
 use tauri::webview::NewWindowResponse;
-use tauri::{State, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, State, Url, WebviewUrl, WebviewWindowBuilder};
 
 #[derive(Parser)]
 #[command(name = "resonance-app", version, about = "Resonance for the desktop")]
@@ -75,21 +75,37 @@ fn run(options: Options) -> Result<(), AppError> {
         .map(|library| Arc::new(Api::new(library).with_data_folder(folder.clone())))
         .map_err(ApiError::library_unavailable);
 
+    let watch_revisions = api.as_ref().ok().map(|api| api.watch_revisions());
+
     let mut context = tauri::generate_context!();
     context.config_mut().app.app_directories_override = Some(AppDirectoriesOverride::Root(folder));
 
     tauri::Builder::default()
         .manage(api)
         .invoke_handler(tauri::generate_handler![dispatch])
-        .setup(|app| {
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("Resonance")
-                .inner_size(1440.0, 900.0)
-                .min_inner_size(760.0, 480.0)
-                .use_https_scheme(true)
-                .on_navigation(local_page)
-                .on_new_window(|_, _| NewWindowResponse::Deny)
-                .build()?;
+        .setup(move |app| {
+            let window =
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                    .title("Resonance")
+                    .inner_size(1440.0, 900.0)
+                    .min_inner_size(760.0, 480.0)
+                    .use_https_scheme(true)
+                    .on_navigation(local_page)
+                    .on_new_window(|_, _| NewWindowResponse::Deny)
+                    .build()?;
+            if let Some(mut revisions) = watch_revisions {
+                tauri::async_runtime::spawn(async move {
+                    while revisions.changed().await.is_ok() {
+                        let revision = *revisions.borrow_and_update();
+                        if window
+                            .emit("resonance://library-changed", revision)
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                });
+            }
             Ok(())
         })
         .run(context)

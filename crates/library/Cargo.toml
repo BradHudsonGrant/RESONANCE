@@ -11,6 +11,7 @@ resonance-core.workspace = true
 resonance-db.workspace = true
 dunce.workspace = true
 lofty.workspace = true
+notify.workspace = true
 
 [dev-dependencies]
 resonance-fixtures.workspace = true

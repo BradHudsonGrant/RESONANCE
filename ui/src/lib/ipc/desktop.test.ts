@@ -1,13 +1,16 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CoreError } from './client';
 import { DesktopCore } from './desktop';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
+vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
 
 beforeEach(() => {
   vi.mocked(invoke).mockReset();
+  vi.mocked(listen).mockReset();
 });
 
 describe('DesktopCore', () => {
@@ -56,4 +59,23 @@ describe('DesktopCore', () => {
       await expect(info).rejects.toThrow(/restart|reopen|try again/i);
     },
   );
+
+  it('subscribes to native library-changed events and cleans up on unsubscribe', async () => {
+    let handler: ((event: { payload: number }) => void) | undefined;
+    const unlisten = vi.fn();
+    vi.mocked(listen).mockImplementation(async (_name, callback) => {
+      handler = callback as (event: { payload: number }) => void;
+      return unlisten;
+    });
+
+    const seen: number[] = [];
+    const stop = new DesktopCore().onLibraryChange((revision) => seen.push(revision));
+    await Promise.resolve();
+    handler?.({ payload: 5 });
+    stop();
+    handler?.({ payload: 6 });
+
+    expect(seen).toEqual([5]);
+    expect(unlisten).toHaveBeenCalledOnce();
+  });
 });

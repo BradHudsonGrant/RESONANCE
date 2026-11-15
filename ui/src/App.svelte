@@ -4,6 +4,7 @@
   import Inspector from './lib/library/Inspector.svelte';
   import Library from './lib/library/Library.svelte';
   import ScanFolder from './lib/library/ScanFolder.svelte';
+  import type { SourcesClient } from './lib/library/SourcesSettings.svelte';
   import { TrackPages } from './lib/library/track-pages.svelte';
   import CommandBar, { type Command } from './lib/shell/CommandBar.svelte';
   import PlayerBar from './lib/shell/PlayerBar.svelte';
@@ -16,6 +17,14 @@
 
   const commandInput = 'command-bar';
   const pages = new TrackPages((offset, limit) => core.call('tracks', { offset, limit }));
+  const sourcesClient: SourcesClient = {
+    sources: () => core.call('sources'),
+    subfolders: (source_id, parent) => core.call('source_subfolders', { source_id, parent }),
+    scan: (folder) => core.call('scan', { folder }),
+    updateSource: (params) => core.call('update_source', params),
+    removeSource: (source_id) => core.call('remove_source', { source_id }),
+    setIgnoredFolders: (folders) => core.call('set_ignored_folders', { folders }),
+  };
 
   let shell: HTMLDivElement;
   let space = $state<SpaceName>('Library');
@@ -28,6 +37,7 @@
   let settingsMounted = $state(false);
   let scanOpen = $state(false);
   let scanMounted = $state(false);
+  let sourcesRevision = $state(0);
   let mixPlaying = $state(false);
 
   function openSettings() {
@@ -79,11 +89,19 @@
     return () => removeEventListener('resize', closeWhenDocked);
   });
 
+  $effect(() =>
+    core.onLibraryChange(() => {
+      sourcesRevision += 1;
+      void pages.refresh();
+    }),
+  );
+
   const commands: Command[] = $derived([
     space === 'Mix'
       ? { name: 'Go to the library', shortcut: '1', run: () => (space = 'Library') }
       : { name: 'Go to Mix', shortcut: '4', run: () => (space = 'Mix') },
     { name: 'Scan a music folder', run: openScan },
+    { name: 'Manage library sources', run: openSettings },
     { name: 'Show or hide the inspector', shortcut: 'I', run: toggleInspector },
     { name: 'Collapse or expand the sidebar', shortcut: '[', run: toggleSidebar },
     { name: 'Collapse or expand the dock', shortcut: 'D', run: toggleDock },
@@ -98,7 +116,12 @@
   }
 
   function reload() {
-    pages.load();
+    void pages.load();
+  }
+
+  function onScanned() {
+    sourcesRevision += 1;
+    void pages.refresh();
   }
 
   function typing(target: EventTarget | null): boolean {
@@ -201,14 +224,19 @@
 {/if}
 
 {#if settingsMounted}
-  <SettingsSheet bind:open={settingsOpen} />
+  <SettingsSheet
+    bind:open={settingsOpen}
+    {sourcesClient}
+    {sourcesRevision}
+    onsourceschanged={() => void pages.refresh()}
+  />
 {/if}
 
 {#if scanMounted}
   <ScanFolder
     bind:open={scanOpen}
     scan={(folder) => core.call('scan', { folder })}
-    onscanned={reload}
+    onscanned={onScanned}
   />
 {/if}
 
