@@ -27,12 +27,16 @@ interface Waiting {
 /** A binary frame and the page time it arrived at, on the clock `performance.now()` reads. */
 export type FrameListener = (frame: ArrayBuffer, arrivedAt: number) => void;
 
+/** Fired when a background source watcher finds new or modified files on disk. */
+export type LibraryChangeListener = (revision: number) => void;
+
 /** Sends typed commands to the core over one socket, opened on the first call and again after a drop. */
 export class Core {
   #open: () => WebSocket;
   #socket: Promise<WebSocket> | null = null;
   #waiting = new Map<number, Waiting>();
   #frameListeners = new Set<FrameListener>();
+  #libraryListeners = new Set<LibraryChangeListener>();
   #nextId = 1;
 
   constructor(open: () => WebSocket) {
@@ -57,6 +61,15 @@ export class Core {
   onFrame(listener: FrameListener): () => void {
     this.#frameListeners.add(listener);
     return () => this.#frameListeners.delete(listener);
+  }
+
+  /**
+   * Listens for library revisions pushed when a watched source changes on disk. Returns a function
+   * that stops listening.
+   */
+  onLibraryChange(listener: LibraryChangeListener): () => void {
+    this.#libraryListeners.add(listener);
+    return () => this.#libraryListeners.delete(listener);
   }
 
   #connected(): Promise<WebSocket> {
@@ -87,7 +100,14 @@ export class Core {
 
   #settle(text: string) {
     const reply = JSON.parse(text) as Reply;
-    if (reply.id === null) return;
+    if (reply.id === null) {
+      if (reply.response?.command === 'library_changed') {
+        for (const listener of this.#libraryListeners) {
+          listener(reply.response.result.revision);
+        }
+      }
+      return;
+    }
     const waiting = this.#waiting.get(reply.id);
     if (!waiting) return;
     this.#waiting.delete(reply.id);

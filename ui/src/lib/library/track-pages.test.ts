@@ -159,4 +159,34 @@ describe('TrackPages', () => {
     expect(pages.selected).toBeNull();
     expect(pages.selectedTrack).toBeUndefined();
   });
+
+  it('refreshes loaded pages in place while keeping selection and clamping when tracks shrink', async () => {
+    let currentTotal = 10;
+    const pages = new TrackPages((offset, limit) =>
+      Promise.resolve({
+        total: currentTotal,
+        offset,
+        tracks: Array.from(
+          { length: Math.max(0, Math.min(limit, currentTotal - offset)) },
+          (_, i) => fakeTrack(offset + i),
+        ),
+      }),
+    );
+
+    await pages.load();
+    pages.selected = 4;
+    currentTotal = 12;
+    await pages.refresh();
+
+    expect(pages.state).toEqual({ kind: 'ready' });
+    expect(pages.total).toBe(12);
+    expect(pages.selected).toBe(4);
+    expect(pages.selectedTrack).toEqual(fakeTrack(4));
+
+    currentTotal = 3;
+    await pages.refresh();
+    expect(pages.total).toBe(3);
+    expect(pages.selected).toBe(2);
+    expect(pages.selectedTrack).toEqual(fakeTrack(2));
+  });
 });

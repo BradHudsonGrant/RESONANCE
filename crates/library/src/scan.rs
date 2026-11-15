@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use resonance_core::library::{
-    AudioFormat, SCAN_IGNORE_MARKER, ScannedFile, folder_under_source_holding, is_ignored_folder,
+    AudioFormat, SCAN_IGNORE_MARKER, ScannedFile, folder_under_source_holding,
+    is_ignored_folder_with, is_subfolder_excluded,
 };
 use resonance_db::{Database, DbError, FileStamp};
 
@@ -64,7 +65,7 @@ pub struct ScanReport {
 }
 
 #[cfg(windows)]
-fn is_hidden(metadata: &Metadata) -> bool {
+pub(crate) fn is_hidden(metadata: &Metadata) -> bool {
     use std::os::windows::fs::MetadataExt;
     const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
     metadata.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0
@@ -72,11 +73,11 @@ fn is_hidden(metadata: &Metadata) -> bool {
 
 /// Elsewhere a hidden folder is one whose name starts with a dot, which the name rule covers.
 #[cfg(not(windows))]
-fn is_hidden(_metadata: &Metadata) -> bool {
+pub(crate) fn is_hidden(_metadata: &Metadata) -> bool {
     false
 }
 
-fn has_scan_ignore_marker(folder: &Path) -> io::Result<bool> {
+pub(crate) fn has_scan_ignore_marker(folder: &Path) -> io::Result<bool> {
     // A dangling marker symlink still marks the folder; only its presence matters.
     match fs::symlink_metadata(folder.join(SCAN_IGNORE_MARKER)) {
         Ok(_) => Ok(true),
@@ -88,6 +89,9 @@ fn has_scan_ignore_marker(folder: &Path) -> io::Result<bool> {
 struct Walk<'a> {
     root: &'a Path,
     own_folders: &'a [PathBuf],
+    include_subfolders: bool,
+    excluded_subfolders: &'a [String],
+    ignored_folders: &'a [String],
     files: Vec<PathBuf>,
     unreadable: Vec<Unreadable>,
 }
@@ -108,11 +112,24 @@ impl Walk<'_> {
     }
 
     fn enters(&self, entry: &DirEntry, path: &Path) -> io::Result<bool> {
-        let ignored_by_name = entry.file_name().to_str().is_some_and(is_ignored_folder);
-        Ok(!ignored_by_name
-            && !is_hidden(&entry.metadata()?)
-            && !self.own_folders.iter().any(|own| own == path)
-            && !has_scan_ignore_marker(path)?)
+        if !self.include_subfolders {
+            return Ok(false);
+        }
+        let ignored_by_name = entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| is_ignored_folder_with(name, self.ignored_folders));
+        if ignored_by_name
+            || is_hidden(&entry.metadata()?)
+            || self.own_folders.iter().any(|own| own == path)
+            || has_scan_ignore_marker(path)?
+        {
+            return Ok(false);
+        }
+        let Some(relative) = stored_path(self.root, path) else {
+            return Ok(false);
+        };
+        Ok(!is_subfolder_excluded(&relative, self.excluded_subfolders))
     }
 
     fn folder(&mut self, folder: &Path) {
@@ -148,7 +165,7 @@ impl Walk<'_> {
 }
 
 /// The path as the library stores it: below the source, with forward slashes on every platform.
-fn stored_path(root: &Path, path: &Path) -> Option<String> {
+pub(crate) fn stored_path(root: &Path, path: &Path) -> Option<String> {
     let parts: Option<Vec<&str>> = path
         .strip_prefix(root)
         .ok()?
@@ -208,9 +225,19 @@ pub fn scan(
         .filter_map(|own| fs::canonicalize(own).ok())
         .filter_map(|own| folder_under_source_holding(&root, &own))
         .collect();
+    let source = database.source(&source_folder)?;
+    let (include_subfolders, excluded_subfolders) = match database.source_config(source)? {
+        Some(config) => (config.include_subfolders, config.excluded_subfolders),
+        None => (true, Vec::new()),
+    };
+    let ignored_folders = database.ignored_folders()?;
+
     let mut walk = Walk {
         root: &root,
         own_folders: &own_folders,
+        include_subfolders,
+        excluded_subfolders: &excluded_subfolders,
+        ignored_folders: &ignored_folders,
         files: Vec::new(),
         unreadable: Vec::new(),
     };
@@ -222,7 +249,6 @@ pub fn scan(
     } = walk;
     files.sort();
 
-    let source = database.source(&source_folder)?;
     let stamps = database.file_stamps(source)?;
     let mut report = ScanReport {
         source_folder,

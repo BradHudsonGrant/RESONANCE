@@ -1,15 +1,23 @@
+mod sources;
+
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use resonance_core::library::{AudioFacts, AudioFormat, ScannedFile, TagField};
+use resonance_core::library::{
+    AudioFacts, AudioFormat, ScannedFile, TagField, is_asset_path_included,
+};
 use rusqlite::{Connection, OptionalExtension, Row, params};
+pub use sources::SourceConfig;
 
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
-const MIGRATIONS: [&str; 1] = [include_str!("../migrations/0001_library.sql")];
+const MIGRATIONS: [&str; 2] = [
+    include_str!("../migrations/0001_library.sql"),
+    include_str!("../migrations/0002_sources.sql"),
+];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
 
@@ -57,7 +65,17 @@ impl From<rusqlite::Error> for DbError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SourceId(i64);
+pub struct SourceId(pub(crate) i64);
+
+impl SourceId {
+    pub const fn from_raw(id: i64) -> Self {
+        Self(id)
+    }
+
+    pub const fn raw(self) -> i64 {
+        self.0
+    }
+}
 
 /// Enough to tell whether a file has changed since it was last scanned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -170,17 +188,20 @@ impl Database {
     pub fn record_scan(&mut self, source: SourceId, files: &[ScannedFile]) -> Result<(), DbError> {
         let transaction = self.connection.transaction()?;
         {
+            let (include_subfolders, excluded_subfolders, ignored_folders) =
+                sources::source_inclusion_in_tx(&transaction, source)?;
             let mut find =
                 transaction.prepare("SELECT id FROM asset WHERE source_id = ?1 AND path = ?2")?;
             let mut add_track = transaction.prepare("INSERT INTO track DEFAULT VALUES")?;
             let mut add_asset = transaction.prepare(
                 "INSERT INTO asset (track_id, source_id, path, size_bytes, modified_ns, format,
-                     duration_ms, sample_rate, channels, bit_depth, bitrate_kbps)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                     duration_ms, sample_rate, channels, bit_depth, bitrate_kbps, included)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             )?;
             let mut update_asset = transaction.prepare(
                 "UPDATE asset SET size_bytes = ?2, modified_ns = ?3, format = ?4, duration_ms = ?5,
-                     sample_rate = ?6, channels = ?7, bit_depth = ?8, bitrate_kbps = ?9
+                     sample_rate = ?6, channels = ?7, bit_depth = ?8, bitrate_kbps = ?9,
+                     included = ?10
                  WHERE id = ?1",
             )?;
             let mut clear_tags = transaction.prepare("DELETE FROM file_tag WHERE asset_id = ?1")?;
@@ -194,6 +215,12 @@ impl Database {
                 let channels = audio.and_then(|audio| audio.channels);
                 let bit_depth = audio.and_then(|audio| audio.bit_depth);
                 let bitrate_kbps = audio.and_then(|audio| audio.bitrate_kbps);
+                let included = i64::from(is_asset_path_included(
+                    &file.path,
+                    include_subfolders,
+                    &excluded_subfolders,
+                    &ignored_folders,
+                ));
 
                 let known: Option<i64> = find
                     .query_row(params![source.0, file.path], |row| row.get(0))
@@ -210,6 +237,7 @@ impl Database {
                             channels,
                             bit_depth,
                             bitrate_kbps,
+                            included,
                         ])?;
                         clear_tags.execute([asset])?;
                         asset
@@ -229,6 +257,7 @@ impl Database {
                             channels,
                             bit_depth,
                             bitrate_kbps,
+                            included,
                         ])?;
                         transaction.last_insert_rowid()
                     }
@@ -291,9 +320,11 @@ impl Database {
     }
 
     pub fn track_count(&self) -> Result<u32, DbError> {
-        Ok(self
-            .connection
-            .query_row("SELECT count(*) FROM asset", [], |row| row.get(0))?)
+        Ok(self.connection.query_row(
+            "SELECT count(*) FROM asset WHERE included = 1",
+            [],
+            |row| row.get(0),
+        )?)
     }
 }
 
@@ -306,6 +337,7 @@ const TRACKS_IN_ORDER: &str = "SELECT asset.id, asset.track_id, source.folder, a
          asset.size_bytes, asset.modified_ns, asset.format, asset.duration_ms, asset.sample_rate,
          asset.channels, asset.bit_depth, asset.bitrate_kbps
      FROM source CROSS JOIN asset ON asset.source_id = source.id
+     WHERE asset.included = 1
      ORDER BY source.folder, asset.path";
 
 fn tag_field(name: String) -> Result<TagField, DbError> {
@@ -402,5 +434,61 @@ mod tests {
                 if found == SCHEMA_VERSION + 1 && known == SCHEMA_VERSION
         ));
         assert!(schema(&newer).is_empty());
+    }
+
+    #[test]
+    fn migrating_from_v1_preserves_existing_tracks_with_default_source_and_ignore_settings() {
+        let mut v1 = Connection::open_in_memory().expect("a database opens");
+        v1.pragma_update(None, "foreign_keys", true)
+            .expect("foreign keys enable");
+        v1.execute_batch(MIGRATIONS[0]).expect("v1 schema applies");
+        v1.pragma_update(None, "user_version", 1u32)
+            .expect("version 1 stamps");
+        v1.execute("INSERT INTO source (folder) VALUES ('D:\\Music')", [])
+            .expect("v1 source inserts");
+        v1.execute("INSERT INTO track DEFAULT VALUES", [])
+            .expect("v1 track inserts");
+        v1.execute(
+            "INSERT INTO asset (track_id, source_id, path, size_bytes, modified_ns, format)
+             VALUES (1, 1, 'House/one.flac', 100, 200, 'flac')",
+            [],
+        )
+        .expect("v1 asset inserts");
+
+        migrate(&mut v1).expect("v1 migrates to current schema");
+        let db = Database { connection: v1 };
+
+        let sources = db.sources().expect("sources read");
+        assert_eq!(sources.len(), 1);
+        assert!(sources[0].include_subfolders);
+        assert!(sources[0].watch);
+        assert!(sources[0].excluded_subfolders.is_empty());
+        assert_eq!(sources[0].track_count, 1);
+        assert_eq!(db.track_count().expect("count reads"), 1);
+        assert_eq!(
+            db.ignored_folders().expect("ignored folders read"),
+            resonance_core::library::DEFAULT_IGNORED_FOLDERS
+        );
+    }
+
+    #[test]
+    fn tracks_in_order_walks_indices_without_a_temp_sort() {
+        let db = Database::open_in_memory().expect("a database opens");
+        let mut stmt = db
+            .connection
+            .prepare(&format!(
+                "EXPLAIN QUERY PLAN {TRACKS_IN_ORDER} LIMIT 200 OFFSET 50000"
+            ))
+            .expect("explain prepares");
+        let steps: Vec<String> = stmt
+            .query_map([], |row| row.get(3))
+            .expect("explain runs")
+            .collect::<Result<_, _>>()
+            .expect("steps read");
+
+        assert!(
+            steps.iter().all(|step| !step.contains("TEMP B-TREE")),
+            "unexpected temp sort in plan: {steps:?}"
+        );
     }
 }

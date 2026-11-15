@@ -24,7 +24,7 @@ use tokio_tungstenite::tungstenite::{Bytes, Message};
 use ts_rs::TS;
 
 use crate::Api;
-use crate::command::{Request, Response};
+use crate::command::{LibraryChanged, Request, Response};
 use crate::error::ApiError;
 use crate::mix_frame;
 
@@ -148,6 +148,7 @@ async fn serve_connection(
     let (mut outgoing, mut incoming) = socket.split();
     let (replies, mut to_send) = mpsc::channel::<String>(16);
     let writer_api = Arc::clone(&api);
+    let mut watch_revisions = api.watch_revisions();
     let writer = tokio::spawn(async move {
         let mut telemetry = telemetry;
         let mut sent_waveforms = [0u32; 2];
@@ -156,6 +157,20 @@ async fn serve_connection(
                 reply = to_send.recv() => match reply {
                     Some(reply) => Message::text(reply),
                     None => break,
+                },
+                changed = watch_revisions.changed() => {
+                    if changed.is_err() {
+                        break;
+                    }
+                    let revision = *watch_revisions.borrow_and_update();
+                    let Ok(push) = serde_json::to_string(&Reply {
+                        id: None,
+                        response: Some(Response::LibraryChanged(LibraryChanged { revision })),
+                        error: None,
+                    }) else {
+                        break;
+                    };
+                    Message::text(push)
                 },
                 changed = telemetry.changed() => {
                     if changed.is_err() {

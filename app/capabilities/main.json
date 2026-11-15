@@ -3,5 +3,5 @@
   "identifier": "main",
   "description": "The local app window can call the command edge.",
   "windows": ["main"],
-  "permissions": ["allow-dispatch"]
+  "permissions": ["allow-dispatch", "core:event:allow-listen", "core:event:allow-unlisten"]
 }

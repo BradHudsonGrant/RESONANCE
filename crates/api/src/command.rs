@@ -15,6 +15,31 @@ pub enum Request {
     Scan {
         folder: String,
     },
+    /// Every configured source folder and the editable ignored-folder list.
+    Sources,
+    /// Direct subfolders inside a source (or under `parent`), for toggling subfolders on or off.
+    SourceSubfolders {
+        #[ts(type = "number")]
+        source_id: i64,
+        parent: Option<String>,
+    },
+    /// Updates a source's subfolder and watcher options.
+    UpdateSource {
+        #[ts(type = "number")]
+        source_id: i64,
+        include_subfolders: bool,
+        watch: bool,
+        excluded_subfolders: Vec<String>,
+    },
+    /// Removes a source and any tracks that came only from it.
+    RemoveSource {
+        #[ts(type = "number")]
+        source_id: i64,
+    },
+    /// Replaces the editable list of folder names skipped at any depth.
+    SetIgnoredFolders {
+        folders: Vec<String>,
+    },
     /// Puts a file on a deck, stopped at its start. The first load opens the audio device.
     MixLoad {
         deck: MixDeck,
@@ -36,9 +61,51 @@ pub enum Response {
     AppInfo(AppInfo),
     Tracks(TrackPage),
     Scan(ScanReport),
+    Sources(LibrarySources),
+    SourceSubfolders(Vec<SourceSubfolder>),
+    UpdateSource(LibrarySources),
+    RemoveSource(LibrarySources),
+    SetIgnoredFolders(LibrarySources),
+    LibraryChanged(LibraryChanged),
     MixLoad(MixState),
     MixPlay(MixState),
     MixStatus(MixState),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct LibrarySources {
+    pub sources: Vec<LibrarySource>,
+    pub ignored_folders: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct LibrarySource {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub folder: String,
+    pub include_subfolders: bool,
+    pub watch: bool,
+    pub watching_active: bool,
+    pub excluded_subfolders: Vec<String>,
+    pub track_count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct SourceSubfolder {
+    pub path: String,
+    pub name: String,
+    pub enabled: bool,
+    pub has_subfolders: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct LibraryChanged {
+    #[ts(type = "number")]
+    pub revision: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]

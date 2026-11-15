@@ -3,9 +3,11 @@ pub mod data_folder;
 pub mod error;
 pub mod mix_frame;
 pub mod serve;
+mod sources;
 
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 use command::{
     AppInfo, LibraryTrack, MixDeck, MixDeckState, MixDevice, MixState, Request, Response,
@@ -15,23 +17,75 @@ use error::ApiError;
 use resonance_core::library::TagField;
 use resonance_db::{Database, TrackRow};
 use resonance_engine::{DeckId, Mix, MixStatus};
+use resonance_library::watch::SourceWatcher;
+use tokio::sync::watch;
 
 const REPORTED_UNREADABLE_FILES: usize = 100;
 
+pub(crate) struct LibraryCore {
+    pub(crate) library: Mutex<Database>,
+    pub(crate) own_files: Mutex<Vec<PathBuf>>,
+    pub(crate) watch_revisions: watch::Sender<u64>,
+}
+
 /// Everything the commands act on. The Tauri shell and the local socket each hold one.
 pub struct Api {
-    library: Mutex<Database>,
-    own_files: Vec<PathBuf>,
+    pub(crate) core: Arc<LibraryCore>,
+    pub(crate) watcher: SourceWatcher,
     mix: Mix,
 }
 
 impl Api {
     pub fn new(library: Database) -> Self {
-        Self {
+        Self::build(library, None)
+    }
+
+    pub fn with_watch_quiet_window(library: Database, quiet_window: Duration) -> Self {
+        Self::build(library, Some(quiet_window))
+    }
+
+    fn build(library: Database, quiet_window: Option<Duration>) -> Self {
+        let (watch_revisions, _) = watch::channel(0u64);
+        let core = Arc::new(LibraryCore {
             library: Mutex::new(library),
-            own_files: std::env::current_exe().into_iter().collect(),
+            own_files: Mutex::new(std::env::current_exe().into_iter().collect()),
+            watch_revisions,
+        });
+        let weak = Arc::downgrade(&core);
+        let callback = move |folder: &Path| {
+            let Some(core) = weak.upgrade() else {
+                return;
+            };
+            let own_files = core
+                .own_files
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            let mut library = core.library.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Ok(report) = resonance_library::scan::scan(&mut library, folder, &own_files)
+                && (report.added > 0 || report.changed > 0)
+            {
+                core.watch_revisions.send_modify(|revision| *revision += 1);
+            }
+        };
+        let watcher = match quiet_window {
+            Some(window) => SourceWatcher::with_quiet_window(window, callback),
+            None => SourceWatcher::new(callback),
+        };
+        let api = Self {
+            core,
+            watcher,
             mix: Mix::new(),
+        };
+        {
+            let guard = api
+                .core
+                .library
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            api.reconcile_watchers(&guard);
         }
+        api
     }
 
     /// The decks, for a transport that streams their telemetry and waveforms.
@@ -39,9 +93,40 @@ impl Api {
         &self.mix
     }
 
+    /// Subscribes to library revisions bumped when a background source watcher finds new or
+    /// modified files on disk.
+    pub fn watch_revisions(&self) -> watch::Receiver<u64> {
+        let mut receiver = self.core.watch_revisions.subscribe();
+        receiver.mark_unchanged();
+        receiver
+    }
+
+    pub(crate) fn own_files_snapshot(&self) -> Vec<PathBuf> {
+        self.core
+            .own_files
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
     /// Keeps a source scan out of the folder holding the app's data.
-    pub fn with_data_folder(mut self, folder: PathBuf) -> Self {
-        self.own_files.push(folder);
+    pub fn with_data_folder(self, folder: PathBuf) -> Self {
+        {
+            let mut own = self
+                .core
+                .own_files
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            own.push(folder);
+        }
+        {
+            let guard = self
+                .core
+                .library
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            self.reconcile_watchers(&guard);
+        }
         self
     }
 
@@ -52,6 +137,24 @@ impl Api {
             })),
             Request::Tracks { offset, limit } => self.tracks(offset, limit).map(Response::Tracks),
             Request::Scan { folder } => self.scan(Path::new(&folder)).map(Response::Scan),
+            Request::Sources => self.sources().map(Response::Sources),
+            Request::SourceSubfolders { source_id, parent } => self
+                .source_subfolders(source_id, parent.as_deref())
+                .map(Response::SourceSubfolders),
+            Request::UpdateSource {
+                source_id,
+                include_subfolders,
+                watch,
+                excluded_subfolders,
+            } => self
+                .update_source(source_id, include_subfolders, watch, &excluded_subfolders)
+                .map(Response::UpdateSource),
+            Request::RemoveSource { source_id } => {
+                self.remove_source(source_id).map(Response::RemoveSource)
+            }
+            Request::SetIgnoredFolders { folders } => self
+                .set_ignored_folders(&folders)
+                .map(Response::SetIgnoredFolders),
             Request::MixLoad { deck, path } => self
                 .mix
                 .load(deck_id(deck), Path::new(&path))
@@ -69,7 +172,11 @@ impl Api {
     fn tracks(&self, offset: u32, limit: u32) -> Result<TrackPage, ApiError> {
         // A panic while the lock was held leaves nothing half-written: reads hold it, and a
         // write is one transaction that SQLite rolls back.
-        let library = self.library.lock().unwrap_or_else(PoisonError::into_inner);
+        let library = self
+            .core
+            .library
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let total = library
             .track_count()
             .map_err(ApiError::library_unreadable)?;
@@ -84,9 +191,15 @@ impl Api {
     }
 
     fn scan(&self, folder: &Path) -> Result<ScanReport, ApiError> {
-        let mut library = self.library.lock().unwrap_or_else(PoisonError::into_inner);
-        let report = resonance_library::scan::scan(&mut library, folder, &self.own_files)
+        let own_files = self.own_files_snapshot();
+        let mut library = self
+            .core
+            .library
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let report = resonance_library::scan::scan(&mut library, folder, &own_files)
             .map_err(ApiError::scan_failed)?;
+        self.reconcile_watchers(&library);
         Ok(ScanReport {
             source_folder: report.source_folder,
             found: report.found,

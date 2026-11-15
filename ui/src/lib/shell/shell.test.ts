@@ -251,14 +251,23 @@ describe('PlayerBar', () => {
 });
 
 describe('SettingsSheet', () => {
-  it('offers the three themes and names the milestone of each section still to come', () => {
+  it('offers the three themes, library sources and the sections still to come', () => {
     render(SettingsSheet, { open: true });
     const dialog = screen.getByRole('dialog');
 
     for (const name of ['Dark', 'Light', 'System']) {
       expect(within(dialog).getByRole('tab', { name })).toBeTruthy();
     }
-    expect(within(dialog).getByText('Library sources arrive in M2.')).toBeTruthy();
+    expect(within(dialog).getByText('Library sources')).toBeTruthy();
+    expect(
+      within(dialog).getByText(
+        'No music folders added yet. Files on disk are never changed by a scan.',
+      ),
+    ).toBeTruthy();
+    expect(within(dialog).getByText('Ignored folder names')).toBeTruthy();
+    for (const ignored of ['_replaced', '_wrong_match', '_trash', '_converted_originals']) {
+      expect(within(dialog).getByText(ignored)).toBeTruthy();
+    }
     expect(within(dialog).getByText('Provider keys')).toBeTruthy();
     expect(
       within(dialog).getByText('Keys for AcoustID, Discogs and paid recognisers arrive in M3.'),

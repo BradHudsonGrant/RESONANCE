@@ -74,6 +74,26 @@ export class TrackPages {
     await this.#readPage(0);
   }
 
+  /**
+   * Re-reads the pages currently held in memory without clearing rows or selection, so live source
+   * updates and watcher events refresh the table in place.
+   */
+  async refresh() {
+    if (this.state.kind !== 'ready') {
+      await this.load();
+      return;
+    }
+    this.#generation += 1;
+    this.#reading.clear();
+    const cached = [...this.#pages.keys()].sort(
+      (a, b) => Math.abs(a + 0.5 - this.#centre) - Math.abs(b + 0.5 - this.#centre),
+    );
+    if (!cached.includes(0)) cached.unshift(0);
+    const first = cached.shift() ?? 0;
+    this.#waiting = cached;
+    await this.#readPage(first);
+  }
+
   /** The track at a place in library order, or nothing while its page is still on its way. */
   track(index: number): LibraryTrack | undefined {
     return this.#pages.get(Math.floor(index / PAGE_SIZE))?.[index % PAGE_SIZE];
@@ -117,8 +137,20 @@ export class TrackPages {
       if (generation !== this.#generation) return;
       this.total = reply.total;
       this.#pages.set(page, reply.tracks);
-      if (this.#selected !== null && Math.floor(this.#selected / PAGE_SIZE) === page) {
-        this.#selectedTrack = reply.tracks[this.#selected % PAGE_SIZE];
+      for (const cached of [...this.#pages.keys()]) {
+        if (cached > 0 && cached * PAGE_SIZE >= reply.total) {
+          this.#pages.delete(cached);
+        }
+      }
+      if (this.#selected !== null) {
+        if (reply.total === 0) {
+          this.selected = null;
+        } else if (this.#selected >= reply.total) {
+          this.#selected = reply.total - 1;
+          this.#selectedTrack = this.track(this.#selected);
+        } else if (Math.floor(this.#selected / PAGE_SIZE) === page) {
+          this.#selectedTrack = reply.tracks[this.#selected % PAGE_SIZE];
+        }
       }
       this.#keepNearby();
       if (this.state.kind === 'loading') this.state = { kind: 'ready' };

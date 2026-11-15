@@ -177,3 +177,68 @@ fn a_page_holds_the_tracks_of_that_part_of_the_library_in_order() {
             .is_empty()
     );
 }
+
+#[test]
+fn toggling_subfolders_and_ignored_names_hides_and_restores_assets_without_losing_track_ids() {
+    let mut database = Database::open_in_memory().expect("a database opens");
+    let source = database.source("music").expect("the source is added");
+    database
+        .record_scan(
+            source,
+            &[
+                file("root.flac", "Root"),
+                file("House/deep.flac", "Deep"),
+                file("Samples/kick.flac", "Kick"),
+            ],
+        )
+        .expect("the scan is stored");
+    let initial = database.tracks().expect("tracks read");
+    let deep_id = initial
+        .iter()
+        .find(|row| row.file.path == "House/deep.flac")
+        .expect("deep exists")
+        .track_id;
+
+    let updated = database
+        .update_source(source, true, false, &["Samples"])
+        .expect("source updates")
+        .expect("source exists");
+    assert!(!updated.watch);
+    assert_eq!(updated.excluded_subfolders, ["Samples"]);
+    assert_eq!(updated.track_count, 2);
+    assert_eq!(database.track_count().expect("count reads"), 2);
+
+    database
+        .update_source(source, false, false, &["Samples"])
+        .expect("source updates");
+    assert_eq!(database.track_count().expect("only root remains"), 1);
+
+    database
+        .update_source(source, true, true, &[] as &[&str])
+        .expect("source restores");
+    let restored = database.tracks().expect("tracks read");
+    assert_eq!(restored.len(), 3);
+    assert_eq!(
+        restored
+            .iter()
+            .find(|row| row.file.path == "House/deep.flac")
+            .expect("deep restored")
+            .track_id,
+        deep_id
+    );
+
+    database
+        .set_ignored_folders(&["House"])
+        .expect("ignored list updates");
+    let after_ignore = database.tracks().expect("tracks read");
+    assert_eq!(after_ignore.len(), 2);
+    assert!(
+        after_ignore
+            .iter()
+            .all(|row| !row.file.path.starts_with("House/"))
+    );
+
+    assert!(database.remove_source(source).expect("source removes"));
+    assert_eq!(database.track_count().expect("empty after remove"), 0);
+    assert!(database.sources().expect("sources read").is_empty());
+}
