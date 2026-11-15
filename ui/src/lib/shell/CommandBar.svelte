@@ -179,7 +179,6 @@
     border: var(--border-width) solid var(--color-border-control);
     border-radius: var(--radius-lg);
     background: var(--color-raised);
-    box-shadow: var(--shadow-popover);
     list-style: none;
   }
 
