@@ -1,0 +1,324 @@
+use std::fmt;
+
+/// Maximum seconds of audio fed into Chromaprint, matching `fpcalc`'s default `-length 120`.
+pub const CHROMAPRINT_MAX_SECONDS: u32 = 120;
+
+/// Domain prefix hashed ahead of sample rate, channel count and `i32` little-endian samples.
+pub const AUDIO_HASH_DOMAIN: &[u8] = b"resonance-audio-i32le-v1\0";
+
+/// A 32-byte BLAKE3 digest used for `byte_hash` and `audio_hash`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ContentHash([u8; Self::LEN]);
+
+impl ContentHash {
+    pub const LEN: usize = 32;
+
+    pub const fn from_bytes(bytes: [u8; Self::LEN]) -> Self {
+        Self(bytes)
+    }
+
+    pub fn from_slice(bytes: &[u8]) -> Option<Self> {
+        let array: [u8; Self::LEN] = bytes.try_into().ok()?;
+        Some(Self(array))
+    }
+
+    pub const fn as_bytes(&self) -> &[u8; Self::LEN] {
+        &self.0
+    }
+
+    pub fn to_hex(&self) -> String {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut out = String::with_capacity(Self::LEN * 2);
+        for &byte in &self.0 {
+            out.push(char::from(HEX[usize::from(byte >> 4)]));
+            out.push(char::from(HEX[usize::from(byte & 0x0f)]));
+        }
+        out
+    }
+
+    pub fn from_hex(hex: &str) -> Option<Self> {
+        if hex.len() != Self::LEN * 2 {
+            return None;
+        }
+        let mut bytes = [0u8; Self::LEN];
+        let (pairs, _) = hex.as_bytes().as_chunks::<2>();
+        for (index, &[high_ch, low_ch]) in pairs.iter().enumerate() {
+            let high = hex_nibble(high_ch)?;
+            let low = hex_nibble(low_ch)?;
+            bytes[index] = (high << 4) | low;
+        }
+        Some(Self(bytes))
+    }
+}
+
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+impl fmt::Display for ContentHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.to_hex())
+    }
+}
+
+impl fmt::Debug for ContentHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ContentHash({self})")
+    }
+}
+
+/// Hash of the normalised decoded audio stream and the decoder version that produced it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioHash {
+    pub hash: ContentHash,
+    pub decoder: String,
+}
+
+/// Chromaprint fingerprint in both AcoustID wire text and raw 32-bit subfingerprints.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Chromaprint {
+    pub encoded: String,
+    pub raw: Vec<u32>,
+    pub duration_s: u32,
+}
+
+impl Chromaprint {
+    pub fn raw_le_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(self.raw.len() * 4);
+        for &word in &self.raw {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        bytes
+    }
+
+    pub fn raw_from_le_bytes(bytes: &[u8]) -> Option<Vec<u32>> {
+        let (words, remainder) = bytes.as_chunks::<4>();
+        if !remainder.is_empty() {
+            return None;
+        }
+        Some(words.iter().copied().map(u32::from_le_bytes).collect())
+    }
+}
+
+/// Stream facts measured directly by decoding every audio packet rather than trusting headers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DecodedAudioFacts {
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub frames: u64,
+    pub decode_errors: u32,
+    /// `Some(true)` or `Some(false)` when the codec carries a stream checksum such as FLAC MD5.
+    pub checksum_ok: Option<bool>,
+}
+
+impl DecodedAudioFacts {
+    pub fn duration_ms(&self) -> u64 {
+        if self.sample_rate == 0 {
+            return 0;
+        }
+        ((u128::from(self.frames) * 1000 + u128::from(self.sample_rate) / 2)
+            / u128::from(self.sample_rate)) as u64
+    }
+
+    pub fn effective_bitrate_kbps(&self, size_bytes: u64) -> Option<u32> {
+        let ms = self.duration_ms();
+        if ms == 0 {
+            return None;
+        }
+        u32::try_from((u128::from(size_bytes) * 8) / u128::from(ms)).ok()
+    }
+}
+
+/// Full identity computed for an audio file on disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssetIdentity {
+    pub byte_hash: ContentHash,
+    pub audio: Option<AudioHash>,
+    pub chromaprint: Option<Chromaprint>,
+    pub decoded_facts: Option<DecodedAudioFacts>,
+}
+
+/// Maps between canonical track sample positions and a specific asset's sample positions.
+///
+/// `offset_samples` is the asset sample index where track sample `0` sits (positive when the
+/// asset has leading silence or encoder padding). `tempo_ratio` is track frames per asset frame
+/// (`1.0` for digital encodes of the same master).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AssetAlignment {
+    offset_samples: i64,
+    tempo_ratio: f64,
+}
+
+impl AssetAlignment {
+    pub const IDENTITY: Self = Self {
+        offset_samples: 0,
+        tempo_ratio: 1.0,
+    };
+
+    pub fn new(offset_samples: i64, tempo_ratio: f64) -> Option<Self> {
+        if !tempo_ratio.is_finite() || tempo_ratio <= 0.0 {
+            return None;
+        }
+        Some(Self {
+            offset_samples,
+            tempo_ratio,
+        })
+    }
+
+    pub const fn offset_samples(&self) -> i64 {
+        self.offset_samples
+    }
+
+    pub const fn tempo_ratio(&self) -> f64 {
+        self.tempo_ratio
+    }
+
+    pub fn track_to_asset_sample(&self, track_sample: i64) -> i64 {
+        let scaled = (track_sample as f64 / self.tempo_ratio).round() as i64;
+        self.offset_samples.saturating_add(scaled)
+    }
+
+    pub fn asset_to_track_sample(&self, asset_sample: i64) -> i64 {
+        let shifted = asset_sample.saturating_sub(self.offset_samples);
+        (shifted as f64 * self.tempo_ratio).round() as i64
+    }
+}
+
+impl Default for AssetAlignment {
+    fn default() -> Self {
+        Self::IDENTITY
+    }
+}
+
+/// Encodes bytes as unpadded URL-safe Base64 (`A-Za-z0-9-_`), matching `fpcalc` and AcoustID.
+pub fn encode_base64_url_unpadded(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    let (triples, remainder) = bytes.as_chunks::<3>();
+    for &[b0, b1, b2] in triples {
+        let n = (u32::from(b0) << 16) | (u32::from(b1) << 8) | u32::from(b2);
+        out.push(char::from(ALPHABET[((n >> 18) & 0x3f) as usize]));
+        out.push(char::from(ALPHABET[((n >> 12) & 0x3f) as usize]));
+        out.push(char::from(ALPHABET[((n >> 6) & 0x3f) as usize]));
+        out.push(char::from(ALPHABET[(n & 0x3f) as usize]));
+    }
+    if remainder.len() == 1 {
+        let n = u32::from(remainder[0]) << 16;
+        out.push(char::from(ALPHABET[((n >> 18) & 0x3f) as usize]));
+        out.push(char::from(ALPHABET[((n >> 12) & 0x3f) as usize]));
+    } else if remainder.len() == 2 {
+        let n = (u32::from(remainder[0]) << 16) | (u32::from(remainder[1]) << 8);
+        out.push(char::from(ALPHABET[((n >> 18) & 0x3f) as usize]));
+        out.push(char::from(ALPHABET[((n >> 12) & 0x3f) as usize]));
+        out.push(char::from(ALPHABET[((n >> 6) & 0x3f) as usize]));
+    }
+    out
+}
+
+/// Best bitwise agreement in `[0.0, 1.0]` between two raw Chromaprint subfingerprint sequences,
+/// searching relative shifts up to `±max_shift` items.
+pub fn fingerprint_similarity(left: &[u32], right: &[u32], max_shift: usize) -> f32 {
+    const MIN_OVERLAP: usize = 16;
+    if left.len() < MIN_OVERLAP || right.len() < MIN_OVERLAP {
+        return 0.0;
+    }
+    let mut best = 0.0_f32;
+    let limit = isize::try_from(max_shift).unwrap_or(isize::MAX);
+    for shift in -limit..=limit {
+        let (left_start, right_start) = if shift >= 0 {
+            (shift as usize, 0usize)
+        } else {
+            (0usize, (-shift) as usize)
+        };
+        if left_start >= left.len() || right_start >= right.len() {
+            continue;
+        }
+        let overlap = (left.len() - left_start).min(right.len() - right_start);
+        if overlap < MIN_OVERLAP {
+            continue;
+        }
+        let differing_bits: u64 = left[left_start..left_start + overlap]
+            .iter()
+            .zip(&right[right_start..right_start + overlap])
+            .map(|(&a, &b)| u64::from((a ^ b).count_ones()))
+            .sum();
+        let total_bits = (overlap as u64) * 32;
+        let similarity = 1.0 - (differing_bits as f32 / total_bits as f32);
+        if similarity > best {
+            best = similarity;
+        }
+    }
+    best
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn content_hash_round_trips_through_hex_and_slices() {
+        let hash = ContentHash::from_bytes([0x5a; 32]);
+        let hex = hash.to_hex();
+        assert_eq!(hex.len(), 64);
+        assert_eq!(ContentHash::from_hex(&hex), Some(hash));
+        assert_eq!(ContentHash::from_hex(&hex.to_uppercase()), Some(hash));
+        assert_eq!(ContentHash::from_slice(hash.as_bytes()), Some(hash));
+        assert_eq!(ContentHash::from_hex("short"), None);
+        assert_eq!(ContentHash::from_slice(&[0u8; 31]), None);
+    }
+
+    #[test]
+    fn alignment_maps_samples_both_ways_with_offset_and_tempo_ratio() {
+        assert_eq!(AssetAlignment::new(0, 0.0), None);
+        assert_eq!(AssetAlignment::new(0, -1.0), None);
+        assert_eq!(AssetAlignment::new(0, f64::NAN), None);
+
+        let padded = AssetAlignment::new(528, 1.0).expect("valid alignment");
+        assert_eq!(padded.track_to_asset_sample(0), 528);
+        assert_eq!(padded.asset_to_track_sample(528), 0);
+        assert_eq!(padded.track_to_asset_sample(44_100), 44_628);
+        assert_eq!(padded.asset_to_track_sample(44_628), 44_100);
+
+        let pitched = AssetAlignment::new(100, 1.02).expect("valid alignment");
+        let asset_pos = pitched.track_to_asset_sample(102_000);
+        assert_eq!(asset_pos, 100_100);
+        assert_eq!(pitched.asset_to_track_sample(asset_pos), 102_000);
+    }
+
+    #[test]
+    fn url_safe_base64_omits_padding_for_every_remainder_length() {
+        assert_eq!(encode_base64_url_unpadded(b""), "");
+        assert_eq!(encode_base64_url_unpadded(&[0xfb]), "-w");
+        assert_eq!(encode_base64_url_unpadded(&[0xfb, 0xff]), "-_8");
+        assert_eq!(encode_base64_url_unpadded(&[0x01, 0x00, 0x00]), "AQAA");
+    }
+
+    #[test]
+    fn fingerprint_similarity_finds_shifted_matches_and_rejects_unrelated_noise() {
+        let base: Vec<u32> = (0..120)
+            .map(|i: u32| i.wrapping_mul(0x9e37_79b9).rotate_left(7))
+            .collect();
+        let mut shifted_slightly_noisy = vec![0xdead_beef, 0x1234_5678, 0xCAFE_BABE];
+        shifted_slightly_noisy.extend(base.iter().map(|&word| word ^ 0b101));
+
+        let same_score = fingerprint_similarity(&base, &shifted_slightly_noisy, 8);
+        assert!(
+            same_score > 0.90,
+            "expected high similarity, got {same_score}"
+        );
+
+        let unrelated: Vec<u32> = (0..120)
+            .map(|i: u32| (i ^ 0x55aa_55aa).wrapping_mul(0x85eb_ca6b).rotate_right(11))
+            .collect();
+        let diff_score = fingerprint_similarity(&base, &unrelated, 8);
+        assert!(
+            diff_score < 0.65,
+            "expected near-chance similarity, got {diff_score}"
+        );
+    }
+}

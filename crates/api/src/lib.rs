@@ -1,6 +1,7 @@
 pub mod command;
 pub mod data_folder;
 pub mod error;
+mod identity;
 pub mod mix_frame;
 pub mod serve;
 mod sources;
@@ -10,10 +11,11 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use command::{
-    AppInfo, LibraryTrack, MixDeck, MixDeckState, MixDevice, MixState, Request, Response,
-    ScanReport, TrackAudio, TrackKey, TrackPage, UnreadableFile,
+    AppInfo, IdentifyReport, LibraryTrack, MixDeck, MixDeckState, MixDevice, MixState, Request,
+    Response, ScanReport, TrackAudio, TrackKey, TrackPage, UnreadableFile,
 };
 use error::ApiError;
+use identity::{IdentityWorker, run_identify_pass, to_command_report};
 use resonance_core::library::TagField;
 use resonance_db::{Database, TrackRow};
 use resonance_engine::{DeckId, Mix, MixStatus};
@@ -24,14 +26,16 @@ const REPORTED_UNREADABLE_FILES: usize = 100;
 
 pub(crate) struct LibraryCore {
     pub(crate) library: Mutex<Database>,
+    pub(crate) identify_pass: Mutex<()>,
     pub(crate) own_files: Mutex<Vec<PathBuf>>,
     pub(crate) watch_revisions: watch::Sender<u64>,
 }
 
 /// Everything the commands act on. The Tauri shell and the local socket each hold one.
 pub struct Api {
-    pub(crate) core: Arc<LibraryCore>,
     pub(crate) watcher: SourceWatcher,
+    pub(crate) identity: Arc<IdentityWorker>,
+    pub(crate) core: Arc<LibraryCore>,
     mix: Mix,
 }
 
@@ -48,10 +52,13 @@ impl Api {
         let (watch_revisions, _) = watch::channel(0u64);
         let core = Arc::new(LibraryCore {
             library: Mutex::new(library),
+            identify_pass: Mutex::new(()),
             own_files: Mutex::new(std::env::current_exe().into_iter().collect()),
             watch_revisions,
         });
+        let identity = Arc::new(IdentityWorker::new(Arc::downgrade(&core)));
         let weak = Arc::downgrade(&core);
+        let watcher_identity = Arc::downgrade(&identity);
         let callback = move |folder: &Path| {
             let Some(core) = weak.upgrade() else {
                 return;
@@ -61,11 +68,16 @@ impl Api {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .clone();
-            let mut library = core.library.lock().unwrap_or_else(PoisonError::into_inner);
-            if let Ok(report) = resonance_library::scan::scan(&mut library, folder, &own_files)
-                && (report.added > 0 || report.changed > 0)
-            {
+            let changed = {
+                let mut library = core.library.lock().unwrap_or_else(PoisonError::into_inner);
+                resonance_library::scan::scan(&mut library, folder, &own_files)
+                    .is_ok_and(|report| report.added > 0 || report.changed > 0)
+            };
+            if changed {
                 core.watch_revisions.send_modify(|revision| *revision += 1);
+                if let Some(worker) = watcher_identity.upgrade() {
+                    worker.wake();
+                }
             }
         };
         let watcher = match quiet_window {
@@ -73,8 +85,9 @@ impl Api {
             None => SourceWatcher::new(callback),
         };
         let api = Self {
-            core,
             watcher,
+            identity,
+            core,
             mix: Mix::new(),
         };
         {
@@ -85,6 +98,7 @@ impl Api {
                 .unwrap_or_else(PoisonError::into_inner);
             api.reconcile_watchers(&guard);
         }
+        api.identity.wake();
         api
     }
 
@@ -137,6 +151,7 @@ impl Api {
             })),
             Request::Tracks { offset, limit } => self.tracks(offset, limit).map(Response::Tracks),
             Request::Scan { folder } => self.scan(Path::new(&folder)).map(Response::Scan),
+            Request::Identify => self.identify().map(Response::Identify),
             Request::Sources => self.sources().map(Response::Sources),
             Request::SourceSubfolders { source_id, parent } => self
                 .source_subfolders(source_id, parent.as_deref())
@@ -192,14 +207,20 @@ impl Api {
 
     fn scan(&self, folder: &Path) -> Result<ScanReport, ApiError> {
         let own_files = self.own_files_snapshot();
-        let mut library = self
-            .core
-            .library
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let report = resonance_library::scan::scan(&mut library, folder, &own_files)
-            .map_err(ApiError::scan_failed)?;
-        self.reconcile_watchers(&library);
+        let report = {
+            let mut library = self
+                .core
+                .library
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let report = resonance_library::scan::scan(&mut library, folder, &own_files)
+                .map_err(ApiError::scan_failed)?;
+            self.reconcile_watchers(&library);
+            report
+        };
+        if report.added > 0 || report.changed > 0 {
+            self.identity.wake();
+        }
         Ok(ScanReport {
             source_folder: report.source_folder,
             found: report.found,
@@ -217,6 +238,16 @@ impl Api {
                 })
                 .collect(),
         })
+    }
+
+    fn identify(&self) -> Result<IdentifyReport, ApiError> {
+        let report = run_identify_pass(&self.core, None)?;
+        if report.reconciled_moves > 0 {
+            self.core
+                .watch_revisions
+                .send_modify(|revision| *revision += 1);
+        }
+        Ok(to_command_report(report))
     }
 }
 
@@ -404,5 +435,62 @@ mod tests {
 
         assert_eq!(empty.total, 0);
         assert!(empty.tracks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn renaming_a_watched_file_keeps_its_track_id_and_pushes_a_library_revision() {
+        let folder = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/test-tmp/api_watched_rename");
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+
+        let original = folder.join("opener.flac");
+        resonance_fixtures::signal::Signal::tone_at_loudness(-12.0, 4.0, 44_100)
+            .write_flac(&original)
+            .unwrap();
+
+        let api = Api::with_watch_quiet_window(
+            Database::open_in_memory().unwrap(),
+            Duration::from_millis(60),
+        );
+        let mut revisions = api.watch_revisions();
+
+        api.handle(Request::Scan {
+            folder: folder.to_string_lossy().into_owned(),
+        })
+        .unwrap();
+        match api.handle(Request::Identify).unwrap() {
+            Response::Identify(report) => assert_eq!(report.skipped_unreadable, 0),
+            other => panic!("expected identify report, got {other:?}"),
+        }
+        assert!(
+            api.core
+                .library
+                .lock()
+                .unwrap()
+                .has_identified_assets()
+                .unwrap()
+        );
+
+        let before = page(&api, 0, 10);
+        assert_eq!(before.total, 1);
+        let original_track_id = before.tracks[0].id;
+
+        let renamed = folder.join("opener-club-edit.flac");
+        std::fs::rename(&original, &renamed).unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), revisions.changed())
+            .await
+            .expect("watcher fired within timeout")
+            .expect("watch channel open");
+
+        let after = page(&api, 0, 10);
+        assert_eq!(after.total, 1);
+        assert_eq!(after.tracks[0].id, original_track_id);
+        assert!(
+            after.tracks[0].location.ends_with("opener-club-edit.flac"),
+            "unexpected location: {}",
+            after.tracks[0].location
+        );
     }
 }

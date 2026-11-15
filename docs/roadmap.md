@@ -83,7 +83,7 @@ Accept:
 ## M2 Library, v0.3.0
 
 - [x] Sources with subfolder toggles and watching ([#80](https://github.com/BradHudsonGrant/RESONANCE/issues/80)). Evidence: merged in [#81](https://github.com/BradHudsonGrant/RESONANCE/pull/81); per-source `include_subfolders`, `watch`, recursive subfolder toggles and the editable `ignored_folder` list live in `0002_sources.sql` and `SourcesSettings.svelte`, `SourceWatcher` (`notify` `8.2.2`, [ADR 0013](adr/0013-filesystem-watching-with-notify.md)) coalesces filesystem events into read-only scans and pushes `library_changed` revisions so open tables refresh in place, verified by Rust integration tests and Playwright browser tests.
-- [ ] Identity by audio hash and fingerprint
+- [x] Identity by audio hash and fingerprint ([#82](https://github.com/BradHudsonGrant/RESONANCE/issues/82)). Evidence: merged in [#83](https://github.com/BradHudsonGrant/RESONANCE/pull/83); `0003_identity.sql`, `crates/core/src/identity.rs` and `crates/library/src/identity.rs` store BLAKE3 `byte_hash`, full-scale `i32` little-endian `audio_hash` (`blake3` `1.8.7`, `symphonia` `0.6.1` with `gapless` and `verify` enabled), 120-second `rusty-chromaprint` `0.3.0` (`preset_test2`) fingerprints and `AssetAlignment` (`offset_samples`, `tempo_ratio`), while `IdentityWorker` decodes in the background (`809.1 MB/s` across 12 threads, `2.3 min` projected for `113 GB`, `49/49` `fpcalc` wire parity and `0.9924` median bitwise agreement in [ADR 0004](adr/0004-identity-model.md) and [benchmarks/identity.md](benchmarks/identity.md)).
 - [ ] Text search, filters, sort
 - [ ] Collections
 - [ ] Preview playback
@@ -93,7 +93,7 @@ Accept:
 Accept:
 
 - [ ] A scan of 3,000 files stays responsive throughout.
-- [ ] Renaming or moving a file outside the app keeps its identity.
+- [x] Renaming or moving a file outside the app keeps its identity ([#82](https://github.com/BradHudsonGrant/RESONANCE/issues/82)). Evidence: merged in [#83](https://github.com/BradHudsonGrant/RESONANCE/pull/83); `scan` and `IdentityWorker` reconcile unseen paths by `byte_hash` and `audio_hash` across renames, subfolder moves, cross-source moves and lossless WAV-to-FLAC retags while leaving live duplicates untouched, verified by `crates/library/tests/identity.rs`, `crates/api/src/lib.rs` and `ui/e2e/library.e2e.ts`.
 - [ ] A synthetic 100,000-row library scrolls and searches smoothly, with numbers recorded.
 
 ## M3 Identify and tag, v0.4.0

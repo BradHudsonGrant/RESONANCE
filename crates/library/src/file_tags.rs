@@ -69,27 +69,46 @@ fn value(tags: &[&Tag], field: TagField) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// A file seen from `start` onwards, as if the bytes before it were not there.
-struct FromOffset<R> {
-    inner: R,
+/// A read-only file handle seen from `start` onwards, as if any stray bytes before `start` were
+/// not there.
+pub(crate) struct OffsetFile {
+    inner: BufReader<File>,
     start: u64,
+    total_len: u64,
 }
 
-impl<R: Read> Read for FromOffset<R> {
+impl Read for OffsetFile {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         self.inner.read(buffer)
     }
 }
 
-impl<R: Seek> Seek for FromOffset<R> {
+impl Seek for OffsetFile {
     fn seek(&mut self, to: SeekFrom) -> io::Result<u64> {
         let position = match to {
-            SeekFrom::Start(offset) => self.inner.seek(SeekFrom::Start(self.start + offset))?,
+            SeekFrom::Start(offset) => self
+                .inner
+                .seek(SeekFrom::Start(self.start.saturating_add(offset)))?,
             relative => self.inner.seek(relative)?,
         };
-        position.checked_sub(self.start).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "a seek to before the start")
-        })
+        if position < self.start {
+            let _ = self.inner.seek(SeekFrom::Start(self.start));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "a seek to before the start",
+            ));
+        }
+        Ok(position - self.start)
+    }
+}
+
+impl symphonia::core::io::MediaSource for OffsetFile {
+    fn is_seekable(&self) -> bool {
+        true
+    }
+
+    fn byte_len(&self) -> Option<u64> {
+        Some(self.total_len.saturating_sub(self.start))
     }
 }
 
@@ -117,18 +136,22 @@ fn start_of_audio_file(file: &mut File) -> io::Result<u64> {
     Ok(0)
 }
 
+pub(crate) fn open_audio_reader(path: &Path) -> io::Result<OffsetFile> {
+    let mut file = File::open(path)?;
+    let total_len = file.metadata()?.len();
+    let start = start_of_audio_file(&mut file)?;
+    file.seek(SeekFrom::Start(start))?;
+    Ok(OffsetFile {
+        inner: BufReader::new(file),
+        start,
+        total_len,
+    })
+}
+
 /// Reads tags and file facts through a handle opened for reading only, so nothing here can
 /// change the file.
 pub fn read(path: &Path) -> Result<FileContents, FileReadError> {
-    let mut file = File::open(path).map_err(FileReadError::Open)?;
-    let start = start_of_audio_file(&mut file).map_err(FileReadError::Open)?;
-    let mut audio_file = FromOffset {
-        inner: BufReader::new(file),
-        start,
-    };
-    audio_file
-        .seek(SeekFrom::Start(0))
-        .map_err(FileReadError::Open)?;
+    let audio_file = open_audio_reader(path).map_err(FileReadError::Open)?;
     let tagged = Probe::new(audio_file)
         .guess_file_type()
         .map_err(FileReadError::Open)?

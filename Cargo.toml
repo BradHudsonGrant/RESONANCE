@@ -24,6 +24,8 @@ resonance-db = { path = "crates/db" }
 resonance-engine = { path = "crates/engine" }
 resonance-fixtures = { path = "crates/fixtures" }
 resonance-library = { path = "crates/library" }
+# Dual-licensed CC0-1.0 OR Apache-2.0; used under Apache-2.0 (ADR 0005).
+blake3 = "1.8.7"
 clap = { version = "4.6.7", features = ["derive"] }
 directories = "6.0.0"
 dunce = "1"
@@ -32,15 +34,19 @@ getrandom = "0.4.3"
 lofty = "0.25.5"
 notify = "8.2.2"
 rusqlite = { version = "0.42.0", features = ["bundled", "fallible_uint"] }
+rusty-chromaprint = "0.3.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
 symphonia = { version = "0.6.1", default-features = false, features = [
     "aac",
     "aiff",
+    "alac",
     "flac",
+    "id3v2",
     "isomp4",
     "mp3",
+    "opt-simd",
     "pcm",
     "wav",
 ] }

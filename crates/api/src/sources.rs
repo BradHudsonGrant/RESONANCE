@@ -125,7 +125,12 @@ impl Api {
             }
         }
         self.reconcile_watchers(&library);
-        self.sources_from(&library)
+        let result = self.sources_from(&library);
+        drop(library);
+        if reopened_subfolders {
+            self.identity.wake();
+        }
+        result
     }
 
     pub(crate) fn remove_source(&self, source_id: i64) -> Result<LibrarySources, ApiError> {
@@ -170,6 +175,11 @@ impl Api {
             }
         }
         self.reconcile_watchers(&library);
-        self.sources_from(&library)
+        let result = self.sources_from(&library);
+        drop(library);
+        if unignored_any {
+            self.identity.wake();
+        }
+        result
     }
 }

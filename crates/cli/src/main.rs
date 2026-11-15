@@ -1,4 +1,5 @@
 mod bench;
+mod identify;
 mod library_file;
 mod scan;
 mod serve;
@@ -32,6 +33,8 @@ enum Command {
         /// The music folder to read
         folder: PathBuf,
     },
+    /// Hash and fingerprint any files in the library whose identity is still pending
+    Identify,
     /// Play both decks through the audio device and write every performance budget to
     /// docs/benchmarks. `just bench` takes the page measurements first and then runs this
     Bench {
@@ -65,6 +68,7 @@ fn main() -> ExitCode {
     match cli.command {
         Command::Key { tags } => show_keys(&tags),
         Command::Scan { folder } => finished(scan::run(&folder, cli.data_folder.as_deref())),
+        Command::Identify => finished(identify::run(cli.data_folder.as_deref())),
         Command::Bench {
             page,
             audio_seconds,

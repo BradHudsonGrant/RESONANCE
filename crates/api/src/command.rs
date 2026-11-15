@@ -15,6 +15,8 @@ pub enum Request {
     Scan {
         folder: String,
     },
+    /// Computes pending byte hashes, decoded-audio hashes and Chromaprint fingerprints.
+    Identify,
     /// Every configured source folder and the editable ignored-folder list.
     Sources,
     /// Direct subfolders inside a source (or under `parent`), for toggling subfolders on or off.
@@ -61,6 +63,7 @@ pub enum Response {
     AppInfo(AppInfo),
     Tracks(TrackPage),
     Scan(ScanReport),
+    Identify(IdentifyReport),
     Sources(LibrarySources),
     SourceSubfolders(Vec<SourceSubfolder>),
     UpdateSource(LibrarySources),
@@ -112,6 +115,15 @@ pub struct LibraryChanged {
 #[ts(export)]
 pub struct AppInfo {
     pub version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct IdentifyReport {
+    pub processed: usize,
+    pub decoded: usize,
+    pub reconciled_moves: usize,
+    pub skipped_unreadable: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]

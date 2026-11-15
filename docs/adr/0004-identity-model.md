@@ -1,6 +1,6 @@
 # 0004: Identity model
 
-Date: 12 November 2026. Status: accepted. The details marked "to settle" are decided with measurements in M2.
+Date: 12 November 2026 (settled 15 November 2026). Status: accepted.
 
 ## Context
 
@@ -36,14 +36,16 @@ A fingerprint is needed as well because two encodes of the same master decode to
 - A missing file is flagged. If the same audio shows up at another path, the app offers to relink.
 - The analysis cache key is the decoded-audio hash plus the analyser version.
 - Duplicates sort into byte-identical, audio-identical, same recording in a different encode, and different versions. Radio edits, extended mixes, dubs and remixes are versions and are never called duplicates.
-- The fingerprint comes from `rusty-chromaprint` (0.3.0, MIT), a pure-Rust port. Check its output against `fpcalc` on the fixtures before trusting AcoustID lookups made with it.
+- The fingerprint comes from `rusty-chromaprint` (0.3.0, MIT), a pure-Rust port (`Configuration::preset_test2()`, first 120 seconds, compressed to unpadded URL-safe Base64 for AcoustID and stored alongside the raw little-endian `u32` subfingerprints for local similarity matching). Checked against `fpcalc` `1.5.1` across `fixtures-local/` in [benchmarks/identity.md](../benchmarks/identity.md): wire encoding is 49/49 byte-identical on the same `u32` words, median bitwise agreement across full decodes is `0.9924` (minimum `0.9364`), and `OffsetFile` decodes the leading-ID3v2 `.m4a` fixture that `fpcalc` rejects.
 
-## To settle in M2
+## Settled in M2
 
-- The exact form that gets hashed. Lossless files decode to the same integers everywhere, so FLAC, WAV and AIFF copies of one master should hash the same once sample format and bit depth are normalised. That needs proving on real files.
-- Lossy decoders can differ by a rounding step between versions. The hash record carries the decoder and its version. When the decoder is upgraded, lossy assets are hashed again in the background and keep their identity through the fingerprint.
-- The hash function. BLAKE3 is the candidate (1.8.7, Apache-2.0).
-- The cost of a first pass over 113 GB, measured on the laptop.
+Measured on 15 November 2026 ([benchmarks/identity.md](../benchmarks/identity.md)):
+
+- **Normalised audio stream.** Symphonia `0.6.1` (`gapless: true`, `verify: true`, with `"alac"` and `"id3v2"` enabled) decodes every audio packet into interleaved full-scale signed `i32` little-endian samples (`i8`/`u8`, `i16`/`u16` and `i24`/`u24` shift cleanly into the high bits with zero dither). Hashing `"resonance-audio-i32le-v1\0" || sample_rate_u32_le || channels_u16_le || samples_i32_le` produces the exact same 32-byte `audio_hash` across WAV (16-bit and zero-padded 24-bit), AIFF, FLAC, ALAC `.m4a` and retagged copies with cover art, proven on both generated signals and `05. Hurricane.flac` from `fixtures-local/`.
+- **Decoder upgrades on lossy files.** `asset.audio_decoder` records `"symphonia/0.6.1"`. When that string changes in a later build, `pending_identity_assets` re-queues included lossy assets (`mp3`, `m4a`) while leaving lossless assets untouched, and tracks keep their identity through `track_id` and Chromaprint.
+- **Hash function.** `blake3` `1.8.7` (used under `Apache-2.0`, [ADR 0005](0005-licence-policy.md)) hashes raw file bytes (`byte_hash`) at `2,234 MB/s` on one thread and hashes the normalised PCM stream (`audio_hash`) in the same decode pass as Chromaprint.
+- **First-pass cost over 113 GB.** Over the 50 real tracks in `fixtures-local/` (`1.454 GB`), full identity runs at `110.1 MB/s` on one thread (`17.1 min` for `113 GB`) and `809.1 MB/s` across 12 threads (`2.3 min` for `113 GB`). Background batches use up to half the logical cores (capped at 8) without holding the database lock during decoding, so the first pass completes in a few minutes while the app stays responsive.
 
 ## What would change it
 

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt;
 use std::fs::{self, DirEntry, Metadata};
 use std::io;
@@ -8,9 +9,9 @@ use resonance_core::library::{
     AudioFormat, SCAN_IGNORE_MARKER, ScannedFile, folder_under_source_holding,
     is_ignored_folder_with, is_subfolder_excluded,
 };
-use resonance_db::{Database, DbError, FileStamp};
+use resonance_db::{Database, DbError, FileStamp, SourceId};
 
-use crate::file_tags;
+use crate::{file_tags, identity};
 
 #[derive(Debug)]
 pub enum ScanError {
@@ -250,6 +251,18 @@ pub fn scan(
     files.sort();
 
     let stamps = database.file_stamps(source)?;
+    let has_identities = database.has_identified_assets()?;
+    let walked_paths: HashSet<String> = if has_identities {
+        files
+            .iter()
+            .filter_map(|path| stored_path(&root, path))
+            .collect()
+    } else {
+        HashSet::new()
+    };
+    let mut claimed_moves: HashSet<i64> = HashSet::new();
+    let mut missing_identified_exists: Option<bool> = None;
+
     let mut report = ScanReport {
         source_folder,
         found: files.len(),
@@ -282,14 +295,14 @@ pub fn scan(
                 continue;
             }
         };
-        match stamps.get(&stored) {
+        let is_new_path = match stamps.get(&stored) {
             Some(before) if *before == now => {
                 report.unchanged += 1;
                 continue;
             }
-            Some(_) => report.changed += 1,
-            None => report.added += 1,
-        }
+            Some(_) => false,
+            None => true,
+        };
         let (audio, tags) = match file_tags::read(path) {
             Ok(contents) => (Some(contents.audio), contents.tags),
             Err(source) => {
@@ -300,17 +313,114 @@ pub fn scan(
                 (None, Vec::new())
             }
         };
-        read.push(ScannedFile {
+        let scanned = ScannedFile {
             path: stored,
             size_bytes: now.size_bytes,
             modified_ns: now.modified_ns,
             format,
             audio,
             tags,
-        });
+        };
+
+        if is_new_path
+            && has_identities
+            && try_reconcile_moved_on_scan(
+                database,
+                source,
+                path,
+                &scanned,
+                &walked_paths,
+                &mut claimed_moves,
+                &mut missing_identified_exists,
+            )?
+        {
+            report.changed += 1;
+            continue;
+        }
+
+        if is_new_path {
+            report.added += 1;
+        } else {
+            report.changed += 1;
+        }
+        read.push(scanned);
     }
     database.record_scan(source, &read)?;
 
     report.unreadable = unreadable;
     Ok(report)
+}
+
+fn try_reconcile_moved_on_scan(
+    database: &mut Database,
+    source: SourceId,
+    path: &Path,
+    scanned: &ScannedFile,
+    walked_paths: &HashSet<String>,
+    claimed_moves: &mut HashSet<i64>,
+    missing_identified_exists: &mut Option<bool>,
+) -> Result<bool, DbError> {
+    if let Ok(byte_hash) = identity::compute_byte_hash(path) {
+        let candidates = database.assets_with_byte_hash(&byte_hash)?;
+        if let Some(matched) = candidates.iter().find(|cand| {
+            !claimed_moves.contains(&cand.asset_id)
+                && !identity::full_asset_path(&cand.source_folder, &cand.path).exists()
+        }) {
+            claimed_moves.insert(matched.asset_id);
+            database.record_moved_scan_file(matched.asset_id, source, scanned, None)?;
+            return Ok(true);
+        }
+    }
+
+    let any_missing = match *missing_identified_exists {
+        Some(value) => value,
+        None => {
+            let computed = any_identified_asset_missing(database, source, walked_paths)?;
+            *missing_identified_exists = Some(computed);
+            computed
+        }
+    };
+    if !any_missing {
+        return Ok(false);
+    }
+
+    if let Ok(computed_id) = identity::compute_identity(path)
+        && let Some(audio) = &computed_id.audio
+    {
+        let candidates = database.assets_with_audio_hash(&audio.hash)?;
+        if let Some(matched) = candidates.iter().find(|cand| {
+            !claimed_moves.contains(&cand.asset_id)
+                && !identity::full_asset_path(&cand.source_folder, &cand.path).exists()
+        }) {
+            claimed_moves.insert(matched.asset_id);
+            database.record_moved_scan_file(
+                matched.asset_id,
+                source,
+                scanned,
+                Some(&computed_id),
+            )?;
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+fn any_identified_asset_missing(
+    database: &Database,
+    current_source: SourceId,
+    walked_paths: &HashSet<String>,
+) -> Result<bool, DbError> {
+    for source_cfg in database.sources()? {
+        let source_id = source_cfg.id;
+        for asset in database.identified_assets_in_source(source_id)? {
+            if source_id == current_source && walked_paths.contains(&asset.path) {
+                continue;
+            }
+            if !identity::full_asset_path(&asset.source_folder, &asset.path).exists() {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }

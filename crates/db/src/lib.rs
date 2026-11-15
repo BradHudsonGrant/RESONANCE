@@ -1,3 +1,4 @@
+mod identity;
 mod sources;
 
 use std::collections::HashMap;
@@ -6,6 +7,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+pub use identity::{IdentityMatch, PendingAsset, StoredAssetIdentity};
 use resonance_core::library::{
     AudioFacts, AudioFormat, ScannedFile, TagField, is_asset_path_included,
 };
@@ -14,9 +16,10 @@ pub use sources::SourceConfig;
 
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
-const MIGRATIONS: [&str; 2] = [
+const MIGRATIONS: [&str; 3] = [
     include_str!("../migrations/0001_library.sql"),
     include_str!("../migrations/0002_sources.sql"),
+    include_str!("../migrations/0003_identity.sql"),
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
