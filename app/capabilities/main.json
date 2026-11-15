@@ -3,5 +3,11 @@
   "identifier": "main",
   "description": "The local app window can call the command edge.",
   "windows": ["main"],
-  "permissions": ["allow-dispatch", "core:event:allow-listen", "core:event:allow-unlisten"]
+  "permissions": [
+    "allow-dispatch",
+    "allow-pick-audio-file",
+    "allow-pick-folder",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
 }

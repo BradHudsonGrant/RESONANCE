@@ -305,4 +305,28 @@ describe('TrackPages', () => {
     expect(pages.allLoadedChecked(new Set([1]))).toBe(false);
     expect(pages.allLoadedChecked(new Set([1, 2]))).toBe(true);
   });
+
+  it('follows the selected track by id when refresh reorders rows after relink', async () => {
+    let reordered = false;
+    const pages = new TrackPages(() =>
+      Promise.resolve({
+        total: 3,
+        library_total: 3,
+        offset: 0,
+        tracks: reordered
+          ? [fakeTrack(1), fakeTrack(2), { ...fakeTrack(0), location: '/moved/0.flac' }]
+          : [fakeTrack(0), fakeTrack(1), fakeTrack(2)],
+      }),
+    );
+
+    await pages.load();
+    pages.selected = 0;
+    expect(pages.selectedTrack?.id).toBe(1);
+
+    reordered = true;
+    await pages.refresh();
+    expect(pages.selected).toBe(2);
+    expect(pages.selectedTrack?.id).toBe(1);
+    expect(pages.selectedTrack?.location).toBe('/moved/0.flac');
+  });
 });

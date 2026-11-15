@@ -24,6 +24,7 @@
     loadFacets?: () => Promise<LibraryFacets>;
     onopen?: () => void;
     onpreview?: (track: LibraryTrack) => void;
+    onrelink?: (track: LibraryTrack) => void;
     onscan: () => void;
     ontogglefavourite?: (track: LibraryTrack) => void;
     onclearsearch?: () => void;
@@ -73,6 +74,7 @@
     loadFacets,
     onopen,
     onpreview,
+    onrelink,
     onscan,
     ontogglefavourite,
     onclearsearch,
@@ -115,6 +117,7 @@
       year_max: null,
       label: null,
       formats: null,
+      missing_only: null,
     });
   }
 
@@ -266,6 +269,7 @@
         {activeCollection}
         {onopen}
         {onpreview}
+        {onrelink}
         {ontogglefavourite}
         {onaddtocollection}
         {onremovefromcollection}

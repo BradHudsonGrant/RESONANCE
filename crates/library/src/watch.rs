@@ -57,12 +57,11 @@ impl WatchFilter {
             return false;
         }
         let is_audio_file = AudioFormat::of(path).is_some();
-        let is_new_or_renamed_dir = path.is_dir()
-            && matches!(
-                kind,
-                EventKind::Create(_) | EventKind::Modify(ModifyKind::Name(_))
-            );
-        if !is_audio_file && !is_new_or_renamed_dir {
+        let is_dir_event = matches!(
+            kind,
+            EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(_))
+        ) || (path.is_dir() && matches!(kind, EventKind::Create(_)));
+        if !is_audio_file && !is_dir_event {
             return false;
         }
 
@@ -189,7 +188,7 @@ impl SourceWatcher {
                 let Ok(event) = res else {
                     return;
                 };
-                if matches!(event.kind, EventKind::Access(_) | EventKind::Remove(_)) {
+                if matches!(event.kind, EventKind::Access(_)) {
                     return;
                 }
                 let accepted = {

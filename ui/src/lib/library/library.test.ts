@@ -52,11 +52,15 @@ describe('Library', () => {
     expect(tick.getAttribute('aria-checked')).toBe('true');
     await fireEvent.click(tick);
     expect(tick.getAttribute('aria-checked')).toBe('false');
+    expect(
+      screen.getAllByRole('row').filter((row) => row.getAttribute('aria-selected') === 'true'),
+    ).toHaveLength(0);
 
+    await fireEvent.keyDown(grid, { key: 'ArrowDown' });
     await fireEvent.keyDown(grid, { key: 'Enter' });
     expect(onopen).toHaveBeenCalledOnce();
 
-    await fireEvent.keyDown(grid, { key: 'ArrowUp' });
+    await fireEvent.keyDown(grid, { key: 'ArrowDown' });
     await fireEvent.keyDown(grid, { key: 'ArrowUp' });
 
     const top = screen
@@ -121,7 +125,7 @@ describe('Library', () => {
       year_min: 2020,
       year_max: 2024,
       labels: ['Northline'],
-      formats: ['flac'],
+      missing_count: 0,
     });
 
     render(Library, {
@@ -345,6 +349,63 @@ describe('Library', () => {
     const grid = screen.getByRole('grid', { name: 'Tracks' });
     await fireEvent.keyDown(grid, { key: 'Enter' });
     expect(onopen).toHaveBeenCalledOnce();
+  });
+
+  it('deselects on repeat row click, tick box click, Escape or empty space, and supports Select all and Deselect', async () => {
+    const { pages } = fakeLibrary(4);
+    await pages.load();
+    render(Library, { pages, onscan: vi.fn() });
+
+    const rows = () => screen.getAllByRole('row');
+    const selectedRows = () => rows().filter((row) => row.getAttribute('aria-selected') === 'true');
+
+    // Click a row to select, click the same row again to deselect.
+    await fireEvent.click(rows()[1]!);
+    expect(selectedRows()).toHaveLength(1);
+    await fireEvent.click(rows()[1]!);
+    expect(selectedRows()).toHaveLength(0);
+
+    // Click a row to select, then click its filled tick box to deselect.
+    await fireEvent.click(rows()[2]!);
+    expect(selectedRows()).toHaveLength(1);
+    await fireEvent.click(within(rows()[2]!).getByRole('checkbox', { name: 'Tick Track 1' }));
+    expect(selectedRows()).toHaveLength(0);
+
+    // Select a row, then Escape deselects even when nothing is multi-ticked.
+    await fireEvent.click(rows()[1]!);
+    expect(selectedRows()).toHaveLength(1);
+    await fireEvent.keyDown(window, { key: 'Escape' });
+    expect(selectedRows()).toHaveLength(0);
+
+    // Select a row, then click another row's tick box -> both rows enter multi-selection,
+    // Select all ticks all 4, and Deselect clears both checked rows and active row selection.
+    await fireEvent.click(rows()[1]!);
+    await fireEvent.click(within(rows()[3]!).getByRole('checkbox', { name: 'Tick Track 2' }));
+    expect(screen.getByText('2 selected')).toBeTruthy();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Select all' }));
+    expect(screen.getByText('4 selected')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Select all' })).toBeNull();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Deselect' }));
+    expect(screen.queryByRole('region', { name: 'Selected tracks' })).toBeNull();
+    expect(selectedRows()).toHaveLength(0);
+
+    // Ctrl+A selects all loaded tracks; header checkbox deselects all; empty viewport click deselects.
+    await fireEvent.keyDown(window, { key: 'a', ctrlKey: true });
+    expect(screen.getByText('4 selected')).toBeTruthy();
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Deselect all tracks' }));
+    expect(screen.queryByRole('region', { name: 'Selected tracks' })).toBeNull();
+    expect(selectedRows()).toHaveLength(0);
+
+    // Shift+Click selects a range and clicking empty viewport space clears everything.
+    await fireEvent.click(rows()[1]!);
+    await fireEvent.click(rows()[3]!, { shiftKey: true });
+    expect(screen.getByText('3 selected')).toBeTruthy();
+    const viewport = document.querySelector('.viewport')!;
+    await fireEvent.click(viewport);
+    expect(screen.queryByRole('region', { name: 'Selected tracks' })).toBeNull();
+    expect(selectedRows()).toHaveLength(0);
   });
 });
 

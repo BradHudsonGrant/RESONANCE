@@ -54,6 +54,34 @@ async fn dispatch(
         .map_err(ApiError::internal)?
 }
 
+#[tauri::command]
+async fn pick_audio_file() -> Result<Option<String>, ApiError> {
+    tauri::async_runtime::spawn_blocking(|| {
+        Ok(rfd::FileDialog::new()
+            .set_title("Locate audio file")
+            .add_filter(
+                "Audio files",
+                &["wav", "aiff", "aif", "flac", "mp3", "m4a", "mp4"],
+            )
+            .pick_file()
+            .map(|path| path.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(ApiError::internal)?
+}
+
+#[tauri::command]
+async fn pick_folder() -> Result<Option<String>, ApiError> {
+    tauri::async_runtime::spawn_blocking(|| {
+        Ok(rfd::FileDialog::new()
+            .set_title("Select folder to search")
+            .pick_folder()
+            .map(|path| path.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(ApiError::internal)?
+}
+
 fn local_page(url: &Url) -> bool {
     url.username().is_empty()
         && url.password().is_none()
@@ -82,7 +110,11 @@ fn run(options: Options) -> Result<(), AppError> {
 
     tauri::Builder::default()
         .manage(api)
-        .invoke_handler(tauri::generate_handler![dispatch])
+        .invoke_handler(tauri::generate_handler![
+            dispatch,
+            pick_audio_file,
+            pick_folder
+        ])
         .setup(move |app| {
             let window =
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))

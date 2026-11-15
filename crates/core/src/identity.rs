@@ -256,6 +256,109 @@ pub fn fingerprint_similarity(left: &[u32], right: &[u32], max_shift: usize) -> 
     best
 }
 
+/// Minimum Chromaprint bitwise agreement required to treat another encode as the same recording.
+pub const RELINK_MIN_FINGERPRINT_SIMILARITY: f32 = 0.85;
+
+/// Maximum duration difference allowed when matching another encode by Chromaprint.
+pub const RELINK_MAX_DURATION_DELTA_MS: u64 = 3_000;
+
+/// Maximum Chromaprint subfingerprint shift searched during relink comparison (~4 s at ~0.124 s/item).
+pub const RELINK_MAX_FINGERPRINT_SHIFT: usize = 32;
+
+/// Identity facts compared between a missing asset and a candidate file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RelinkIdentityRef<'a> {
+    pub byte_hash: Option<ContentHash>,
+    pub audio_hash: Option<ContentHash>,
+    pub chromaprint_raw: Option<&'a [u32]>,
+    pub duration_ms: Option<u64>,
+}
+
+/// Match verdict between a missing track's stored identity and a candidate file.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RelinkMatchKind {
+    ExactBytes,
+    ExactAudio,
+    SameRecording { similarity: f32 },
+    DifferentRecording { similarity: Option<f32> },
+}
+
+impl RelinkMatchKind {
+    pub fn confidence(self) -> f32 {
+        match self {
+            Self::ExactBytes | Self::ExactAudio => 1.0,
+            Self::SameRecording { similarity } => similarity,
+            Self::DifferentRecording { similarity } => similarity.unwrap_or(0.0),
+        }
+    }
+
+    pub fn is_auto_candidate(self) -> bool {
+        matches!(
+            self,
+            Self::ExactBytes | Self::ExactAudio | Self::SameRecording { .. }
+        )
+    }
+
+    pub fn requires_confirmation(self) -> bool {
+        matches!(self, Self::DifferentRecording { .. })
+    }
+
+    pub fn tier(self) -> u8 {
+        match self {
+            Self::ExactBytes => 0,
+            Self::ExactAudio => 1,
+            Self::SameRecording { .. } => 2,
+            Self::DifferentRecording { .. } => 3,
+        }
+    }
+}
+
+/// Evaluates how closely `candidate` matches `missing` along the identity ladder:
+/// exact `byte_hash`, exact `audio_hash`, or `fingerprint_similarity >= 0.85` within `±3.0 s`.
+pub fn evaluate_relink_match(
+    missing: RelinkIdentityRef<'_>,
+    candidate: RelinkIdentityRef<'_>,
+) -> RelinkMatchKind {
+    if let (Some(left), Some(right)) = (missing.byte_hash, candidate.byte_hash)
+        && left == right
+    {
+        return RelinkMatchKind::ExactBytes;
+    }
+    if let (Some(left), Some(right)) = (missing.audio_hash, candidate.audio_hash)
+        && left == right
+    {
+        return RelinkMatchKind::ExactAudio;
+    }
+
+    let similarity = match (missing.chromaprint_raw, candidate.chromaprint_raw) {
+        (Some(left), Some(right)) if !left.is_empty() && !right.is_empty() => Some(
+            fingerprint_similarity(left, right, RELINK_MAX_FINGERPRINT_SHIFT),
+        ),
+        _ => None,
+    };
+
+    let duration_close = match (missing.duration_ms, candidate.duration_ms) {
+        (Some(left), Some(right)) => left.abs_diff(right) <= RELINK_MAX_DURATION_DELTA_MS,
+        _ => true,
+    };
+
+    if let Some(score) = similarity
+        && score >= RELINK_MIN_FINGERPRINT_SIMILARITY
+        && duration_close
+    {
+        return RelinkMatchKind::SameRecording { similarity: score };
+    }
+
+    RelinkMatchKind::DifferentRecording { similarity }
+}
+
+/// Orders two relink verdicts from strongest (`ExactBytes`) to weakest (`DifferentRecording`).
+pub fn compare_relink_matches(left: RelinkMatchKind, right: RelinkMatchKind) -> std::cmp::Ordering {
+    left.tier()
+        .cmp(&right.tier())
+        .then_with(|| right.confidence().total_cmp(&left.confidence()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,5 +423,92 @@ mod tests {
             diff_score < 0.65,
             "expected near-chance similarity, got {diff_score}"
         );
+    }
+
+    #[test]
+    fn relink_ladder_ranks_bytes_then_audio_then_fingerprint_and_flags_mismatches() {
+        let fp_a: Vec<u32> = (0..120)
+            .map(|i: u32| i.wrapping_mul(0x9e37_79b9).rotate_left(7))
+            .collect();
+        let fp_a_lossy: Vec<u32> = fp_a.iter().map(|&w| w ^ 0b11).collect();
+        let fp_other: Vec<u32> = (0..120)
+            .map(|i: u32| (i ^ 0x55aa_55aa).wrapping_mul(0x85eb_ca6b).rotate_right(11))
+            .collect();
+
+        let missing = RelinkIdentityRef {
+            byte_hash: Some(ContentHash::from_bytes([0x11; 32])),
+            audio_hash: Some(ContentHash::from_bytes([0x22; 32])),
+            chromaprint_raw: Some(&fp_a),
+            duration_ms: Some(180_000),
+        };
+
+        let exact_bytes = evaluate_relink_match(
+            missing,
+            RelinkIdentityRef {
+                byte_hash: Some(ContentHash::from_bytes([0x11; 32])),
+                audio_hash: Some(ContentHash::from_bytes([0x99; 32])),
+                chromaprint_raw: None,
+                duration_ms: Some(180_000),
+            },
+        );
+        assert_eq!(exact_bytes, RelinkMatchKind::ExactBytes);
+        assert!(exact_bytes.is_auto_candidate());
+        assert!(!exact_bytes.requires_confirmation());
+
+        let exact_audio = evaluate_relink_match(
+            missing,
+            RelinkIdentityRef {
+                byte_hash: Some(ContentHash::from_bytes([0x33; 32])),
+                audio_hash: Some(ContentHash::from_bytes([0x22; 32])),
+                chromaprint_raw: None,
+                duration_ms: Some(180_000),
+            },
+        );
+        assert_eq!(exact_audio, RelinkMatchKind::ExactAudio);
+
+        let same_recording = evaluate_relink_match(
+            missing,
+            RelinkIdentityRef {
+                byte_hash: Some(ContentHash::from_bytes([0x44; 32])),
+                audio_hash: Some(ContentHash::from_bytes([0x55; 32])),
+                chromaprint_raw: Some(&fp_a_lossy),
+                duration_ms: Some(182_400),
+            },
+        );
+        assert!(matches!(
+            same_recording,
+            RelinkMatchKind::SameRecording { similarity } if similarity > 0.90
+        ));
+        assert!(same_recording.is_auto_candidate());
+
+        let duration_too_far = evaluate_relink_match(
+            missing,
+            RelinkIdentityRef {
+                byte_hash: Some(ContentHash::from_bytes([0x44; 32])),
+                audio_hash: Some(ContentHash::from_bytes([0x55; 32])),
+                chromaprint_raw: Some(&fp_a_lossy),
+                duration_ms: Some(184_500),
+            },
+        );
+        assert!(duration_too_far.requires_confirmation());
+
+        let different = evaluate_relink_match(
+            missing,
+            RelinkIdentityRef {
+                byte_hash: Some(ContentHash::from_bytes([0x66; 32])),
+                audio_hash: Some(ContentHash::from_bytes([0x77; 32])),
+                chromaprint_raw: Some(&fp_other),
+                duration_ms: Some(180_000),
+            },
+        );
+        assert!(different.requires_confirmation());
+        assert!(!different.is_auto_candidate());
+
+        let mut ranked = [different, same_recording, exact_audio, exact_bytes];
+        ranked.sort_by(|a, b| compare_relink_matches(*a, *b));
+        assert_eq!(ranked[0], exact_bytes);
+        assert_eq!(ranked[1], exact_audio);
+        assert_eq!(ranked[2], same_recording);
+        assert_eq!(ranked[3], different);
     }
 }

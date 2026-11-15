@@ -119,6 +119,31 @@ pub enum Request {
     },
     /// Current state of the single-track preview player.
     PreviewStatus,
+    /// Discovers ranked audio-matched candidate files across sources (or inside `search_folder`)
+    /// for relinking `track_id`.
+    RelinkCandidates {
+        #[ts(type = "number")]
+        track_id: i64,
+        #[serde(default)]
+        #[ts(optional = nullable)]
+        search_folder: Option<String>,
+    },
+    /// Computes audio identity on `candidate_path` and previews match evidence before relinking.
+    PreviewRelink {
+        #[ts(type = "number")]
+        track_id: i64,
+        candidate_path: String,
+    },
+    /// Repoints `track_id` to `candidate_path`, merging any duplicate scanned track row and
+    /// clearing `missing_since`. Requires `force = true` when `PreviewRelink` reports
+    /// `DifferentRecording`.
+    ApplyRelink {
+        #[ts(type = "number")]
+        track_id: i64,
+        candidate_path: String,
+        #[serde(default)]
+        force: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -152,6 +177,9 @@ pub enum Response {
     PreviewSeek(PreviewState),
     PreviewSetVolume(PreviewState),
     PreviewStatus(PreviewState),
+    RelinkCandidates(Vec<RelinkCandidate>),
+    PreviewRelink(Box<RelinkPreview>),
+    ApplyRelink(Box<LibraryTrack>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -306,6 +334,9 @@ pub struct TrackQuery {
     pub collection_id: Option<i64>,
     #[serde(default)]
     #[ts(optional = nullable)]
+    pub missing_only: Option<bool>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
     pub sort: Option<TrackSortField>,
     #[serde(default)]
     #[ts(optional = nullable)]
@@ -328,6 +359,7 @@ pub struct LibraryFacets {
     pub bpm_max: Option<f64>,
     pub year_min: Option<i32>,
     pub year_max: Option<i32>,
+    pub missing_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -368,6 +400,9 @@ pub struct LibraryTrack {
     /// Missing when the file could not be read as audio.
     pub audio: Option<TrackAudio>,
     pub collections: Vec<TrackCollection>,
+    /// Unix epoch milliseconds when the file was found missing on disk, if missing.
+    #[ts(type = "number | null")]
+    pub missing_since: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -460,4 +495,51 @@ pub struct PreviewState {
     pub duration_ms: u64,
     pub volume: f32,
     pub generation: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum RelinkMatchEvidence {
+    ExactBytes,
+    ExactAudio,
+    SameRecording { similarity: f32 },
+    DifferentRecording { similarity: Option<f32> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct RelinkFileSummary {
+    pub path: String,
+    pub format: String,
+    #[ts(type = "number")]
+    pub size_bytes: u64,
+    #[ts(type = "number | null")]
+    pub duration_ms: Option<u64>,
+    pub sample_rate: Option<u32>,
+    pub bit_depth: Option<u8>,
+    pub bitrate_kbps: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct RelinkCandidate {
+    pub candidate_path: String,
+    #[ts(type = "number | null")]
+    pub existing_track_id: Option<i64>,
+    pub evidence: RelinkMatchEvidence,
+    pub file: RelinkFileSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct RelinkPreview {
+    #[ts(type = "number")]
+    pub track_id: i64,
+    pub evidence: RelinkMatchEvidence,
+    pub requires_confirmation: bool,
+    pub current: RelinkFileSummary,
+    pub candidate: RelinkFileSummary,
+    #[ts(type = "number | null")]
+    pub merges_existing_track_id: Option<i64>,
 }

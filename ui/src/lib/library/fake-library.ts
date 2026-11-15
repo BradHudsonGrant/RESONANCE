@@ -20,6 +20,7 @@ export function fakeTrack(index: number): LibraryTrack {
     favourite: false,
     location: `/music/${index}.flac`,
     size_bytes: 9_000_000,
+    missing_since: null,
     audio: {
       duration_ms: 301_000,
       sample_rate: 44_100,

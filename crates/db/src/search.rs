@@ -21,6 +21,7 @@ pub struct LibraryFacets {
     pub bpm_max: Option<f64>,
     pub year_min: Option<i32>,
     pub year_max: Option<i32>,
+    pub missing_count: u32,
 }
 
 pub(crate) struct AssetSearchMeta<'a> {
@@ -72,6 +73,14 @@ pub(crate) fn now_unix_ns() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| {
             i64::try_from(duration.as_nanos()).unwrap_or(i64::MAX)
+        })
+}
+
+pub fn now_unix_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| {
+            i64::try_from(duration.as_millis()).unwrap_or(i64::MAX)
         })
 }
 
@@ -225,12 +234,19 @@ impl Database {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
 
+        let missing_count: u32 = self.connection.query_row(
+            "SELECT count(*) FROM asset WHERE included = 1 AND missing_since IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )?;
+
         Ok(LibraryFacets {
             labels,
             bpm_min,
             bpm_max,
             year_min,
             year_max,
+            missing_count,
         })
     }
 
@@ -294,6 +310,10 @@ fn build_query_sql(query: &TrackQuery, count_only: bool) -> (String, Vec<Value>)
         }
     }
 
+    if query.missing_only {
+        conditions.push("asset.missing_since IS NOT NULL".to_owned());
+    }
+
     if let Some(bpm_min) = query.bpm_min.filter(|value| value.is_finite()) {
         let slot = bind_param(&mut params, Value::Real(bpm_min));
         conditions.push(format!("asset.tag_bpm >= {slot}"));
@@ -342,6 +362,7 @@ fn build_query_sql(query: &TrackQuery, count_only: bool) -> (String, Vec<Value>)
     // Choose join order to keep SQLite walking the matching index without a temp sort.
     let has_selective_filter = query.pill == FilterPill::Favourites
         || query.collection_id.is_some()
+        || query.missing_only
         || query.bpm_min.is_some()
         || query.bpm_max.is_some()
         || query.year_min.is_some()
@@ -475,7 +496,8 @@ pub(crate) fn load_tracks_by_ids(
     let track_sql = format!(
         "SELECT asset.id, asset.track_id, source.folder, asset.path, asset.size_bytes,
                 asset.modified_ns, asset.format, asset.duration_ms, asset.sample_rate,
-                asset.channels, asset.bit_depth, asset.bitrate_kbps, track.favourite
+                asset.channels, asset.bit_depth, asset.bitrate_kbps, track.favourite,
+                asset.missing_since
          FROM asset
          JOIN source ON source.id = asset.source_id
          JOIN track ON track.id = asset.track_id

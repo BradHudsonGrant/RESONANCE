@@ -28,6 +28,7 @@ export type LibraryState =
 
 export function countActiveDrawerFilters(query: TrackQuery): number {
   let count = 0;
+  if (query.missing_only) count += 1;
   if (query.bpm_min != null || query.bpm_max != null) count += 1;
   if (query.keys && query.keys.length > 0) count += 1;
   if (query.year_min != null || query.year_max != null) count += 1;
@@ -257,6 +258,11 @@ export class TrackPages {
     });
   }
 
+  /** Replaces a cached track in-place after relinking so selection and inspector update immediately. */
+  replaceLocalTrack(updated: LibraryTrack) {
+    this.#mapTracks((track) => (track.id === updated.id ? updated : undefined));
+  }
+
   /** The track at a place in current query order, or nothing while its page is still on its way. */
   track(index: number): LibraryTrack | undefined {
     return this.#pages.get(Math.floor(index / PAGE_SIZE))?.[index % PAGE_SIZE];
@@ -349,11 +355,20 @@ export class TrackPages {
       if (this.#selected !== null) {
         if (reply.total === 0) {
           this.selected = null;
-        } else if (this.#selected >= reply.total) {
-          this.#selected = reply.total - 1;
-          this.#selectedTrack = this.track(this.#selected);
-        } else if (Math.floor(this.#selected / PAGE_SIZE) === page) {
-          this.#selectedTrack = reply.tracks[this.#selected % PAGE_SIZE];
+        } else {
+          const movedIndex =
+            !replacePages && this.#selectedTrack !== undefined
+              ? reply.tracks.findIndex((item) => item.id === this.#selectedTrack?.id)
+              : -1;
+          if (movedIndex !== -1) {
+            this.#selected = page * PAGE_SIZE + movedIndex;
+            this.#selectedTrack = reply.tracks[movedIndex];
+          } else if (this.#selected >= reply.total) {
+            this.#selected = reply.total - 1;
+            this.#selectedTrack = this.track(this.#selected);
+          } else if (Math.floor(this.#selected / PAGE_SIZE) === page) {
+            this.#selectedTrack = reply.tracks[this.#selected % PAGE_SIZE];
+          }
         }
       }
       this.#keepNearby();

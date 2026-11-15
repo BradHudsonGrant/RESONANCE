@@ -35,6 +35,7 @@ pub struct TrackQuery {
     pub text: Option<String>,
     pub pill: FilterPill,
     pub collection_id: Option<i64>,
+    pub missing_only: bool,
     pub bpm_min: Option<f64>,
     pub bpm_max: Option<f64>,
     pub keys: Vec<String>,
@@ -55,9 +56,12 @@ impl TrackQuery {
             || self.active_filter_count() > 0
     }
 
-    /// Number of active drawer criteria (`bpm`, `keys`, `year`, `label`, `formats`).
+    /// Number of active drawer criteria (`missing_only`, `bpm`, `keys`, `year`, `label`, `formats`).
     pub fn active_filter_count(&self) -> usize {
         let mut count = 0;
+        if self.missing_only {
+            count += 1;
+        }
         if self.bpm_min.is_some() || self.bpm_max.is_some() {
             count += 1;
         }
@@ -184,5 +188,16 @@ mod tests {
 
         let same_from_name = key_filter_values(&["Am".to_owned()]);
         assert_eq!(expanded, same_from_name);
+    }
+
+    #[test]
+    fn missing_only_counts_as_active_drawer_filter() {
+        let mut query = TrackQuery::default();
+        assert!(!query.is_narrowed());
+        assert_eq!(query.active_filter_count(), 0);
+
+        query.missing_only = true;
+        assert!(query.is_narrowed());
+        assert_eq!(query.active_filter_count(), 1);
     }
 }

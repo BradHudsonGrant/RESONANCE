@@ -1,7 +1,8 @@
 use resonance_core::identity::{
     AssetAlignment, AssetIdentity, AudioHash, Chromaprint, ContentHash,
+    RELINK_MAX_DURATION_DELTA_MS,
 };
-use resonance_core::library::{AudioFormat, is_asset_path_included};
+use resonance_core::library::{AudioFormat, TagField, is_asset_path_included};
 use rusqlite::{OptionalExtension, Transaction, params};
 
 use crate::{Database, DbError, FileStamp, ScannedFile, SourceId, search, sources, tag_field};
@@ -50,6 +51,45 @@ pub struct IdentityMatch {
     pub source_id: SourceId,
     pub source_folder: String,
     pub path: String,
+}
+
+/// Primary included asset state and stored identity for a track being relinked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredTrackRelinkTarget {
+    pub asset_id: i64,
+    pub track_id: i64,
+    pub source_id: SourceId,
+    pub source_folder: String,
+    pub path: String,
+    pub format: AudioFormat,
+    pub size_bytes: u64,
+    pub duration_ms: Option<u64>,
+    pub sample_rate: Option<u32>,
+    pub bit_depth: Option<u8>,
+    pub bitrate_kbps: Option<u32>,
+    pub missing_since: Option<i64>,
+    pub byte_hash: Option<ContentHash>,
+    pub audio_hash: Option<ContentHash>,
+    pub chromaprint_raw: Option<Vec<u32>>,
+}
+
+/// Included present asset in the library considered as a candidate when relinking a missing track.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredRelinkCandidate {
+    pub asset_id: i64,
+    pub track_id: i64,
+    pub source_id: SourceId,
+    pub source_folder: String,
+    pub path: String,
+    pub format: AudioFormat,
+    pub size_bytes: u64,
+    pub duration_ms: Option<u64>,
+    pub sample_rate: Option<u32>,
+    pub bit_depth: Option<u8>,
+    pub bitrate_kbps: Option<u32>,
+    pub byte_hash: Option<ContentHash>,
+    pub audio_hash: Option<ContentHash>,
+    pub chromaprint_raw: Option<Vec<u32>>,
 }
 
 fn parse_format(name: String) -> Result<AudioFormat, DbError> {
@@ -104,6 +144,7 @@ impl Database {
              JOIN source ON source.id = asset.source_id
              WHERE asset.id > ?1
                AND asset.included = 1
+               AND asset.missing_since IS NULL
                AND (
                    asset.identity_size_bytes IS NULL
                    OR asset.identity_size_bytes != asset.size_bytes
@@ -409,6 +450,7 @@ impl Database {
                  bit_depth = ?10,
                  bitrate_kbps = ?11,
                  included = ?12,
+                 missing_since = NULL,
                  byte_hash = ?13,
                  audio_hash = ?14,
                  audio_decoder = ?15,
@@ -574,6 +616,402 @@ impl Database {
             tempo_ratio_bits: row.tempo_ratio.to_bits(),
         }))
     }
+
+    /// Reads the primary included asset and stored identity of `track_id` for relink inspection.
+    pub fn track_relink_target(
+        &self,
+        track_id: i64,
+    ) -> Result<Option<StoredTrackRelinkTarget>, DbError> {
+        struct RawTarget {
+            asset_id: i64,
+            track_id: i64,
+            source_id: i64,
+            source_folder: String,
+            path: String,
+            format_name: String,
+            size_bytes: u64,
+            duration_ms: Option<u64>,
+            sample_rate: Option<u32>,
+            bit_depth: Option<u8>,
+            bitrate_kbps: Option<u32>,
+            missing_since: Option<i64>,
+            byte_hash_raw: Option<Vec<u8>>,
+            audio_hash_raw: Option<Vec<u8>>,
+            fp_raw: Option<Vec<u8>>,
+        }
+
+        let Some(row) = self
+            .connection
+            .query_row(
+                "SELECT asset.id, asset.track_id, asset.source_id, source.folder, asset.path,
+                     asset.format, asset.size_bytes, asset.duration_ms, asset.sample_rate,
+                     asset.bit_depth, asset.bitrate_kbps, asset.missing_since,
+                     asset.byte_hash, asset.audio_hash, asset.fingerprint_raw
+                 FROM asset
+                 JOIN source ON source.id = asset.source_id
+                 WHERE asset.track_id = ?1 AND asset.included = 1
+                 ORDER BY asset.is_primary DESC, asset.id ASC
+                 LIMIT 1",
+                [track_id],
+                |row| {
+                    Ok(RawTarget {
+                        asset_id: row.get(0)?,
+                        track_id: row.get(1)?,
+                        source_id: row.get(2)?,
+                        source_folder: row.get(3)?,
+                        path: row.get(4)?,
+                        format_name: row.get(5)?,
+                        size_bytes: row.get(6)?,
+                        duration_ms: row.get(7)?,
+                        sample_rate: row.get(8)?,
+                        bit_depth: row.get(9)?,
+                        bitrate_kbps: row.get(10)?,
+                        missing_since: row.get(11)?,
+                        byte_hash_raw: row.get(12)?,
+                        audio_hash_raw: row.get(13)?,
+                        fp_raw: row.get(14)?,
+                    })
+                },
+            )
+            .optional()?
+        else {
+            return Ok(None);
+        };
+
+        Ok(Some(StoredTrackRelinkTarget {
+            asset_id: row.asset_id,
+            track_id: row.track_id,
+            source_id: SourceId(row.source_id),
+            source_folder: row.source_folder,
+            path: row.path,
+            format: parse_format(row.format_name)?,
+            size_bytes: row.size_bytes,
+            duration_ms: row.duration_ms,
+            sample_rate: row.sample_rate,
+            bit_depth: row.bit_depth,
+            bitrate_kbps: row.bitrate_kbps,
+            missing_since: row.missing_since,
+            byte_hash: parse_hash(row.byte_hash_raw, "asset.byte_hash")?,
+            audio_hash: parse_hash(row.audio_hash_raw, "asset.audio_hash")?,
+            chromaprint_raw: row
+                .fp_raw
+                .and_then(|bytes| Chromaprint::raw_from_le_bytes(&bytes)),
+        }))
+    }
+
+    /// Fetches included present assets across all sources that could match `target` by `byte_hash`,
+    /// `audio_hash`, or Chromaprint within `±RELINK_MAX_DURATION_DELTA_MS`.
+    pub fn candidate_assets_for_relink(
+        &self,
+        target: &StoredTrackRelinkTarget,
+    ) -> Result<Vec<StoredRelinkCandidate>, DbError> {
+        if target.byte_hash.is_none()
+            && target.audio_hash.is_none()
+            && target.chromaprint_raw.is_none()
+        {
+            return Ok(Vec::new());
+        }
+
+        let byte_hash = target.byte_hash.as_ref().map(|h| h.as_bytes().as_slice());
+        let audio_hash = target.audio_hash.as_ref().map(|h| h.as_bytes().as_slice());
+        let has_fp = i64::from(target.chromaprint_raw.is_some());
+        let dur_min = target
+            .duration_ms
+            .map(|ms| ms.saturating_sub(RELINK_MAX_DURATION_DELTA_MS));
+        let dur_max = target
+            .duration_ms
+            .map(|ms| ms.saturating_add(RELINK_MAX_DURATION_DELTA_MS));
+
+        struct RawCand {
+            asset_id: i64,
+            track_id: i64,
+            source_id: i64,
+            source_folder: String,
+            path: String,
+            format_name: String,
+            size_bytes: u64,
+            duration_ms: Option<u64>,
+            sample_rate: Option<u32>,
+            bit_depth: Option<u8>,
+            bitrate_kbps: Option<u32>,
+            byte_hash_raw: Option<Vec<u8>>,
+            audio_hash_raw: Option<Vec<u8>>,
+            fp_raw: Option<Vec<u8>>,
+        }
+
+        let mut stmt = self.connection.prepare(
+            "SELECT asset.id, asset.track_id, asset.source_id, source.folder, asset.path,
+                    asset.format, asset.size_bytes, asset.duration_ms, asset.sample_rate,
+                    asset.bit_depth, asset.bitrate_kbps, asset.byte_hash, asset.audio_hash,
+                    asset.fingerprint_raw
+             FROM asset
+             JOIN source ON source.id = asset.source_id
+             WHERE asset.included = 1
+               AND asset.missing_since IS NULL
+               AND asset.id != ?1
+               AND (
+                   (?2 IS NOT NULL AND asset.byte_hash = ?2)
+                   OR (?3 IS NOT NULL AND asset.audio_hash = ?3)
+                   OR (
+                       ?4 = 1
+                       AND asset.fingerprint_raw IS NOT NULL
+                       AND (?5 IS NULL OR asset.duration_ms IS NULL OR asset.duration_ms BETWEEN ?5 AND ?6)
+                   )
+                   OR (
+                       asset.byte_hash IS NULL
+                       AND (?5 IS NULL OR asset.duration_ms IS NULL OR asset.duration_ms BETWEEN ?5 AND ?6)
+                   )
+               )
+             ORDER BY asset.id",
+        )?;
+
+        let raw_rows = stmt
+            .query_map(
+                params![
+                    target.asset_id,
+                    byte_hash,
+                    audio_hash,
+                    has_fp,
+                    dur_min,
+                    dur_max
+                ],
+                |row| {
+                    Ok(RawCand {
+                        asset_id: row.get(0)?,
+                        track_id: row.get(1)?,
+                        source_id: row.get(2)?,
+                        source_folder: row.get(3)?,
+                        path: row.get(4)?,
+                        format_name: row.get(5)?,
+                        size_bytes: row.get(6)?,
+                        duration_ms: row.get(7)?,
+                        sample_rate: row.get(8)?,
+                        bit_depth: row.get(9)?,
+                        bitrate_kbps: row.get(10)?,
+                        byte_hash_raw: row.get(11)?,
+                        audio_hash_raw: row.get(12)?,
+                        fp_raw: row.get(13)?,
+                    })
+                },
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        raw_rows
+            .into_iter()
+            .map(|row| {
+                Ok(StoredRelinkCandidate {
+                    asset_id: row.asset_id,
+                    track_id: row.track_id,
+                    source_id: SourceId(row.source_id),
+                    source_folder: row.source_folder,
+                    path: row.path,
+                    format: parse_format(row.format_name)?,
+                    size_bytes: row.size_bytes,
+                    duration_ms: row.duration_ms,
+                    sample_rate: row.sample_rate,
+                    bit_depth: row.bit_depth,
+                    bitrate_kbps: row.bitrate_kbps,
+                    byte_hash: parse_hash(row.byte_hash_raw, "asset.byte_hash")?,
+                    audio_hash: parse_hash(row.audio_hash_raw, "asset.audio_hash")?,
+                    chromaprint_raw: row
+                        .fp_raw
+                        .and_then(|bytes| Chromaprint::raw_from_le_bytes(&bytes)),
+                })
+            })
+            .collect()
+    }
+
+    /// Returns the `track_id` currently occupying `(source, path)`, if any.
+    pub fn track_id_at_source_path(
+        &self,
+        source: SourceId,
+        path: &str,
+    ) -> Result<Option<i64>, DbError> {
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT track_id FROM asset WHERE source_id = ?1 AND path = ?2",
+                params![source.0, path],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// Repoints `track_id`'s primary asset to `(target_source, file.path)` with freshly computed
+    /// `identity`, merging and deleting any duplicate `asset`/`track` row at that path while
+    /// keeping `track_id`, `favourite` and `collection_item` memberships intact.
+    pub fn apply_track_relink(
+        &mut self,
+        track_id: i64,
+        target_source: SourceId,
+        file: &ScannedFile,
+        identity: &AssetIdentity,
+    ) -> Result<bool, DbError> {
+        let tx = self.connection.transaction()?;
+        let Some(original_asset_id): Option<i64> = tx
+            .query_row(
+                "SELECT id FROM asset
+                 WHERE track_id = ?1 AND included = 1
+                 ORDER BY is_primary DESC, asset.id ASC
+                 LIMIT 1",
+                [track_id],
+                |row| row.get(0),
+            )
+            .optional()?
+        else {
+            return Ok(false);
+        };
+
+        let existing_tags: Vec<(TagField, String)> = {
+            let mut stmt = tx.prepare("SELECT field, value FROM file_tag WHERE asset_id = ?1")?;
+            let raw = stmt
+                .query_map([original_asset_id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            raw.into_iter()
+                .map(|(field, value)| Ok((tag_field(field)?, value)))
+                .collect::<Result<Vec<_>, DbError>>()?
+        };
+
+        let collision: Option<(i64, i64)> = tx
+            .query_row(
+                "SELECT id, track_id FROM asset WHERE source_id = ?1 AND path = ?2",
+                params![target_source.0, file.path],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+
+        if let Some((dup_asset_id, dup_track_id)) = collision
+            && dup_asset_id != original_asset_id
+        {
+            if dup_track_id != track_id {
+                tx.execute(
+                    "UPDATE track
+                     SET favourite = CASE
+                         WHEN favourite = 1 OR COALESCE((SELECT favourite FROM track WHERE id = ?2), 0) = 1
+                         THEN 1 ELSE 0
+                     END
+                     WHERE id = ?1",
+                    params![track_id, dup_track_id],
+                )?;
+                tx.execute(
+                    "INSERT OR IGNORE INTO collection_item (collection_id, track_id, position, added_ns)
+                     SELECT collection_id, ?1, position, added_ns
+                     FROM collection_item
+                     WHERE track_id = ?2",
+                    params![track_id, dup_track_id],
+                )?;
+            }
+            tx.execute("DELETE FROM asset_fts WHERE rowid = ?1", [dup_asset_id])?;
+            tx.execute("DELETE FROM asset WHERE id = ?1", [dup_asset_id])?;
+            if dup_track_id != track_id {
+                let remaining: i64 = tx.query_row(
+                    "SELECT count(*) FROM asset WHERE track_id = ?1",
+                    [dup_track_id],
+                    |row| row.get(0),
+                )?;
+                if remaining == 0 {
+                    tx.execute("DELETE FROM track WHERE id = ?1", [dup_track_id])?;
+                }
+            }
+        }
+
+        let mut merged_tags = file.tags.clone();
+        for (field, value) in existing_tags {
+            if !merged_tags.iter().any(|(existing, _)| *existing == field) {
+                merged_tags.push((field, value));
+            }
+        }
+
+        let duration_ms = file
+            .audio
+            .map(|a| a.duration_ms)
+            .or_else(|| identity.decoded_facts.map(|f| f.duration_ms()));
+        let sample_rate = file
+            .audio
+            .and_then(|a| a.sample_rate)
+            .or_else(|| identity.decoded_facts.map(|f| f.sample_rate));
+        let channels = file.audio.and_then(|a| a.channels).or_else(|| {
+            identity
+                .decoded_facts
+                .and_then(|f| u8::try_from(f.channels).ok())
+        });
+        let bit_depth = file.audio.and_then(|a| a.bit_depth);
+        let bitrate_kbps = file.audio.and_then(|a| a.bitrate_kbps).or_else(|| {
+            identity
+                .decoded_facts
+                .and_then(|f| f.effective_bitrate_kbps(file.size_bytes))
+        });
+
+        let audio_bytes = identity
+            .audio
+            .as_ref()
+            .map(|a| a.hash.as_bytes().as_slice());
+        let audio_decoder = identity.audio.as_ref().map(|a| a.decoder.as_str());
+        let fp_encoded = identity.chromaprint.as_ref().map(|fp| fp.encoded.as_str());
+        let fp_raw = identity.chromaprint.as_ref().map(Chromaprint::raw_le_bytes);
+        let fp_duration = identity.chromaprint.as_ref().map(|fp| fp.duration_s);
+
+        tx.execute(
+            "UPDATE asset
+             SET source_id = ?2,
+                 path = ?3,
+                 size_bytes = ?4,
+                 modified_ns = ?5,
+                 format = ?6,
+                 duration_ms = ?7,
+                 sample_rate = ?8,
+                 channels = ?9,
+                 bit_depth = ?10,
+                 bitrate_kbps = ?11,
+                 included = 1,
+                 missing_since = NULL,
+                 byte_hash = ?12,
+                 audio_hash = ?13,
+                 audio_decoder = ?14,
+                 fingerprint = ?15,
+                 fingerprint_raw = ?16,
+                 fingerprint_duration_s = ?17,
+                 identity_size_bytes = ?4,
+                 identity_modified_ns = ?5
+             WHERE id = ?1",
+            params![
+                original_asset_id,
+                target_source.0,
+                file.path,
+                file.size_bytes,
+                file.modified_ns,
+                file.format.name(),
+                duration_ms,
+                sample_rate,
+                channels,
+                bit_depth,
+                bitrate_kbps,
+                identity.byte_hash.as_bytes().as_slice(),
+                audio_bytes,
+                audio_decoder,
+                fp_encoded,
+                fp_raw.as_deref(),
+                fp_duration,
+            ],
+        )?;
+
+        tx.execute(
+            "DELETE FROM file_tag WHERE asset_id = ?1",
+            [original_asset_id],
+        )?;
+        for (field, value) in &merged_tags {
+            tx.execute(
+                "INSERT INTO file_tag (asset_id, field, value) VALUES (?1, ?2, ?3)",
+                params![original_asset_id, field.name(), value],
+            )?;
+        }
+        search::sync_asset_metadata_in_tx(&tx, original_asset_id, &file.path, &merged_tags, true)?;
+
+        tx.commit()?;
+        Ok(true)
+    }
 }
 
 pub(crate) fn record_moved_in_tx(
@@ -618,6 +1056,7 @@ pub(crate) fn record_moved_in_tx(
                  bit_depth = ?10,
                  bitrate_kbps = ?11,
                  included = ?12,
+                 missing_since = NULL,
                  byte_hash = ?13,
                  audio_hash = ?14,
                  audio_decoder = ?15,
@@ -662,6 +1101,7 @@ pub(crate) fn record_moved_in_tx(
                  bit_depth = ?10,
                  bitrate_kbps = ?11,
                  included = ?12,
+                 missing_since = NULL,
                  identity_size_bytes = ?4,
                  identity_modified_ns = ?5
              WHERE id = ?1",

@@ -4,6 +4,7 @@ pub mod data_folder;
 pub mod error;
 mod identity;
 pub mod mix_frame;
+mod relink;
 pub mod serve;
 mod sources;
 
@@ -93,8 +94,9 @@ impl Api {
                 .clone();
             let changed = {
                 let mut library = core.library.lock().unwrap_or_else(PoisonError::into_inner);
-                resonance_library::scan::scan(&mut library, folder, &own_files)
-                    .is_ok_and(|report| report.added > 0 || report.changed > 0)
+                resonance_library::scan::scan(&mut library, folder, &own_files).is_ok_and(
+                    |report| report.added > 0 || report.changed > 0 || report.missing_changed > 0,
+                )
             };
             if changed {
                 core.watch_revisions.send_modify(|revision| *revision += 1);
@@ -271,6 +273,27 @@ impl Api {
             Request::PreviewStatus => Ok(Response::PreviewStatus(
                 self.preview_state(self.mix.preview_status()),
             )),
+            Request::RelinkCandidates {
+                track_id,
+                search_folder,
+            } => self
+                .relink_candidates(track_id, search_folder.as_deref())
+                .map(Response::RelinkCandidates),
+            Request::PreviewRelink {
+                track_id,
+                candidate_path,
+            } => self
+                .preview_relink(track_id, &candidate_path)
+                .map(Box::new)
+                .map(Response::PreviewRelink),
+            Request::ApplyRelink {
+                track_id,
+                candidate_path,
+                force,
+            } => self
+                .apply_relink(track_id, &candidate_path, force)
+                .map(Box::new)
+                .map(Response::ApplyRelink),
         }
     }
 
@@ -348,6 +371,7 @@ impl Api {
             bpm_max: facets.bpm_max,
             year_min: facets.year_min,
             year_max: facets.year_max,
+            missing_count: facets.missing_count,
         })
     }
 
@@ -538,6 +562,7 @@ fn core_track_query(query: Option<TrackQuery>) -> CoreTrackQuery {
             })
             .collect(),
         collection_id: query.collection_id,
+        missing_only: query.missing_only.unwrap_or(false),
         sort: match query.sort.unwrap_or_default() {
             TrackSortField::Index => CoreTrackSortField::Index,
             TrackSortField::Title => CoreTrackSortField::Title,
@@ -554,7 +579,7 @@ fn core_track_query(query: Option<TrackQuery>) -> CoreTrackQuery {
     }
 }
 
-fn library_track(row: &TrackRow) -> LibraryTrack {
+pub(crate) fn library_track(row: &TrackRow) -> LibraryTrack {
     let file = &row.file;
     let tag = |field| file.tag(field).map(str::to_owned);
     LibraryTrack {
@@ -596,6 +621,7 @@ fn library_track(row: &TrackRow) -> LibraryTrack {
                 name: collection.name.clone(),
             })
             .collect(),
+        missing_since: row.missing_since,
     }
 }
 
@@ -992,5 +1018,104 @@ mod tests {
         };
         assert_eq!(loaded.track_id, Some(track.id));
         assert!(loaded.playing);
+    }
+
+    #[test]
+    fn relink_commands_surface_missing_tracks_rank_candidates_and_enforce_force_on_mismatch() {
+        use command::RelinkMatchEvidence;
+        use resonance_fixtures::signal::Signal;
+
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/test-tmp/api-missing-relink");
+        let _ = std::fs::remove_dir_all(&root);
+        let source_dir = root.join("Club");
+        let outside_dir = root.join("Outside");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::create_dir_all(&outside_dir).unwrap();
+
+        let orig = source_dir.join("anthem.wav");
+        let moved_transcode = outside_dir.join("anthem.aiff");
+        let different = outside_dir.join("other.wav");
+        let tone_a = Signal::tone(220.0, 4.0, -6.0, 44_100);
+        let tone_b = Signal::tone(523.25, 9.0, -6.0, 44_100);
+        tone_a.write_wav(&orig).unwrap();
+        tone_a.write_aiff(&moved_transcode).unwrap();
+        tone_b.write_wav(&different).unwrap();
+
+        let api = Api::new_silent(Database::open_in_memory().unwrap());
+        api.handle(Request::Scan {
+            folder: source_dir.to_string_lossy().into_owned(),
+        })
+        .unwrap();
+        api.handle(Request::Identify).unwrap();
+        let initial = page(&api, 0, 10).tracks.into_iter().next().unwrap();
+        assert_eq!(initial.missing_since, None);
+
+        std::fs::remove_file(&orig).unwrap();
+        api.handle(Request::Scan {
+            folder: source_dir.to_string_lossy().into_owned(),
+        })
+        .unwrap();
+
+        let Response::Tracks(missing_page) = api
+            .handle(Request::Tracks {
+                offset: 0,
+                limit: 10,
+                query: Some(TrackQuery {
+                    missing_only: Some(true),
+                    ..TrackQuery::default()
+                }),
+            })
+            .unwrap()
+        else {
+            panic!("expected Tracks");
+        };
+        assert_eq!(missing_page.total, 1);
+        assert!(missing_page.tracks[0].missing_since.is_some());
+
+        let Response::RelinkCandidates(candidates) = api
+            .handle(Request::RelinkCandidates {
+                track_id: initial.id,
+                search_folder: Some(outside_dir.to_string_lossy().into_owned()),
+            })
+            .unwrap()
+        else {
+            panic!("expected RelinkCandidates");
+        };
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].evidence, RelinkMatchEvidence::ExactAudio);
+
+        let Response::PreviewRelink(bad_preview) = api
+            .handle(Request::PreviewRelink {
+                track_id: initial.id,
+                candidate_path: different.to_string_lossy().into_owned(),
+            })
+            .unwrap()
+        else {
+            panic!("expected PreviewRelink");
+        };
+        assert!(bad_preview.requires_confirmation);
+        assert!(
+            api.handle(Request::ApplyRelink {
+                track_id: initial.id,
+                candidate_path: different.to_string_lossy().into_owned(),
+                force: false,
+            })
+            .is_err()
+        );
+
+        let Response::ApplyRelink(relinked) = api
+            .handle(Request::ApplyRelink {
+                track_id: initial.id,
+                candidate_path: moved_transcode.to_string_lossy().into_owned(),
+                force: false,
+            })
+            .unwrap()
+        else {
+            panic!("expected ApplyRelink");
+        };
+        assert_eq!(relinked.id, initial.id);
+        assert_eq!(relinked.missing_since, None);
+        assert_eq!(relinked.format, "aiff");
     }
 }

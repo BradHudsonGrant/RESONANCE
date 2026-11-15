@@ -20,6 +20,7 @@
     activeCollection?: LibraryCollection | null;
     onclose: () => void;
     onpreview?: (track: LibraryTrack) => void;
+    onrelink?: (track: LibraryTrack) => void;
     ontogglefavourite?: (track: LibraryTrack) => void;
     onaddtocollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
     onremovefromcollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
@@ -35,13 +36,15 @@
     activeCollection = null,
     onclose,
     onpreview,
+    onrelink,
     ontogglefavourite,
     onaddtocollection,
     onremovefromcollection,
     oncreatecollectionandadd,
   }: Props = $props();
 
-  const isPreviewTrack = $derived(Boolean(track && previewTrackId === track.id));
+  const isMissing = $derived(Boolean(track && track.missing_since != null));
+  const isPreviewTrack = $derived(Boolean(track && previewTrackId === track.id && !isMissing));
   const isPreviewPlaying = $derived(isPreviewTrack && previewPlaying);
 
   let menuOpen = $state(false);
@@ -98,13 +101,21 @@
           <div class="hero-top">
             <h2 class="title">{track.title}</h2>
             <div class="tools">
-              <Tooltip text={isPreviewPlaying ? 'Pause preview' : 'Play preview'} side="left">
+              <Tooltip
+                text={isMissing
+                  ? 'File is missing — relink to play'
+                  : isPreviewPlaying
+                    ? 'Pause preview'
+                    : 'Play preview'}
+                side="left"
+              >
                 <Button
                   variant="icon"
                   active={isPreviewTrack}
+                  disabled={isMissing}
                   aria-label={isPreviewPlaying ? `Pause ${track.title}` : `Play ${track.title}`}
                   aria-pressed={isPreviewPlaying}
-                  onclick={() => track && onpreview?.(track)}
+                  onclick={() => track && !isMissing && onpreview?.(track)}
                 >
                   <Icon name={isPreviewPlaying ? 'pause' : 'play'} size="sm" filled />
                 </Button>
@@ -144,6 +155,27 @@
           <p class="format numeric">{audioSummary(track.format, track.audio)}</p>
         </div>
       </div>
+
+      {#if isMissing}
+        <div class="missing-banner" role="status">
+          <div class="missing-copy">
+            <div class="missing-head">
+              <Icon name="missing" size="sm" />
+              <span class="missing-title">Missing file</span>
+            </div>
+            <p class="missing-note">
+              This track stays in your library and collections, but the file is no longer at its
+              recorded path.
+            </p>
+          </div>
+          {#if onrelink}
+            <Button size="sm" variant="primary" onclick={() => track && onrelink(track)}>
+              <Icon name="relink" size="xs" />
+              Relink…
+            </Button>
+          {/if}
+        </div>
+      {/if}
 
       {#if !track.audio}
         <p class="warning">
@@ -275,6 +307,7 @@
   {activeCollection}
   showFavourite={menuShowFavourite}
   onToggleFavourite={ontogglefavourite}
+  onRelink={onrelink}
   onAdd={onaddtocollection}
   onRemove={onremovefromcollection}
   onCreateAndAdd={oncreatecollectionandadd}
@@ -374,6 +407,47 @@
     margin: 0;
     color: var(--color-text-2);
     font-size: var(--text-sm);
+  }
+
+  .missing-banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    border: var(--border-width) solid var(--color-border-control);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-2);
+  }
+
+  .missing-copy {
+    display: grid;
+    flex: 1 1 12rem;
+    gap: var(--space-1);
+    min-width: 0;
+  }
+
+  .missing-head {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+  }
+
+  .missing-note {
+    margin: 0;
+    color: var(--color-text-2);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+  }
+
+  @media (forced-colors: active) {
+    .missing-banner {
+      border-color: CanvasText;
+    }
   }
 
   .details,

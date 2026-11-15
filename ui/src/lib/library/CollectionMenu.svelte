@@ -15,6 +15,7 @@
     activeCollection?: LibraryCollection | null;
     showFavourite?: boolean;
     onToggleFavourite?: (track: LibraryTrack) => void;
+    onRelink?: (track: LibraryTrack) => void;
     onAdd?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
     onRemove?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
     onCreateAndAdd?: (name: string, trackIds: number[]) => Promise<void> | void;
@@ -30,6 +31,7 @@
     activeCollection = null,
     showFavourite = false,
     onToggleFavourite,
+    onRelink,
     onAdd,
     onRemove,
     onCreateAndAdd,
@@ -248,6 +250,21 @@
     style:top="{pos.top}px"
     style:left="{pos.left}px"
   >
+    {#if singleTrack && singleTrack.missing_since != null && onRelink}
+      <button
+        type="button"
+        class="item"
+        role="menuitem"
+        onclick={() => {
+          onRelink(singleTrack);
+          onClose();
+        }}
+      >
+        <Icon name="relink" size="xs" />
+        <span class="item-label">Relink missing file…</span>
+      </button>
+    {/if}
+
     {#if showFavourite && singleTrack && onToggleFavourite}
       <button
         type="button"
@@ -272,7 +289,7 @@
       </button>
     {/if}
 
-    {#if (showFavourite && singleTrack && onToggleFavourite) || (canRemoveActive && activeCollection)}
+    {#if (singleTrack && singleTrack.missing_since != null && onRelink) || (showFavourite && singleTrack && onToggleFavourite) || (canRemoveActive && activeCollection)}
       <div class="sep" role="separator"></div>
     {/if}
 
