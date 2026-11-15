@@ -118,6 +118,8 @@ Where to start, with what was checked on 12 November 2026:
 
 Evaluate on the real library and on public datasets. Don't claim accuracy without numbers, and record the hardware with every benchmark.
 
+Bar-synchronous feature storage, continuous tuning maths, phrase compatibility and pairwise preference learning are set out in [transition-analysis.md](transition-analysis.md).
+
 ## Dependencies and licences
 
 Only permissive licences in the dependency tree: MIT, Apache-2.0, BSD, ISC, Zlib, MPL-2.0. No GPL or AGPL linking. That keeps both doors open: the source can be opened later, or the app sold. Enforce it with `cargo-deny` in CI.
