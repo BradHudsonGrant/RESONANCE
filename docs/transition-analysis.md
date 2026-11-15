@@ -19,8 +19,20 @@ Five traps in the initial milestone notes need addressing as M2 to M6 are built:
 | Phrases (M5) | `allin1` (`mir-aidj/all-in-one`) takes four-stem HTDemucs spectrograms (`[4, steps, 24]`), relies on custom NATTEN C++/CUDA kernels that resist plain ONNX export, and outputs pop labels (`verse`, `chorus`, `bridge`). Running it in Tier 2 would force Tier 3 stem separation on every track. | Keep `allin1` in `tools/models/` as an offline Python benchmark only. In Tier 2, segment over bar-synchronous harmonic, percussive and sub-band features with dance labels (`intro`, `buildup`, `drop`, `breakdown`, `cooldown`, `outro`). |
 | Embeddings (M6) | CLAP and MERT cosine similarity do not predict blend compatibility, and CLAP checkpoints vary in licence even though the code is MIT/CC0. | Use CLAP in M6 for symmetric vibe and text search ("similar to this"), and verify the chosen checkpoint's commercial licence in the model registry (for example `music_audioset_epoch_15_esc_90.14.pt` under MIT, or an Apache-2.0 encoder such as `dasheng`). Rank "what mixes next" with asymmetric phrase-window scoring. |
 | Vocal activity (M5) | [product.md](product.md) puts vocal activity in Tier 2 for the coach and set builder, while [architecture.md](architecture.md) assigns no algorithm to it. Waiting for Tier 3 vocal stems would leave un-stemmed tracks without vocal clash checks. | Add a Tier 2 vocal presence detector on the harmonic mid-channel (`M = L + R`, 250 Hz to 4 kHz) using pitch-stability and vibrato features or a small mel CNN. |
-| Decode offset (M2, M4) | Lossy decoders (MP3, AAC, Symphonia vs FFmpeg) strip encoder delay and end padding differently. A few milliseconds of padding drift breaks M4's acceptance check (alignment within 1 ms, carried-over cues within 5 ms). | Strip gapless encoder delay and padding canonically at decode time before BLAKE3 audio hashing and Beat This! grid extraction. In M4 Replace, refine `offset_samples` by cross-correlating decoded onset envelopes rather than trusting container headers alone. |
+| Decode offset (M2, M4) | Lossy decoders (MP3, AAC, Symphonia vs FFmpeg) strip encoder delay and end padding differently. A few milliseconds of padding drift breaks M4's acceptance check (alignment within 1 ms, carried-over cues within 5 ms). | Strip gapless encoder delay and padding canonically at decode time (`gapless: true`, `verify: true` in Symphonia `0.6.1`) before BLAKE3 audio hashing and Beat This! grid extraction. In M4 Replace, refine `offset_samples` by cross-correlating decoded onset envelopes rather than trusting container headers alone. |
 | Global key and BPM (M6–M10) | Global key penalises percussive outros that have no pitched content, misses modulations and non-440 Hz masters, and ignores pitch shift when keylock is off. Global BPM misses swing and syncopation clashes. | Score transitions over bar-synchronous feature windows in `core` and `metrics`. |
+
+## Shared decode pass and front-end parameters
+
+Once M4 and M5 land alongside M2's identity worker, a newly imported file decodes once on a background worker thread and feeds every CPU consumer in a single streaming pass:
+
+- full-scale `i32` little-endian BLAKE3 `audio_hash` and stream verification (`DecodedAudioFacts`: sample rate, channel count, exact frame count, packet decode errors and container checksum status);
+- 120-second `i16` Chromaprint (`Configuration::preset_test2()`);
+- integrated loudness, loudness range and 4x-oversampled true peak (`ebur128`), plus clipping, dropout and high-frequency spectral-cutoff checks for lossy transcodes dressed up as lossless;
+- multi-resolution three-band waveform peaks (`< 150 Hz`, `150 Hz–2.5 kHz`, `> 2.5 kHz`) for inline, dock and deck rendering;
+- a mono `44.1 kHz` STFT (`2,048`-sample Hann window, `512`-sample hop, `86.13` frames/s) split by Fitzgerald's 1D median filter (`17` frames in time for `H`, `17` bins in frequency for `P`) alongside the `Beat This!` log-mel spectrogram (`50` frames/s).
+
+Files scanned during M2 already carry `audio_hash` in SQLite (`0003_identity.sql`). Because `analysis_run` keys every result by `(audio_hash, analyser, version, param_hash)`, later milestones populate missing tables without re-running identity or touching user edits.
 
 ## Bar-synchronous feature matrix
 
