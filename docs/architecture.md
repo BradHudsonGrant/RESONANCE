@@ -150,7 +150,7 @@ These are requirements. Measure them on the development laptop in M0, record the
 | What | Budget |
 | --- | --- |
 | Cold start to a usable library | Under 1.5 s |
-| Library table, 100,000 rows, fast scroll | Holds the display's refresh rate, no frame over 16 ms |
+| Library table, 100,000 rows, fast scroll | Median frame at the display's refresh rate, no frame over 16 ms |
 | Mix view: two scrolling waveforms, meters, coach strip | Holds the display's refresh rate; at 120 Hz the 99th-percentile frame is under 8 ms |
 | Text search | Under 50 ms |
 | UI thread | Never blocked for more than 16 ms |
