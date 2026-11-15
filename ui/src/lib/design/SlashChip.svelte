@@ -38,7 +38,7 @@
   .slash-chip {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-2-5);
+    gap: var(--space-2);
     padding: 0;
     border: 0;
     border-radius: var(--radius-sm);

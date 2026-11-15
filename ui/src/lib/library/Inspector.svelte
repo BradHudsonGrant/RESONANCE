@@ -9,10 +9,11 @@
 
   interface Props {
     track: LibraryTrack | undefined;
+    inSheet?: boolean;
     onclose: () => void;
   }
 
-  let { track, onclose }: Props = $props();
+  let { track, inSheet = false, onclose }: Props = $props();
 
   interface Field {
     label: string;
@@ -60,7 +61,7 @@
   }
 </script>
 
-<aside class="inspector" aria-label="Inspector">
+<aside class={['inspector', { 'in-sheet': inSheet }]} aria-label="Inspector">
   <div class="close">
     <Tooltip text="Hide the inspector" shortcut="I" side="left">
       <Button variant="icon" aria-label="Hide the inspector" onclick={onclose}>
@@ -101,6 +102,24 @@
     min-height: 0;
     border-left: var(--border-width) solid var(--color-border);
     background: var(--color-surface);
+  }
+
+  .inspector.in-sheet {
+    border-left: 0;
+    background: transparent;
+  }
+
+  .inspector.in-sheet .close {
+    top: 0;
+    right: 0;
+  }
+
+  .inspector.in-sheet .body {
+    padding: 0;
+  }
+
+  .inspector.in-sheet .empty {
+    padding: 0 var(--control-height-md) 0 0;
   }
 
   .close {

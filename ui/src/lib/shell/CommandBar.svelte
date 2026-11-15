@@ -233,7 +233,7 @@
   .chips {
     display: flex;
     flex-wrap: wrap;
-    column-gap: var(--space-6);
+    column-gap: var(--space-3);
     min-width: 0;
     height: var(--control-height-xs);
     overflow: hidden;

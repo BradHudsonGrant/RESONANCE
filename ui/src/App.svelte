@@ -186,7 +186,7 @@
 
 {#if sheetOpen && space === 'Library'}
   <Sheet bind:open={sheetOpen} variant="drawer" title="Inspector">
-    <Inspector {track} onclose={() => (sheetOpen = false)} />
+    <Inspector {track} inSheet onclose={() => (sheetOpen = false)} />
   </Sheet>
 {/if}
 
