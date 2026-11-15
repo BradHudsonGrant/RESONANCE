@@ -62,3 +62,11 @@ Cold-start launches to the first filled rows of 100,000 tracks, plus idle memory
 ### Conclusion
 
 Cold start (**0.42 s** at the longest of five launches, under `1.5 s`), idle memory (**130 MB**, under `400 MB`), the wave (**0.2 ms**, under `1 ms`) and post-startup UI-thread tasks (**11.1 ms**, under `16 ms`) all meet their budgets, and splitting startup cut the M1 main-thread stall from **126.2–151.9 ms** to **27.3–29.5 ms**, so the change is kept. A detailed trace on the updated build (`29.2 ms` longest task) shows three startup tasks still over `16 ms`: Blink's first `BeginMainFrame` pass (**29.2 ms**, with `5.2 ms` initial style and `17.7 ms` initial layout across 323 layout objects), WebView2's warm `canvas.getContext('webgl2')` setup (**26.5 ms**), and `mount(App)` (**18.2 ms**). The startup UI-thread budget remains open in [#55](https://github.com/BradHudsonGrant/RESONANCE/issues/55) for M2, pointing at moving `WaveRenderer` to an `OffscreenCanvas` worker and mounting secondary shell regions after the first paint.
+
+## 15 November 2026, v0.2.0 release installer
+
+`Resonance_0.2.0_x64-setup.exe` (3.78 MiB, `sha256:f67e9bfd2e9bb2baf6c84d16a4f2f7efe2ecf167bbd31afc2b77ff0520cb33d9`) was downloaded from the published [`v0.2.0` pre-release](https://github.com/BradHudsonGrant/RESONANCE/releases/tag/v0.2.0) and installed in current-user mode at `%LOCALAPPDATA%\Resonance\resonance-app.exe` (13.46 MiB).
+
+- Launched against a fresh data folder, the window showed the empty library state (`No tracks yet`).
+- Scanning `D:\Music\RESONANCE\fixtures-local` through the scan form reported `50 files: 50 added, 0 changed, 0 unchanged.` and filled the track grid with all 50 tracks (`50 tracks`, `aria-rowcount=51`).
+- Closing and reopening the installed app kept all 50 tracks in the grid (`aria-rowcount=51`).
