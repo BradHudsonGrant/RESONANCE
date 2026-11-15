@@ -155,25 +155,23 @@ This run had 71 missed frames out of 6,000 and one interval over 16 ms. The buff
 
 None of the three changes measured better than the baseline, so the table keeps the code it had. The trace puts the remaining long intervals in the compositor rather than the page. The budget stays open in [#40](https://github.com/BradHudsonGrant/RESONANCE/issues/40), which starts by measuring a stationary table to see whether idle frames miss too.
 
-## 14 November 2026, Milestone M1 re-measurement
+## 14 November 2026, M1 shell in the native release app
 
-Machine: ROG Zephyrus G16, Core Ultra 9 285H, 64 GB RAM, Windows 11 Pro. The page ran in Microsoft Edge with the App Shell layout (4-row by 3-column CSS Grid), viewport set to 1920 by 1080, against a 100,000-track synthetic library served by the dev core (`target/debug/resonance.exe`). The display refresh interval was 16.7 ms (60 Hz).
-
-Five runs straight after loading the page. Each pass is 600 frames.
+Machine: the same ROG Zephyrus G16 on mains power, RTX 5090 Laptop GPU, WebView2 157.0.4341.46 at 1440 by 900 CSS pixels, device pixel ratio 1.25. The measured refresh interval was 4.2 ms (240 Hz). The run used the same release protocol above, inside the M1 shell grid (256 px sidebar, 382 px inspector, command bar, dock and player bar), with benchmark controls removed and DevTools closed.
 
 | Run | Pass | Median frame | 99th percentile | Longest frame | Missed frames | Frames with a loading row |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Fling | 16.7 ms | 17.3 ms | 17.3 ms | 0 | 0 |
-| 1 | Jumps | 16.7 ms | 17.2 ms | 17.3 ms | 0 | 546 |
-| 2 | Fling | 16.7 ms | 17.2 ms | 17.3 ms | 0 | 0 |
-| 2 | Jumps | 16.7 ms | 17.2 ms | 17.2 ms | 0 | 521 |
-| 3 | Fling | 16.7 ms | 17.2 ms | 17.4 ms | 0 | 0 |
-| 3 | Jumps | 16.8 ms | 18.2 ms | 655.3 ms | 1 | 533 |
-| 4 | Fling | 17.6 ms | 18.5 ms | 18.9 ms | 0 | 0 |
-| 4 | Jumps | 17.6 ms | 18.6 ms | 18.8 ms | 0 | 542 |
-| 5 | Fling | 16.7 ms | 17.1 ms | 50.0 ms | 1 | 0 |
-| 5 | Jumps | 16.7 ms | 17.2 ms | 17.6 ms | 0 | 535 |
+| 1 | Fling | 4.2 ms | 4.6 ms | 8.4 ms | 5 | 0 |
+| 1 | Jumps | 4.2 ms | 4.3 ms | 8.4 ms | 4 | 536 |
+| 2 | Fling | 4.2 ms | 8.3 ms | 8.5 ms | 7 | 0 |
+| 2 | Jumps | 4.2 ms | 8.4 ms | 8.5 ms | 11 | 540 |
+| 3 | Fling | 4.2 ms | 4.4 ms | 8.4 ms | 5 | 0 |
+| 3 | Jumps | 4.2 ms | 8.4 ms | 8.5 ms | 17 | 533 |
+| 4 | Fling | 4.2 ms | 8.4 ms | 8.5 ms | 13 | 0 |
+| 4 | Jumps | 4.2 ms | 8.3 ms | 8.5 ms | 9 | 534 |
+| 5 | Fling | 4.2 ms | 8.3 ms | 8.4 ms | 7 | 0 |
+| 5 | Jumps | 4.2 ms | 8.4 ms | 8.5 ms | 10 | 530 |
 
-Every rendered row was filled 32.9 to 322.3 ms after the last jump (80.8, 32.9, 51.0, 322.3 and 46.2 ms respectively).
+After the last jump, every rendered row was filled in 16.2, 16.0, 19.9, 12.1 and 15.8 ms respectively.
 
-Across 6,000 scrolling frames in the updated shell, 2 frames were missed (one 655.3 ms spike during Run 3 jumps and one 50.0 ms spike during Run 5 fling). Because the display refresh at the time of measurement was 60 Hz (16.7 ms frame interval), baseline frame duration tracks ~16.7 ms. The budget remains open in [#40](https://github.com/BradHudsonGrant/RESONANCE/issues/40).
+Across 6,000 scrolling frames, no frame exceeded 8.5 ms, well inside the 16 ms cap. 88 frames exceeded 1.5 display intervals (6.3 ms at 240 Hz) and landed on the next refresh, so the refresh-hold half of the budget stays open in [#40](https://github.com/BradHudsonGrant/RESONANCE/issues/40).

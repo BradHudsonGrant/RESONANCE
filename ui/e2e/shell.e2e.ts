@@ -43,29 +43,35 @@ const layouts = [
 ];
 
 for (const layout of layouts) {
-  test(`at ${layout.width} by ${layout.height} the shell keeps to the layout rules`, async ({
+  test(`at ${layout.width} by ${layout.height} the shell keeps to the layout rules in both themes`, async ({
     page,
   }) => {
     await open(page, layout.width, layout.height);
 
-    const sidebar = page.getByRole('navigation', { name: 'Spaces' });
-    const inspector = page.getByRole('complementary', { name: 'Inspector' });
-    expect(await width(sidebar)).toBe(layout.sidebar);
-    await expect(page.getByRole('button', { name: layout.dock })).toBeVisible();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
-    if (layout.inspector === null) await expect(inspector).toBeHidden();
-    else expect(await width(inspector)).toBe(layout.inspector);
+    for (const theme of ['dark', 'light'] as const) {
+      await page.evaluate((next) => {
+        document.documentElement.dataset.theme = next;
+      }, theme);
 
-    const search = await page.getByRole('combobox', { name: 'Commands' }).boundingBox();
-    const content = await page.getByRole('main').boundingBox();
-    expect(search && content && search.x + search.width <= content.x + content.width).toBe(true);
+      const sidebar = page.getByRole('navigation', { name: 'Spaces' });
+      const inspector = page.getByRole('complementary', { name: 'Inspector' });
+      expect(await width(sidebar)).toBe(layout.sidebar);
+      await expect(page.getByRole('button', { name: layout.dock })).toBeVisible();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      if (layout.inspector === null) await expect(inspector).toBeHidden();
+      else expect(await width(inspector)).toBe(layout.inspector);
 
-    const sideways = await page.evaluate(() =>
-      [document.documentElement, ...document.querySelectorAll('nav *')].filter(
-        (element) => element.scrollWidth > element.clientWidth + 1,
-      ),
-    );
-    expect(sideways).toHaveLength(0);
+      const search = await page.getByRole('combobox', { name: 'Commands' }).boundingBox();
+      const content = await page.getByRole('main').boundingBox();
+      expect(search && content && search.x + search.width <= content.x + content.width).toBe(true);
+
+      const sideways = await page.evaluate(() =>
+        [document.documentElement, ...document.querySelectorAll('nav *')].filter(
+          (element) => element.scrollWidth > element.clientWidth + 1,
+        ),
+      );
+      expect(sideways).toHaveLength(0);
+    }
   });
 }
 

@@ -41,7 +41,7 @@ Nothing in the page changes per frame. Playhead and meter data arrive over the b
 
 Each deck is `Deck variant="full"` in a card with 10 px corners, framed by focus brackets when it has the keyboard.
 
-- The header matches the dock card: a 35 by 34 letter badge, 60 px artwork, the title in 20 px Space Grotesk 600 and the artist in 14 px Text 2.
+- The header matches the dock card: a 34 px letter badge, 60 px artwork, the title in 20 px Space Grotesk 600 and the artist in 14 px Text 2.
 - Four 22 px mono pills: tempo with its pitch change (`128.0 BPM`, `+0.0%`), key (`8A · A min`), loudness (`-7.4 LUFS`, from M5) and time left over total time.
 - Play, Cue, Sync and Keylock buttons, 34 px tall. Play is inverted while playing. Under them, an overview scrub bar.
 - From M7, a three-band EQ, a filter, crossfader assignment and two level meters made of 2 px segments in Text 2 and Text, with only the clip light in the accent.
