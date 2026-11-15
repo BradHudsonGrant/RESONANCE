@@ -18,11 +18,12 @@ pub use sources::SourceConfig;
 
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
-const MIGRATIONS: [&str; 4] = [
+const MIGRATIONS: [&str; 5] = [
     include_str!("../migrations/0001_library.sql"),
     include_str!("../migrations/0002_sources.sql"),
     include_str!("../migrations/0003_identity.sql"),
     include_str!("../migrations/0004_search_and_sort.sql"),
+    include_str!("../migrations/0005_asset_fts_delete_trigger.sql"),
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -615,6 +616,56 @@ mod tests {
                 ..TrackQuery::default()
             })
             .expect("recent count runs"),
+            0
+        );
+    }
+
+    #[test]
+    fn migrating_from_v4_adds_asset_delete_fts_trigger() {
+        use resonance_core::search::TrackQuery;
+
+        let mut v4 = Connection::open_in_memory().expect("a database opens");
+        v4.pragma_update(None, "foreign_keys", true)
+            .expect("foreign keys enable");
+        for migration in &MIGRATIONS[..4] {
+            v4.execute_batch(migration).expect("prior migration runs");
+        }
+        v4.pragma_update(None, "user_version", 4u32)
+            .expect("version 4 stamps");
+
+        v4.execute("INSERT INTO source (folder) VALUES ('D:\\Club')", [])
+            .expect("source inserts");
+        v4.execute("INSERT INTO track DEFAULT VALUES", [])
+            .expect("track inserts");
+        v4.execute(
+            "INSERT INTO asset (track_id, source_id, path, size_bytes, modified_ns, format, sort_title)
+             VALUES (1, 1, '01/ghost_check.flac', 100, 1000, 'flac', 'ghost check')",
+            [],
+        )
+        .expect("asset inserts");
+        v4.execute(
+            "INSERT INTO asset_fts (rowid, title, artist, album, genre, label, path)
+             VALUES (1, 'Ghost Check', 'Bicep', '', '', '', '01/ghost_check.flac')",
+            [],
+        )
+        .expect("fts row inserts");
+
+        migrate(&mut v4).expect("v4 migrates to v5");
+        v4.execute("DELETE FROM asset WHERE id = 1", [])
+            .expect("asset deletes");
+
+        let fts_rows: i64 = v4
+            .query_row("SELECT count(*) FROM asset_fts", [], |row| row.get(0))
+            .expect("fts count reads");
+        assert_eq!(fts_rows, 0);
+
+        let db = Database { connection: v4 };
+        assert_eq!(
+            db.query_track_count(&TrackQuery {
+                text: Some("ghost".to_owned()),
+                ..TrackQuery::default()
+            })
+            .expect("fts query runs"),
             0
         );
     }

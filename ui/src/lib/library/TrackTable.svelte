@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
 
+  import Icon from '../design/Icon.svelte';
   import TableCell from '../design/TableCell.svelte';
   import TableRow from '../design/TableRow.svelte';
   import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
@@ -200,13 +201,9 @@
     onclick={() => cycleSort(field)}
   >
     {#if sortState !== 'none'}
-      <svg class="sort-arrow" viewBox="0 0 10 10" width="9" height="9" aria-hidden="true">
-        {#if sortState === 'ascending'}
-          <path d="M2 6.5 5 3.2 8 6.5" fill="none" stroke="currentColor" stroke-width="1.4" />
-        {:else}
-          <path d="M2 3.5 5 6.8 8 3.5" fill="none" stroke="currentColor" stroke-width="1.4" />
-        {/if}
-      </svg>
+      <span class="sort-arrow">
+        <Icon name={sortState === 'ascending' ? 'chevron-up' : 'chevron-down'} size={11} />
+      </span>
     {/if}
     <span>{label}</span>
   </button>
@@ -558,6 +555,7 @@
   }
 
   .sort-arrow {
+    display: inline-flex;
     flex: 0 0 auto;
   }
 

@@ -65,6 +65,10 @@ export class TrackPages {
   #centre = 0;
   // A reload starts a new generation, and a page that arrives for an older one is dropped.
   #generation = 0;
+  // Keeps at most one page-0 query switch on the wire, coalescing rapid typing without a timer.
+  #activeQueryLoop: symbol | null = null;
+  #queryQueued = false;
+  #queryWaiters: (() => void)[] = [];
 
   constructor(read: ReadPage) {
     this.#read = read;
@@ -87,6 +91,9 @@ export class TrackPages {
 
   async load() {
     this.#generation += 1;
+    this.#activeQueryLoop = null;
+    this.#queryQueued = false;
+    this.#settleQueryWaiters();
     this.selected = null;
     this.#pages.clear();
     this.#reading.clear();
@@ -98,7 +105,8 @@ export class TrackPages {
 
   /**
    * Switches search, filter or sort criteria while keeping existing rows visible until page 0 of
-   * the new query arrives, so rapid typing never blanks the table.
+   * the new query arrives, so rapid typing never blanks the table. Fires immediately when idle and
+   * coalesces newer queries into a single follow-up read while one is already in flight.
    */
   async setQuery(next: TrackQuery) {
     this.query = next;
@@ -110,7 +118,34 @@ export class TrackPages {
     this.#reading.clear();
     this.#waiting = [];
     this.#centre = 0;
-    await this.#readPage(0, true);
+    if (this.#activeQueryLoop !== null) {
+      this.#queryQueued = true;
+      return new Promise<void>((resolve) => {
+        this.#queryWaiters.push(resolve);
+      });
+    }
+    await this.#runQueryLoop();
+  }
+
+  async #runQueryLoop() {
+    const loop = Symbol();
+    this.#activeQueryLoop = loop;
+    try {
+      do {
+        this.#queryQueued = false;
+        await this.#readPage(0, true);
+      } while (this.#activeQueryLoop === loop && this.#queryQueued && this.state.kind === 'ready');
+    } finally {
+      if (this.#activeQueryLoop === loop) {
+        this.#activeQueryLoop = null;
+        this.#settleQueryWaiters();
+      }
+    }
+  }
+
+  #settleQueryWaiters() {
+    const waiters = this.#queryWaiters.splice(0);
+    for (const resolve of waiters) resolve();
   }
 
   /**
@@ -121,6 +156,15 @@ export class TrackPages {
     if (this.state.kind !== 'ready') {
       await this.load();
       return;
+    }
+    if (this.#activeQueryLoop !== null) {
+      this.#generation += 1;
+      this.#reading.clear();
+      this.#waiting = [];
+      this.#queryQueued = true;
+      return new Promise<void>((resolve) => {
+        this.#queryWaiters.push(resolve);
+      });
     }
     this.#generation += 1;
     this.#reading.clear();

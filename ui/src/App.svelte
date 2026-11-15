@@ -43,28 +43,16 @@
   let sourcesRevision = $state(0);
   let mixPlaying = $state(false);
   let searchText = $state('');
-  let searchTimer: ReturnType<typeof setTimeout> | undefined;
-
-  $effect(() => () => clearTimeout(searchTimer));
 
   function setSearch(text: string) {
     searchText = text;
-    clearTimeout(searchTimer);
     const nextText = text.trim() || null;
-    const apply = () => {
-      if ((pages.query.text ?? null) !== nextText) {
-        void pages.setQuery({ ...pages.query, text: nextText });
-      }
-    };
-    if (!nextText) {
-      apply();
-      return;
+    if ((pages.query.text ?? null) !== nextText) {
+      void pages.setQuery({ ...pages.query, text: nextText });
     }
-    searchTimer = setTimeout(apply, 60);
   }
 
   function clearSearch() {
-    clearTimeout(searchTimer);
     searchText = '';
   }
 
