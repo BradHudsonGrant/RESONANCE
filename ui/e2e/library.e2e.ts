@@ -45,9 +45,9 @@ test('a scanned folder fills the table, and a selected track fills the inspector
   await expect(inspector).toContainText('Garage');
 
   const filters = page.getByRole('toolbar', { name: 'Track filters' });
-  await filters.getByRole('button', { name: 'Analysed' }).click();
+  await filters.getByRole('button', { name: 'Analysed', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Analysed arrives in M5' })).toBeVisible();
-  await filters.getByRole('button', { name: 'Analysed' }).click();
+  await filters.getByRole('button', { name: 'Analysed', exact: true }).click();
   await expect(table).toBeVisible();
 
   await page.setViewportSize({ width: 1100, height: 700 });
