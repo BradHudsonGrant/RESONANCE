@@ -65,7 +65,9 @@ describe('TrackPages', () => {
       (offset, limit) =>
         new Promise((resolve) => {
           asked.push(offset);
-          answers.push(() => resolve({ total: 100_000, offset, tracks: [] }));
+          answers.push(() =>
+            resolve({ total: 100_000, library_total: 100_000, offset, tracks: [] }),
+          );
           if (offset === 0) answers.shift()?.();
           void limit;
         }),
@@ -165,6 +167,7 @@ describe('TrackPages', () => {
     const pages = new TrackPages((offset, limit) =>
       Promise.resolve({
         total: currentTotal,
+        library_total: currentTotal,
         offset,
         tracks: Array.from(
           { length: Math.max(0, Math.min(limit, currentTotal - offset)) },
@@ -188,5 +191,50 @@ describe('TrackPages', () => {
     expect(pages.total).toBe(3);
     expect(pages.selected).toBe(2);
     expect(pages.selectedTrack).toEqual(fakeTrack(2));
+  });
+
+  it('switches query without clearing cached rows until page 0 arrives, then resets scroll', async () => {
+    let releaseSecond!: () => void;
+    let call = 0;
+    const pages = new TrackPages((offset, limit, query) => {
+      call += 1;
+      if (call === 1) {
+        return Promise.resolve({
+          total: 2,
+          library_total: 10,
+          offset,
+          tracks: [fakeTrack(0), fakeTrack(1)].slice(0, limit),
+        });
+      }
+      return new Promise((resolve) => {
+        releaseSecond = () =>
+          resolve({
+            total: query?.text ? 1 : 2,
+            library_total: 10,
+            offset,
+            tracks: [{ ...fakeTrack(5), favourite: true }],
+          });
+      });
+    });
+
+    await pages.load();
+    pages.selected = 0;
+    const initialResets = pages.scrollResetCount;
+
+    const pending = pages.setQuery({ text: 'ada', sort: 'title', direction: 'asc' });
+    expect(pages.track(0)?.title).toBe('Track 0');
+    expect(pages.scrollResetCount).toBe(initialResets);
+
+    releaseSecond();
+    await pending;
+
+    expect(pages.total).toBe(1);
+    expect(pages.libraryTotal).toBe(10);
+    expect(pages.selected).toBeNull();
+    expect(pages.scrollResetCount).toBe(initialResets + 1);
+    expect(pages.track(0)?.id).toBe(6);
+
+    pages.setLocalFavourite(6, false);
+    expect(pages.track(0)?.favourite).toBe(false);
   });
 });

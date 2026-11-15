@@ -17,6 +17,7 @@ export function fakeTrack(index: number): LibraryTrack {
     key: { camelot: '8A', name: 'Am' },
     key_tag: 'Am',
     format: 'flac',
+    favourite: false,
     location: `/music/${index}.flac`,
     size_bytes: 9_000_000,
     audio: {
@@ -37,6 +38,7 @@ export function fakeLibrary(total: number) {
     const count = Math.max(0, Math.min(limit, total - offset));
     return {
       total,
+      library_total: total,
       offset,
       tracks: Array.from({ length: count }, (_, at) => fakeTrack(offset + at)),
     };

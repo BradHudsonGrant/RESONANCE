@@ -146,30 +146,52 @@ describe('Sidebar', () => {
 });
 
 describe('CommandBar', () => {
-  it('asks for a command, since library search arrives in M2', () => {
+  it('invites searching the library or typing a command', () => {
     render(CommandBar, { commands: [], inputId: 'commands' });
 
     const input = screen.getByRole('combobox', { name: 'Commands' });
-    expect(input.getAttribute('placeholder')).toBe('Type a command…');
+    expect(input.getAttribute('placeholder')).toBe('Search your library, or type a command…');
   });
 
-  it('names the milestone of each slash command, and keeps only the first in the Tab order', () => {
+  it('activates the BPM slash command chip and keeps future milestones marked', () => {
     render(CommandBar, { commands: [], inputId: 'commands' });
 
+    const bpmChip = screen.getByRole('button', { name: '/ bpm 125-132 Filter by tempo' });
+    expect(bpmChip.getAttribute('aria-disabled')).toBeNull();
+    expect(bpmChip.tabIndex).toBe(0);
+
     const chips = [
-      '/ bpm 125-132 Filter by tempo',
       '/ key 8A Compatible with A minor',
       '/ similar Find matching tracks',
       '/ build set Generate 90m progression',
     ].map((name) => screen.getByRole('button', { name }));
-    for (const chip of chips) expect(chip.getAttribute('aria-disabled')).toBe('true');
-    expect(chips.map((chip) => chip.tabIndex)).toEqual([0, -1, -1, -1]);
+    for (const chip of chips) {
+      expect(chip.getAttribute('aria-disabled')).toBe('true');
+      expect(chip.tabIndex).toBe(-1);
+    }
     expect(screen.getByRole('button', { name: 'More slash commands' }).tabIndex).toBe(-1);
 
     const tooltips = tooltipTexts();
-    for (const milestone of ['M2', 'M5', 'M6', 'M10']) {
+    for (const milestone of ['M5', 'M6', 'M10']) {
       expect(tooltips.some((text) => text?.includes(`arrives in ${milestone}`))).toBe(true);
     }
+  });
+
+  it('searches as you type without showing an empty command list, and runs / bpm commands', async () => {
+    const onsearch = vi.fn();
+    const onbpm = vi.fn();
+    render(CommandBar, { commands: [], inputId: 'commands', onsearch, onbpm });
+
+    const input = screen.getByRole('combobox', { name: 'Commands' }) as HTMLInputElement;
+    await fireEvent.focus(input);
+    await fireEvent.input(input, { target: { value: 'daft punk' } });
+    expect(onsearch).toHaveBeenLastCalledWith('daft punk');
+    expect(screen.queryByRole('listbox', { name: 'Commands' })).toBeNull();
+
+    await fireEvent.click(screen.getByRole('button', { name: '/ bpm 125-132 Filter by tempo' }));
+    expect(input.value).toBe('/ bpm 125-132');
+    await fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onbpm).toHaveBeenLastCalledWith(125, 132);
   });
 
   it('runs the command chosen from the list', async () => {

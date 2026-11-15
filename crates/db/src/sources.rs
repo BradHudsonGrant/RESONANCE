@@ -267,6 +267,10 @@ impl Database {
     pub fn remove_source(&mut self, id: SourceId) -> Result<bool, DbError> {
         let transaction = self.connection.transaction()?;
         let removed = {
+            transaction.execute(
+                "DELETE FROM asset_fts WHERE rowid IN (SELECT id FROM asset WHERE source_id = ?1)",
+                [id.0],
+            )?;
             transaction.execute("DELETE FROM asset WHERE source_id = ?1", [id.0])?;
             let removed = transaction.execute("DELETE FROM source WHERE id = ?1", [id.0])?;
             if removed > 0 {

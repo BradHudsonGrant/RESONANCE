@@ -13,6 +13,7 @@
     compact?: boolean;
     class?: string;
     header?: boolean;
+    ariaSort?: 'ascending' | 'descending' | 'none';
     children: Snippet;
   }
 
@@ -25,6 +26,7 @@
     compact = false,
     class: className = '',
     header = false,
+    ariaSort,
     children,
   }: Props = $props();
 </script>
@@ -39,6 +41,7 @@
     className,
   ]}
   role={header ? 'columnheader' : 'cell'}
+  aria-sort={header ? ariaSort : undefined}
 >
   {@render children()}
 </div>

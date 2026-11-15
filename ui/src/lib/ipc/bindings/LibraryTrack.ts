@@ -5,7 +5,7 @@ import type { TrackKey } from "./TrackKey";
 /**
  * One track as the library table and the inspector show it.
  */
-export type LibraryTrack = { id: number, title: string, artist: string | null, album: string | null, album_artist: string | null, genre: string | null, year: string | null, track_number: string | null, label: string | null, comment: string | null, bpm: number | null, key: TrackKey | null, 
+export type LibraryTrack = { id: number, favourite: boolean, title: string, artist: string | null, album: string | null, album_artist: string | null, genre: string | null, year: string | null, track_number: string | null, label: string | null, comment: string | null, bpm: number | null, key: TrackKey | null, 
 /**
  * The key tag as the file has it, which may not be a key at all.
  */

@@ -1,4 +1,5 @@
 mod identity;
+mod search;
 mod sources;
 
 use std::collections::HashMap;
@@ -12,14 +13,16 @@ use resonance_core::library::{
     AudioFacts, AudioFormat, ScannedFile, TagField, is_asset_path_included,
 };
 use rusqlite::{Connection, OptionalExtension, Row, params};
+pub use search::LibraryFacets;
 pub use sources::SourceConfig;
 
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
-const MIGRATIONS: [&str; 3] = [
+const MIGRATIONS: [&str; 4] = [
     include_str!("../migrations/0001_library.sql"),
     include_str!("../migrations/0002_sources.sql"),
     include_str!("../migrations/0003_identity.sql"),
+    include_str!("../migrations/0004_search_and_sort.sql"),
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -93,6 +96,7 @@ pub struct TrackRow {
     pub track_id: i64,
     pub source_folder: String,
     pub file: ScannedFile,
+    pub favourite: bool,
 }
 
 /// The connection that writes. Readers open their own.
@@ -111,6 +115,9 @@ fn migrate(connection: &mut Connection) -> Result<(), DbError> {
     for (index, migration) in MIGRATIONS.iter().enumerate().skip(found as usize) {
         let transaction = connection.transaction()?;
         transaction.execute_batch(migration)?;
+        if index == 3 {
+            search::backfill_v4_metadata(&transaction)?;
+        }
         transaction.pragma_update(None, "user_version", index as u32 + 1)?;
         transaction.commit()?;
     }
@@ -193,23 +200,40 @@ impl Database {
         {
             let (include_subfolders, excluded_subfolders, ignored_folders) =
                 sources::source_inclusion_in_tx(&transaction, source)?;
+            let max_added: i64 = transaction.query_row(
+                "SELECT COALESCE(MAX(added_ns), 0) FROM track",
+                [],
+                |row| row.get(0),
+            )?;
+            let mut next_added_ns = search::now_unix_ns().max(max_added + 1);
+
             let mut find =
                 transaction.prepare("SELECT id FROM asset WHERE source_id = ?1 AND path = ?2")?;
-            let mut add_track = transaction.prepare("INSERT INTO track DEFAULT VALUES")?;
+            let mut add_track = transaction.prepare("INSERT INTO track (added_ns) VALUES (?1)")?;
             let mut add_asset = transaction.prepare(
                 "INSERT INTO asset (track_id, source_id, path, size_bytes, modified_ns, format,
-                     duration_ms, sample_rate, channels, bit_depth, bitrate_kbps, included)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                     duration_ms, sample_rate, channels, bit_depth, bitrate_kbps, included,
+                     sort_title, sort_artist, tag_album, tag_genre, tag_label, tag_key, sort_key,
+                     tag_bpm, tag_year)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                         ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
             )?;
             let mut update_asset = transaction.prepare(
                 "UPDATE asset SET size_bytes = ?2, modified_ns = ?3, format = ?4, duration_ms = ?5,
                      sample_rate = ?6, channels = ?7, bit_depth = ?8, bitrate_kbps = ?9,
-                     included = ?10
+                     included = ?10, sort_title = ?11, sort_artist = ?12, tag_album = ?13,
+                     tag_genre = ?14, tag_label = ?15, tag_key = ?16, sort_key = ?17,
+                     tag_bpm = ?18, tag_year = ?19
                  WHERE id = ?1",
             )?;
             let mut clear_tags = transaction.prepare("DELETE FROM file_tag WHERE asset_id = ?1")?;
             let mut add_tag = transaction
                 .prepare("INSERT INTO file_tag (asset_id, field, value) VALUES (?1, ?2, ?3)")?;
+            let mut del_fts = transaction.prepare("DELETE FROM asset_fts WHERE rowid = ?1")?;
+            let mut add_fts = transaction.prepare(
+                "INSERT INTO asset_fts (rowid, title, artist, album, genre, label, comment, path)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            )?;
 
             for file in files {
                 let audio = file.audio;
@@ -224,6 +248,7 @@ impl Database {
                     &excluded_subfolders,
                     &ignored_folders,
                 ));
+                let meta = search::AssetSearchMeta::from_path_and_tags(&file.path, &file.tags);
 
                 let known: Option<i64> = find
                     .query_row(params![source.0, file.path], |row| row.get(0))
@@ -241,12 +266,23 @@ impl Database {
                             bit_depth,
                             bitrate_kbps,
                             included,
+                            meta.title,
+                            meta.artist,
+                            meta.album,
+                            meta.genre,
+                            meta.label,
+                            meta.tag_key,
+                            meta.sort_key,
+                            meta.tag_bpm,
+                            meta.tag_year,
                         ])?;
                         clear_tags.execute([asset])?;
+                        del_fts.execute([asset])?;
                         asset
                     }
                     None => {
-                        add_track.execute([])?;
+                        add_track.execute([next_added_ns])?;
+                        next_added_ns += 1;
                         let track = transaction.last_insert_rowid();
                         add_asset.execute(params![
                             track,
@@ -261,6 +297,15 @@ impl Database {
                             bit_depth,
                             bitrate_kbps,
                             included,
+                            meta.title,
+                            meta.artist,
+                            meta.album,
+                            meta.genre,
+                            meta.label,
+                            meta.tag_key,
+                            meta.sort_key,
+                            meta.tag_bpm,
+                            meta.tag_year,
                         ])?;
                         transaction.last_insert_rowid()
                     }
@@ -268,6 +313,16 @@ impl Database {
                 for (field, value) in &file.tags {
                     add_tag.execute(params![asset, field.name(), value])?;
                 }
+                add_fts.execute(params![
+                    asset,
+                    meta.title,
+                    meta.artist.unwrap_or(""),
+                    meta.album.unwrap_or(""),
+                    meta.genre.unwrap_or(""),
+                    meta.label.unwrap_or(""),
+                    meta.comment.unwrap_or(""),
+                    file.path,
+                ])?;
             }
         }
         transaction.commit()?;
@@ -338,12 +393,14 @@ impl Database {
 /// 585 ms instead of 13 ms.
 const TRACKS_IN_ORDER: &str = "SELECT asset.id, asset.track_id, source.folder, asset.path,
          asset.size_bytes, asset.modified_ns, asset.format, asset.duration_ms, asset.sample_rate,
-         asset.channels, asset.bit_depth, asset.bitrate_kbps
-     FROM source CROSS JOIN asset ON asset.source_id = source.id
+         asset.channels, asset.bit_depth, asset.bitrate_kbps, track.favourite
+     FROM source
+     CROSS JOIN asset ON asset.source_id = source.id
+     JOIN track ON track.id = asset.track_id
      WHERE asset.included = 1
      ORDER BY source.folder, asset.path";
 
-fn tag_field(name: String) -> Result<TagField, DbError> {
+pub(crate) fn tag_field(name: String) -> Result<TagField, DbError> {
     TagField::from_name(&name).ok_or(DbError::UnknownName {
         column: "file_tag.field",
         name,
@@ -351,7 +408,7 @@ fn tag_field(name: String) -> Result<TagField, DbError> {
 }
 
 /// A row of `TRACKS_IN_ORDER` as its asset id and its track, without tags.
-fn track_row(row: &Row<'_>) -> Result<(i64, TrackRow), DbError> {
+pub(crate) fn track_row(row: &Row<'_>) -> Result<(i64, TrackRow), DbError> {
     let name: String = row.get(6)?;
     let format = AudioFormat::from_name(&name).ok_or(DbError::UnknownName {
         column: "asset.format",
@@ -368,6 +425,7 @@ fn track_row(row: &Row<'_>) -> Result<(i64, TrackRow), DbError> {
         }),
         None => None,
     };
+    let favourite_raw: i64 = row.get(12)?;
     let track = TrackRow {
         track_id: row.get(1)?,
         source_folder: row.get(2)?,
@@ -379,6 +437,7 @@ fn track_row(row: &Row<'_>) -> Result<(i64, TrackRow), DbError> {
             audio,
             tags: Vec::new(),
         },
+        favourite: favourite_raw != 0,
     };
     Ok((row.get(0)?, track))
 }
@@ -492,6 +551,71 @@ mod tests {
         assert!(
             steps.iter().all(|step| !step.contains("TEMP B-TREE")),
             "unexpected temp sort in plan: {steps:?}"
+        );
+    }
+
+    #[test]
+    fn migrating_from_v3_backfills_search_and_normalises_tags() {
+        use resonance_core::search::{FilterPill, TrackQuery};
+
+        let mut v3 = Connection::open_in_memory().expect("a database opens");
+        v3.pragma_update(None, "foreign_keys", true)
+            .expect("foreign keys enable");
+        for migration in &MIGRATIONS[..3] {
+            v3.execute_batch(migration).expect("prior migration runs");
+        }
+        v3.pragma_update(None, "user_version", 3u32)
+            .expect("version 3 stamps");
+
+        v3.execute("INSERT INTO source (folder) VALUES ('D:\\Legacy')", [])
+            .expect("source inserts");
+        v3.execute("INSERT INTO track DEFAULT VALUES", [])
+            .expect("track 1 inserts");
+        v3.execute(
+            "INSERT INTO asset (track_id, source_id, path, size_bytes, modified_ns, format)
+             VALUES (1, 1, 'Trance/tiesto_cut.mp3', 100, 1000, 'mp3')",
+            [],
+        )
+        .expect("asset 1 inserts");
+        v3.execute_batch(
+            "INSERT INTO file_tag (asset_id, field, value) VALUES
+                (1, 'artist', 'Tiësto'),
+                (1, 'bpm', '127,5'),
+                (1, 'key', 'A minor'),
+                (1, 'year', '2021-05-14');",
+        )
+        .expect("tags insert");
+
+        migrate(&mut v3).expect("v3 migrates to v4");
+        let db = Database { connection: v3 };
+
+        // FTS folds diacritics and uses stem title fallback when title tag is absent.
+        let found = db
+            .query_tracks_page(
+                &TrackQuery {
+                    text: Some("tiesto".to_owned()),
+                    bpm_min: Some(127.0),
+                    bpm_max: Some(128.0),
+                    keys: vec!["8A".to_owned()],
+                    year_min: Some(2021),
+                    year_max: Some(2021),
+                    ..TrackQuery::default()
+                },
+                0,
+                10,
+            )
+            .expect("query runs");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].file.title(), "tiesto_cut");
+
+        // Legacy tracks with 1970 modified_ns are excluded from the 30-day Recent window.
+        assert_eq!(
+            db.query_track_count(&TrackQuery {
+                pill: FilterPill::Recent,
+                ..TrackQuery::default()
+            })
+            .expect("recent count runs"),
+            0
         );
     }
 }

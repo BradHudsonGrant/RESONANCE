@@ -1,16 +1,27 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Deserialize, TS)]
 #[serde(tag = "command", content = "params", rename_all = "snake_case")]
 #[ts(export)]
 pub enum Request {
     AppInfo,
-    /// A page of the library in library order, for a table that shows the part in view.
+    /// A page of matching library tracks, for a virtualised table.
     Tracks {
         offset: u32,
         limit: u32,
+        #[serde(default)]
+        #[ts(optional = nullable)]
+        query: Option<TrackQuery>,
     },
+    /// Marks or unmarks a track as a favourite.
+    SetTrackFavourite {
+        #[ts(type = "number")]
+        track_id: i64,
+        favourite: bool,
+    },
+    /// Distinct labels and BPM/year bounds across the library, for filter controls.
+    LibraryFacets,
     /// Reads a folder into the library without changing the files in it.
     Scan {
         folder: String,
@@ -62,6 +73,8 @@ pub enum Request {
 pub enum Response {
     AppInfo(AppInfo),
     Tracks(TrackPage),
+    SetTrackFavourite(FavouriteState),
+    LibraryFacets(LibraryFacets),
     Scan(ScanReport),
     Identify(IdentifyReport),
     Sources(LibrarySources),
@@ -148,11 +161,113 @@ pub struct UnreadableFile {
     pub reason: String,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum TrackFilterPill {
+    #[default]
+    All,
+    Favourites,
+    Recent,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum TrackSortField {
+    #[default]
+    Index,
+    Title,
+    Artist,
+    Bpm,
+    Key,
+    Duration,
+    Added,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SortDirection {
+    #[default]
+    Asc,
+    Desc,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+pub enum TrackFormat {
+    Mp3,
+    Flac,
+    Aiff,
+    Wav,
+    M4a,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TrackQuery {
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub text: Option<String>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub pill: Option<TrackFilterPill>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub bpm_min: Option<f64>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub bpm_max: Option<f64>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub keys: Option<Vec<String>>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub year_min: Option<i32>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub year_max: Option<i32>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub label: Option<String>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub formats: Option<Vec<TrackFormat>>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub sort: Option<TrackSortField>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub direction: Option<SortDirection>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct FavouriteState {
+    #[ts(type = "number")]
+    pub track_id: i64,
+    pub favourite: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct LibraryFacets {
+    pub labels: Vec<String>,
+    pub bpm_min: Option<f64>,
+    pub bpm_max: Option<f64>,
+    pub year_min: Option<i32>,
+    pub year_max: Option<i32>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[ts(export)]
 pub struct TrackPage {
-    /// How many tracks the whole library holds when the page was read.
+    /// Matching tracks for the current query.
     pub total: u32,
+    /// Total included tracks in the library before search or filters.
+    pub library_total: u32,
     pub offset: u32,
     pub tracks: Vec<LibraryTrack>,
 }
@@ -163,6 +278,7 @@ pub struct TrackPage {
 pub struct LibraryTrack {
     #[ts(type = "number")]
     pub id: i64,
+    pub favourite: bool,
     pub title: String,
     pub artist: Option<String>,
     pub album: Option<String>,

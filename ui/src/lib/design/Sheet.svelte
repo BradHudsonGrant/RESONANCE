@@ -44,7 +44,9 @@
     color: var(--color-text);
   }
 
-  .drawer {
+  .drawer[open] {
+    display: flex;
+    flex-direction: column;
     width: min(var(--sheet-drawer-width), 100vw);
     height: 100vh;
     max-height: 100vh;
@@ -65,6 +67,9 @@
   }
 
   .body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
     padding: var(--space-3) var(--space-4) var(--space-4);
     color: var(--color-text-2);
   }

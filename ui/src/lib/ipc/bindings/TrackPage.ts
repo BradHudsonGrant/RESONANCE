@@ -3,6 +3,10 @@ import type { LibraryTrack } from "./LibraryTrack";
 
 export type TrackPage = { 
 /**
- * How many tracks the whole library holds when the page was read.
+ * Matching tracks for the current query.
  */
-total: number, offset: number, tracks: Array<LibraryTrack>, };
+total: number, 
+/**
+ * Total included tracks in the library before search or filters.
+ */
+library_total: number, offset: number, tracks: Array<LibraryTrack>, };

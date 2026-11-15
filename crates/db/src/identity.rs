@@ -4,7 +4,7 @@ use resonance_core::identity::{
 use resonance_core::library::{AudioFormat, is_asset_path_included};
 use rusqlite::{OptionalExtension, Transaction, params};
 
-use crate::{Database, DbError, FileStamp, ScannedFile, SourceId, sources};
+use crate::{Database, DbError, FileStamp, ScannedFile, SourceId, search, sources, tag_field};
 
 /// An asset whose identity has not been computed yet, or whose file or lossy decoder changed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -376,6 +376,7 @@ impl Database {
         };
 
         // Remove the temporary asset first so the UNIQUE(source_id, path) slot is free.
+        tx.execute("DELETE FROM asset_fts WHERE rowid = ?1", [new_asset_id])?;
         tx.execute("DELETE FROM asset WHERE id = ?1", [new_asset_id])?;
         let remaining_on_new_track: i64 = tx.query_row(
             "SELECT count(*) FROM asset WHERE track_id = ?1",
@@ -443,12 +444,15 @@ impl Database {
             "DELETE FROM file_tag WHERE asset_id = ?1",
             [original_asset_id],
         )?;
+        let mut parsed_tags = Vec::with_capacity(new_tags.len());
         for (field, value) in new_tags {
             tx.execute(
                 "INSERT INTO file_tag (asset_id, field, value) VALUES (?1, ?2, ?3)",
                 params![original_asset_id, field, value],
             )?;
+            parsed_tags.push((tag_field(field)?, value));
         }
+        search::sync_asset_metadata_in_tx(&tx, original_asset_id, &new_path, &parsed_tags, true)?;
 
         tx.commit()?;
         Ok(true)
@@ -685,6 +689,7 @@ pub(crate) fn record_moved_in_tx(
             params![asset_id, field.name(), value],
         )?;
     }
+    search::sync_asset_metadata_in_tx(tx, asset_id, &file.path, &file.tags, true)?;
     Ok(())
 }
 

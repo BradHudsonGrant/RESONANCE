@@ -3,6 +3,7 @@ import { SvelteMap } from 'svelte/reactivity';
 
 import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
 import type { TrackPage } from '../ipc/bindings/TrackPage';
+import type { TrackQuery } from '../ipc/bindings/TrackQuery';
 
 export const PAGE_SIZE = 200;
 
@@ -19,19 +20,40 @@ const READS_IN_FLIGHT = 2;
 /** Rows past each edge of the view that are read before they come into it. */
 const READ_AHEAD = PAGE_SIZE / 2;
 
-export type ReadPage = (offset: number, limit: number) => Promise<TrackPage>;
+export type ReadPage = (offset: number, limit: number, query: TrackQuery) => Promise<TrackPage>;
 
 export type LibraryState =
   { kind: 'loading' } | { kind: 'ready' } | { kind: 'error'; message: string };
 
+export function countActiveDrawerFilters(query: TrackQuery): number {
+  let count = 0;
+  if (query.bpm_min != null || query.bpm_max != null) count += 1;
+  if (query.keys && query.keys.length > 0) count += 1;
+  if (query.year_min != null || query.year_max != null) count += 1;
+  if (query.label && query.label.trim().length > 0) count += 1;
+  if (query.formats && query.formats.length > 0) count += 1;
+  return count;
+}
+
+export function isQueryNarrowed(query: TrackQuery): boolean {
+  return (
+    Boolean(query.text && query.text.trim().length > 0) ||
+    (query.pill !== undefined && query.pill !== null && query.pill !== 'all') ||
+    countActiveDrawerFilters(query) > 0
+  );
+}
+
 /**
- * The library as a table sees it: how many tracks there are, and the pages read so far. Rows are
- * read a page at a time as they come into view, so a library of any size opens as fast as a
- * small one.
+ * The library as a table sees it: how many tracks match the active query, and the pages read so
+ * far. Rows are read a page at a time as they come into view, so a library of any size opens as
+ * fast as a small one.
  */
 export class TrackPages {
   state = $state<LibraryState>({ kind: 'loading' });
   total = $state(0);
+  libraryTotal = $state(0);
+  query = $state<TrackQuery>({});
+  scrollResetCount = $state(0);
 
   #read: ReadPage;
   #pages = new SvelteMap<number, LibraryTrack[]>();
@@ -71,7 +93,24 @@ export class TrackPages {
     this.#waiting = [];
     this.#centre = 0;
     this.state = { kind: 'loading' };
-    await this.#readPage(0);
+    await this.#readPage(0, false);
+  }
+
+  /**
+   * Switches search, filter or sort criteria while keeping existing rows visible until page 0 of
+   * the new query arrives, so rapid typing never blanks the table.
+   */
+  async setQuery(next: TrackQuery) {
+    this.query = next;
+    if (this.state.kind !== 'ready') {
+      await this.load();
+      return;
+    }
+    this.#generation += 1;
+    this.#reading.clear();
+    this.#waiting = [];
+    this.#centre = 0;
+    await this.#readPage(0, true);
   }
 
   /**
@@ -91,10 +130,25 @@ export class TrackPages {
     if (!cached.includes(0)) cached.unshift(0);
     const first = cached.shift() ?? 0;
     this.#waiting = cached;
-    await this.#readPage(first);
+    await this.#readPage(first, false);
   }
 
-  /** The track at a place in library order, or nothing while its page is still on its way. */
+  /** Updates a track's favourite flag in cached pages and the selected track immediately. */
+  setLocalFavourite(trackId: number, favourite: boolean) {
+    for (const [page, tracks] of this.#pages.entries()) {
+      const index = tracks.findIndex((item) => item.id === trackId);
+      if (index !== -1) {
+        const updated = [...tracks];
+        updated[index] = { ...tracks[index]!, favourite };
+        this.#pages.set(page, updated);
+      }
+    }
+    if (this.#selectedTrack?.id === trackId) {
+      this.#selectedTrack = { ...this.#selectedTrack, favourite };
+    }
+  }
+
+  /** The track at a place in current query order, or nothing while its page is still on its way. */
   track(index: number): LibraryTrack | undefined {
     return this.#pages.get(Math.floor(index / PAGE_SIZE))?.[index % PAGE_SIZE];
   }
@@ -125,17 +179,23 @@ export class TrackPages {
     while (this.#reading.size < READS_IN_FLIGHT) {
       const page = this.#waiting.shift();
       if (page === undefined) return;
-      void this.#readPage(page);
+      void this.#readPage(page, false);
     }
   }
 
-  async #readPage(page: number) {
+  async #readPage(page: number, replacePages: boolean) {
     const generation = this.#generation;
     this.#reading.add(page);
     try {
-      const reply = await this.#read(page * PAGE_SIZE, PAGE_SIZE);
+      const reply = await this.#read(page * PAGE_SIZE, PAGE_SIZE, this.query);
       if (generation !== this.#generation) return;
+      if (replacePages) {
+        this.#pages.clear();
+        this.selected = null;
+        this.scrollResetCount += 1;
+      }
       this.total = reply.total;
+      this.libraryTotal = reply.library_total;
       this.#pages.set(page, reply.tracks);
       for (const cached of [...this.#pages.keys()]) {
         if (cached > 0 && cached * PAGE_SIZE >= reply.total) {

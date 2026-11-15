@@ -1,5 +1,6 @@
 <script lang="ts">
   import Sheet from './lib/design/Sheet.svelte';
+  import type { LibraryTrack } from './lib/ipc/bindings/LibraryTrack';
   import { core } from './lib/ipc/core';
   import Inspector from './lib/library/Inspector.svelte';
   import Library from './lib/library/Library.svelte';
@@ -16,7 +17,9 @@
   type Fold = 'collapsed' | 'expanded';
 
   const commandInput = 'command-bar';
-  const pages = new TrackPages((offset, limit) => core.call('tracks', { offset, limit }));
+  const pages = new TrackPages((offset, limit, query) =>
+    core.call('tracks', { offset, limit, query }),
+  );
   const sourcesClient: SourcesClient = {
     sources: () => core.call('sources'),
     subfolders: (source_id, parent) => core.call('source_subfolders', { source_id, parent }),
@@ -39,6 +42,52 @@
   let scanMounted = $state(false);
   let sourcesRevision = $state(0);
   let mixPlaying = $state(false);
+  let searchText = $state('');
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
+
+  $effect(() => () => clearTimeout(searchTimer));
+
+  function setSearch(text: string) {
+    searchText = text;
+    clearTimeout(searchTimer);
+    const nextText = text.trim() || null;
+    const apply = () => {
+      if ((pages.query.text ?? null) !== nextText) {
+        void pages.setQuery({ ...pages.query, text: nextText });
+      }
+    };
+    if (!nextText) {
+      apply();
+      return;
+    }
+    searchTimer = setTimeout(apply, 60);
+  }
+
+  function clearSearch() {
+    clearTimeout(searchTimer);
+    searchText = '';
+  }
+
+  function setBpmFilter(min: number | null, max: number | null) {
+    void pages.setQuery({ ...pages.query, bpm_min: min, bpm_max: max });
+  }
+
+  async function toggleFavourite(target: LibraryTrack) {
+    const next = !target.favourite;
+    pages.setLocalFavourite(target.id, next);
+    try {
+      const updated = await core.call('set_track_favourite', {
+        track_id: target.id,
+        favourite: next,
+      });
+      pages.setLocalFavourite(target.id, updated.favourite);
+      if (pages.query.pill === 'favourites' && !updated.favourite) {
+        await pages.refresh();
+      }
+    } catch {
+      pages.setLocalFavourite(target.id, target.favourite);
+    }
+  }
 
   function openSettings() {
     settingsMounted = true;
@@ -177,7 +226,7 @@
   <div class="sidebar">
     <Sidebar
       activeSpace={space}
-      trackCount={pages.state.kind === 'ready' ? pages.total : null}
+      trackCount={pages.state.kind === 'ready' ? pages.libraryTotal : null}
       wavePaused={space === 'Mix' && mixPlaying}
       onSelectSpace={(nextSpace) => (space = nextSpace)}
       onCollapse={(collapsed) => (sidebarChoice = collapsed ? 'collapsed' : 'expanded')}
@@ -185,21 +234,40 @@
   </div>
 
   <div class="workspace">
-    <CommandBar {commands} inputId={commandInput} />
+    <CommandBar
+      {commands}
+      inputId={commandInput}
+      search={searchText}
+      bpmActive={pages.query.bpm_min != null || pages.query.bpm_max != null}
+      onsearch={setSearch}
+      onbpm={setBpmFilter}
+    />
     <main class="workspace-content">
       {#if space === 'Mix'}
         {#await import('./lib/mix/Mix.svelte') then { default: Mix }}
           <Mix onplayingchange={(playing) => (mixPlaying = playing)} />
         {/await}
       {:else}
-        <Library {pages} bind:selected={pages.selected} onopen={showInspector} onscan={openScan} />
+        <Library
+          {pages}
+          bind:selected={pages.selected}
+          loadFacets={() => core.call('library_facets')}
+          onopen={showInspector}
+          onscan={openScan}
+          ontogglefavourite={toggleFavourite}
+          onclearsearch={clearSearch}
+        />
       {/if}
     </main>
   </div>
 
   {#if inspectorDocked}
     <div class="inspector-dock">
-      <Inspector {track} onclose={() => (inspectorHidden = true)} />
+      <Inspector
+        {track}
+        onclose={() => (inspectorHidden = true)}
+        ontogglefavourite={toggleFavourite}
+      />
     </div>
   {/if}
 
@@ -219,7 +287,12 @@
 
 {#if sheetOpen && space === 'Library'}
   <Sheet bind:open={sheetOpen} variant="drawer" title="Inspector">
-    <Inspector {track} inSheet onclose={() => (sheetOpen = false)} />
+    <Inspector
+      {track}
+      inSheet
+      onclose={() => (sheetOpen = false)}
+      ontogglefavourite={toggleFavourite}
+    />
   </Sheet>
 {/if}
 
