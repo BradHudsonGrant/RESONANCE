@@ -82,7 +82,7 @@ Accept:
 
 ## M2 Library, v0.3.0
 
-- [ ] Sources with subfolder toggles and watching
+- [x] Sources with subfolder toggles and watching ([#80](https://github.com/BradHudsonGrant/RESONANCE/issues/80)). Evidence: merged in [#81](https://github.com/BradHudsonGrant/RESONANCE/pull/81); per-source `include_subfolders`, `watch`, recursive subfolder toggles and the editable `ignored_folder` list live in `0002_sources.sql` and `SourcesSettings.svelte`, `SourceWatcher` (`notify` `8.2.2`, [ADR 0013](adr/0013-filesystem-watching-with-notify.md)) coalesces filesystem events into read-only scans and pushes `library_changed` revisions so open tables refresh in place, verified by Rust integration tests and Playwright browser tests.
 - [ ] Identity by audio hash and fingerprint
 - [ ] Text search, filters, sort
 - [ ] Collections
