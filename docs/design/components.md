@@ -75,7 +75,7 @@ In `ui/src/lib/design/`, built in #50 and shown on `/design.html` in both themes
 | --- | --- | --- | --- |
 | `Wave` | `variant` (`ambient`, `sidebar`, `card`, `thumb`), `seed`, `paused` | The dot wave. `card` is 181 by 82 (`--card-wave-width`, `--card-wave-height`). | #50, cards in M10 |
 | `Waveform` | `mode`, `peaks`, `progress`, `mixPoint`, `durationSec` | `inline`: 140 by 17 in a table row (`--waveform-inline-width`, `--waveform-inline-height`). `crossfade`: the dock, both decks' bars with two 1.5 px crossfade curves and a 1 px playhead with a 5 px square cap, in the accent while playing and in Text at rest. `deck`: the scrolling waveform in Mix, on the audio clock. `curve`: the 385 by 67 energy curve (`--waveform-curve-width`, `--waveform-curve-height`) with five time labels. Rules in [visual-language.md](visual-language.md#waveforms). | #50, #52 |
-| `Deck` | `deck` (`A`, `B`), `variant` (`dock`, `full`) | `dock`: a 340 by 87 card with a 35 by 34 letter badge, a 60 px thumb, title, artist, a mono stats line and a more button. `full`: the Mix deck, adding focus brackets, transport, pitch and the scrolling waveform. | #51, #52 |
+| `Deck` | `deck` (`A`, `B`), `variant` (`dock`, `full`) | `dock`: a 340 by 87 card with a 34 px letter badge, a 60 px thumb, title, artist, a mono stats line and a more button. `full`: the Mix deck, adding focus brackets, transport, pitch and the scrolling waveform. | #51, #52 |
 | `TrackTable` | | The virtualised table, see [library.md](library.md#track-table) | #52 |
 | `ScanFolder` | | The folder picker in the empty library | #52 restyles it |
 

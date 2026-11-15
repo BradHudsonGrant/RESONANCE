@@ -5,6 +5,8 @@
     max?: number;
     step?: number;
     size?: 'sm' | 'md';
+    /** Fills its container instead of stopping at the medium width. */
+    stretch?: boolean;
     label?: string;
     valueText?: string;
     disabled?: boolean;
@@ -17,6 +19,7 @@
     max = 100,
     step = 1,
     size = 'md',
+    stretch = false,
     label,
     valueText,
     disabled = false,
@@ -32,7 +35,7 @@
   }
 </script>
 
-<label class={['scrub', `size-${size}`, { disabled }]}>
+<label class={['scrub', `size-${size}`, { stretch, disabled }]}>
   {#if label}
     <span class="label">{label}</span>
   {/if}
@@ -69,7 +72,11 @@
 
   .size-md {
     width: 100%;
-    max-width: var(--scrub-max-width, var(--scrub-width-md));
+    max-width: var(--scrub-width-md);
+  }
+
+  .stretch {
+    max-width: none;
   }
 
   .label {
@@ -85,13 +92,13 @@
     display: flex;
     flex: 1;
     align-items: center;
-    min-width: var(--scrub-sm-track-width, var(--scrub-width-sm));
+    min-width: var(--scrub-width-sm);
     height: var(--control-height-xs);
   }
 
   .size-sm .track-wrap {
-    width: var(--scrub-sm-track-width, var(--scrub-width-sm));
-    flex: 0 0 var(--scrub-sm-track-width, var(--scrub-width-sm));
+    width: var(--scrub-width-sm);
+    flex: 0 0 var(--scrub-width-sm);
   }
 
   .track {
@@ -156,5 +163,21 @@
 
   .disabled .range {
     cursor: default;
+  }
+
+  /* Forced colours drop backgrounds, so the track is drawn as an outline and the fill kept. */
+  @media (forced-colors: active) {
+    .track {
+      border: var(--border-width) solid CanvasText;
+    }
+
+    .fill {
+      background: CanvasText;
+      forced-color-adjust: none;
+    }
+
+    .disabled .track {
+      border-color: GrayText;
+    }
   }
 </style>

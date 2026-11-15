@@ -7,7 +7,8 @@
   import Tooltip from '../design/Tooltip.svelte';
 
   // Preview playback arrives in M2 and the decks' mixer in M7. Until then every control is
-  // unavailable and says which milestone brings it, and no level or position is shown.
+  // unavailable and says which milestone brings it, and no level or position is shown. Only Play
+  // takes focus, so Tab does not stop on every placeholder.
 </script>
 
 <footer class="player" aria-label="Player">
@@ -20,7 +21,7 @@
           </Button>
         </Tooltip>
         <Tooltip text="Preview playback arrives in M2">
-          <Button variant="icon" aria-label="Pause" aria-disabled="true">
+          <Button variant="icon" aria-label="Pause" aria-disabled="true" tabindex={-1}>
             <Icon name="pause" size="sm" />
           </Button>
         </Tooltip>
@@ -29,7 +30,7 @@
 
       <div class="scrub">
         <Tooltip text="Preview playback arrives in M2">
-          <ScrubBar size="md" disabled />
+          <ScrubBar size="md" stretch disabled />
         </Tooltip>
       </div>
 
@@ -42,15 +43,19 @@
         </Tooltip>
         <span class="label">Curve</span>
         <Tooltip text="Crossfader curves arrive in M7">
-          <Button variant="select" size="sm" aria-label="Curve" aria-disabled="true">—</Button>
+          <Button variant="select" size="sm" aria-label="Curve" aria-disabled="true" tabindex={-1}>
+            —
+          </Button>
         </Tooltip>
         <span class="label">EQ</span>
         <Tooltip text="EQ arrives in M7">
-          <Button variant="select" size="sm" aria-label="EQ" aria-disabled="true">—</Button>
+          <Button variant="select" size="sm" aria-label="EQ" aria-disabled="true" tabindex={-1}>
+            —
+          </Button>
         </Tooltip>
         <ModularDivider orientation="vertical" />
         <Tooltip text="Headphone cue arrives in M7" side="left">
-          <Button variant="icon" aria-label="Headphone cue" aria-disabled="true">
+          <Button variant="icon" aria-label="Headphone cue" aria-disabled="true" tabindex={-1}>
             <Icon name="headphones" size="md" />
           </Button>
         </Tooltip>
@@ -101,7 +106,6 @@
   }
 
   .scrub {
-    --scrub-max-width: none;
     display: flex;
     min-width: 0;
   }
@@ -119,7 +123,7 @@
   /* Below a 1360 px window the volume sliders shorten. Container queries cannot read tokens. */
   @container player (width < 1320px) {
     .mixer {
-      --scrub-sm-track-width: var(--scrub-width-compact);
+      --scrub-width-sm: var(--scrub-width-compact);
       gap: var(--space-3);
     }
 

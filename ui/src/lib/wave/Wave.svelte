@@ -1,12 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
+  import { onThemeChange } from '../design/theme';
   import {
     type Listening,
     type Preset,
     presetSettings,
     type TrackBands,
     WaveMotion,
+    type WaveSettings,
   } from './motion';
   import { drawWaveThumb, type Rgb, WaveRenderer } from './renderer';
 
@@ -33,9 +35,15 @@
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   const motion = new WaveMotion(presetSettings('balanced'));
 
-  $effect(() => {
+  /** The sidebar's field is wide and short, so the camera sits lower and closer to fill it. */
+  function settings(): WaveSettings {
     const base = presetSettings(reducedMotion.matches || paused ? 'still' : preset);
-    motion.settings = variant === 'sidebar' ? { ...base, density: 'thumb', pointSize: 0.75 } : base;
+    if (variant !== 'sidebar') return base;
+    return { ...base, density: 'low', pointSize: 0.35, zoom: 2.3, elevation: 0.3 };
+  }
+
+  $effect(() => {
+    motion.settings = settings();
   });
 
   /** The rgb() a colour token resolves to on this element, as 0 to 1 channels. */
@@ -75,18 +83,14 @@
         });
       };
 
-      const scheme = matchMedia('(prefers-color-scheme: dark)');
-      const forced = matchMedia('(forced-colors: active)');
       const sized = new ResizeObserver(paintStatic);
       sized.observe(canvas);
-      scheme.addEventListener('change', paintStatic);
-      forced.addEventListener('change', paintStatic);
+      const stopThemes = onThemeChange(paintStatic);
       paintStatic();
 
       return () => {
         sized.disconnect();
-        scheme.removeEventListener('change', paintStatic);
-        forced.removeEventListener('change', paintStatic);
+        stopThemes();
       };
     }
 
@@ -111,9 +115,7 @@
       drawOnce();
     };
     const onReducedMotion = () => {
-      const base = presetSettings(reducedMotion.matches || paused ? 'still' : preset);
-      motion.settings =
-        variant === 'sidebar' ? { ...base, density: 'thumb', pointSize: 0.75 } : base;
+      motion.settings = settings();
       drawOnce();
     };
 
@@ -134,18 +136,14 @@
       drawOnce();
     };
 
-    const onScheme = () => {
-      readColours();
-      drawOnce();
-    };
-    const scheme = matchMedia('(prefers-color-scheme: dark)');
-    const forced = matchMedia('(forced-colors: active)');
     const seen = new IntersectionObserver(([entry]) => (visible = entry?.isIntersecting ?? true));
     const sized = new ResizeObserver(resize);
     seen.observe(canvas);
     sized.observe(canvas);
-    scheme.addEventListener('change', onScheme);
-    forced.addEventListener('change', onScheme);
+    const stopThemes = onThemeChange(() => {
+      readColours();
+      drawOnce();
+    });
     reducedMotion.addEventListener('change', onReducedMotion);
     readColours();
     resize();
@@ -155,8 +153,7 @@
       cancelAnimationFrame(request);
       seen.disconnect();
       sized.disconnect();
-      scheme.removeEventListener('change', onScheme);
-      forced.removeEventListener('change', onScheme);
+      stopThemes();
       reducedMotion.removeEventListener('change', onReducedMotion);
       renderer.release();
     };

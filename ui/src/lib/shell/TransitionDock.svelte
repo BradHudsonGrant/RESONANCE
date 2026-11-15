@@ -4,9 +4,7 @@
   import Tooltip from '../design/Tooltip.svelte';
   import Deck from '../mix/Deck.svelte';
 
-  let { collapsed, ontoggle }: { collapsed: boolean; ontoggle: () => void } = $props();
-
-  const toggleLabel = $derived(collapsed ? 'Expand the dock' : 'Collapse the dock');
+  let { onCollapse }: { onCollapse: (collapsed: boolean) => void } = $props();
 </script>
 
 <section class="dock" aria-label="Transition">
@@ -22,23 +20,42 @@
       </Tooltip>
       <span class="label">Blend</span>
       <Tooltip text="Blends arrive in M10">
-        <Button variant="select" size="xs" aria-label="Blend" aria-disabled="true">—</Button>
+        <Button variant="select" size="xs" aria-label="Blend" aria-disabled="true" tabindex={-1}>
+          —
+        </Button>
       </Tooltip>
     </div>
-    <Tooltip text={toggleLabel} shortcut="D" side="left">
-      <Button variant="icon" aria-label={toggleLabel} aria-expanded={!collapsed} onclick={ontoggle}>
-        <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size="sm" />
-      </Button>
-    </Tooltip>
+    <span class="collapse">
+      <Tooltip text="Collapse the dock" shortcut="D" side="left">
+        <Button
+          variant="icon"
+          aria-label="Collapse the dock"
+          aria-expanded="true"
+          onclick={() => onCollapse(true)}
+        >
+          <Icon name="chevron-down" size="sm" />
+        </Button>
+      </Tooltip>
+    </span>
+    <span class="expand">
+      <Tooltip text="Expand the dock" shortcut="D" side="left">
+        <Button
+          variant="icon"
+          aria-label="Expand the dock"
+          aria-expanded="false"
+          onclick={() => onCollapse(false)}
+        >
+          <Icon name="chevron-right" size="sm" />
+        </Button>
+      </Tooltip>
+    </span>
   </div>
 
-  {#if !collapsed}
-    <div class="body">
-      <Deck deck="A" />
-      <div class="crossfade">Two loaded decks show their crossfade here. Decks arrive in M7.</div>
-      <Deck deck="B" />
-    </div>
-  {/if}
+  <div class="body">
+    <Deck deck="A" />
+    <div class="crossfade">Two loaded decks show their crossfade here. Decks arrive in M7.</div>
+    <Deck deck="B" />
+  </div>
 </section>
 
 <style>
@@ -55,8 +72,13 @@
     padding: 0 var(--player-inset-x);
   }
 
-  .head > :global(:last-child) {
+  .collapse,
+  .expand {
     justify-self: end;
+  }
+
+  .expand {
+    display: none;
   }
 
   .name,
@@ -93,7 +115,7 @@
       minmax(var(--dock-wave-min-width), 1fr)
       clamp(var(--dock-card-min-width), 21.5vw, var(--dock-card-width));
     align-items: center;
-    gap: var(--dock-gap);
+    gap: var(--space-3);
     padding: 0 var(--player-inset-x) var(--space-1-5);
   }
 
@@ -105,5 +127,17 @@
     color: var(--color-muted);
     font-size: var(--text-sm);
     text-align: center;
+  }
+
+  /* The shell sets --dock-state from the window height, or from the user's own choice. */
+  @container style(--dock-state: collapsed) {
+    .collapse,
+    .body {
+      display: none;
+    }
+
+    .expand {
+      display: inline-flex;
+    }
   }
 </style>

@@ -4,10 +4,19 @@
     description: string;
     active?: boolean;
     disabled?: boolean;
+    /** -1 keeps a chip out of the Tab order. */
+    tabindex?: number;
     onclick?: () => void;
   }
 
-  let { command, description, active = false, disabled = false, onclick }: Props = $props();
+  let {
+    command,
+    description,
+    active = false,
+    disabled = false,
+    tabindex,
+    onclick,
+  }: Props = $props();
 </script>
 
 <!-- A chip that is not built yet stays focusable, so its tooltip can say when it arrives. -->
@@ -16,6 +25,7 @@
   class={['slash-chip', { active }]}
   aria-pressed={active ? true : undefined}
   aria-disabled={disabled ? 'true' : undefined}
+  {tabindex}
   onclick={() => {
     if (!disabled) onclick?.();
   }}
@@ -28,7 +38,7 @@
   .slash-chip {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-2-5);
+    gap: var(--space-2);
     padding: 0;
     border: 0;
     border-radius: var(--radius-sm);
@@ -83,5 +93,12 @@
   .slash-chip[aria-disabled='true'] .code,
   .slash-chip[aria-disabled='true'] .description {
     color: var(--color-muted);
+  }
+
+  @media (forced-colors: active) {
+    .slash-chip[aria-disabled='true'] .code,
+    .slash-chip[aria-disabled='true'] .description {
+      color: GrayText;
+    }
   }
 </style>

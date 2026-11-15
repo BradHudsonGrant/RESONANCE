@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
 
   import Button from '../design/Button.svelte';
+  import { onThemeChange } from '../design/theme';
   import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
   import type { MixDeck } from '../ipc/bindings/MixDeck';
   import type { MixDevice } from '../ipc/bindings/MixDevice';
@@ -166,12 +167,11 @@
       mixProbe.frame(now, performance.now() - started);
     };
 
-    const scheme = matchMedia('(prefers-color-scheme: dark)');
     const seen = new IntersectionObserver(([entry]) => (visible = entry?.isIntersecting ?? true));
     const sized = new ResizeObserver(resize);
     seen.observe(canvas);
     sized.observe(canvas);
-    scheme.addEventListener('change', readColours);
+    const stopThemes = onThemeChange(readColours);
     readColours();
     resize();
     mixProbe.attached = true;
@@ -183,7 +183,7 @@
       stopListening();
       seen.disconnect();
       sized.disconnect();
-      scheme.removeEventListener('change', readColours);
+      stopThemes();
       renderer.release();
     };
   });
