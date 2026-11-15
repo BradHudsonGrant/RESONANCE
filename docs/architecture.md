@@ -49,7 +49,7 @@ RESONANCE/
   ui/              Svelte app
     src/lib/design/        tokens and primitives
     src/lib/components/    TrackTable, Waveform, Inspector and other domain parts
-    src/lib/spaces/        library, inbox, sets, mix, review
+    src/lib/spaces/        library, prep, sets, mix, replay
     src/lib/ipc/           generated bindings and a thin client
   tools/models/    Python scripts that export and verify ONNX models (dev only)
   mappings/        controller mapping files
@@ -117,6 +117,8 @@ Where to start, with what was checked on 12 November 2026:
 | Fingerprint lookup | AcoustID | Free for non-commercial apps, registration needed | A commercial plan exists. |
 
 Evaluate on the real library and on public datasets. Don't claim accuracy without numbers, and record the hardware with every benchmark.
+
+Bar-synchronous feature storage, continuous tuning maths, phrase compatibility and pairwise preference learning are set out in [transition-analysis.md](transition-analysis.md).
 
 ## Dependencies and licences
 

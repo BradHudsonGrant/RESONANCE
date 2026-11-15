@@ -63,13 +63,13 @@ Collections come in three kinds: manual, smart (a saved filter or a saved natura
 
 The table is virtualised, with configurable columns, sort and filter on any field, an inline waveform, full keyboard navigation, and preview playback from any row.
 
-### Inbox
+### Prep
 
-One queue for everything that needs a decision: new tracks, identification proposals, quality flags, duplicates, missing files, Organise plans, pending updates to other libraries.
+Prep is one queue for everything that needs a decision: new tracks, identification proposals, quality flags, duplicates, missing files, Organise plans, pending updates to other libraries.
 
 Each item shows what was found, the proposed action, the confidence and the evidence. Enter accepts, S skips, E edits. "Accept everything above 90%" exists and the threshold is adjustable.
 
-Nothing in the Inbox blocks the rest of the app.
+Nothing in Prep blocks the rest of the app.
 
 ### Identify and tag
 
@@ -135,7 +135,7 @@ Every result records the analyser, its version and its parameters. The cache key
 
 User corrections are stored separately and always win. Re-analysis never deletes a correction.
 
-Every value has a confidence. A low-confidence grid becomes an Inbox item ("check grid") so it isn't trusted silently.
+Every value has a confidence. A low-confidence grid becomes a Prep item ("check grid") so it isn't trusted silently.
 
 The grid editor has a metronome, shift, halve, double, tap, set-downbeat, and a variable grid for vinyl rips that drift.
 
@@ -185,13 +185,13 @@ Build the inputs in this order. Keyboard and mouse come first. Gamepads come sec
 
 The first hardware mapping is the Rane System One, because that is the unit on hand to test with. It works as a controller for Serato and shows up as a MIDI device. Expect the motorised platters and the screens to use vendor messages that have to be captured from the unit. A DDJ-FLX4 mapping follows, since it is the controller most beginners own.
 
-A session can record the master to WAV or FLAC together with a control log: deck positions, tempo, EQ and fader moves, stamped with the audio clock. The control log is what makes Review exact.
+A session can record the master to WAV or FLAC together with a control log: deck positions, tempo, EQ and fader moves, stamped with the audio clock. The control log is what makes Replay exact.
 
 ### Coach
 
 A toggle in Mix: Off, Hints, Full. Off costs nothing and shows nothing.
 
-Live measurements (the same code Review uses offline):
+Live measurements (the same code Replay uses offline):
 
 - Beat alignment. Offset between the decks in milliseconds and as a fraction of a beat, plus drift in ms per bar. It comes from grid positions and playheads, cross-checked by correlating low-band onsets over the last two bars. Show it to 1 ms. Accuracy is limited by the grids, so when grid confidence is low, say that and don't show a precise-looking number.
 - Starting thresholds, to be tuned by listening: under 5 ms is tight, 5 to 15 ms is audible on kicks, over 15 ms is loose.
@@ -212,7 +212,7 @@ Guidance rules:
 
 The coach strip sits between the waveforms and the mixer: a centre-zero beat-offset meter, a level trace with a target band, a low-end overlap bar and phrase countdowns. The accent colour marks only the thing that needs action.
 
-### Review
+### Replay
 
 Two sources. Sessions recorded in Resonance are exact because of the control log. Imported recordings are estimates.
 
