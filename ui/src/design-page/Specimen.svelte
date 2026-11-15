@@ -74,6 +74,8 @@
     'arrow-right',
     'volume',
     'volume-mute',
+    'missing',
+    'relink',
   ];
 
   const segmentedItems = [

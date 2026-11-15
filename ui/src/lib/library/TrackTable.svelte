@@ -25,6 +25,7 @@
     /** Enter or a double click on a row. */
     onopen?: () => void;
     onpreview?: (track: LibraryTrack) => void;
+    onrelink?: (track: LibraryTrack) => void;
     ontogglefavourite?: (track: LibraryTrack) => void;
     onsort?: (sort: TrackSortField, direction: SortDirection) => void;
     onaddtocollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
@@ -49,6 +50,7 @@
     activeCollection = null,
     onopen,
     onpreview,
+    onrelink,
     ontogglefavourite,
     onsort,
     onaddtocollection,
@@ -80,6 +82,7 @@
 
   const allLoadedChecked = $derived(pages.allLoadedChecked(checkedIds));
   const someChecked = $derived(checkedIds.size > 0);
+  const hasAnySelection = $derived(someChecked || selected !== null);
   const resolvedMenuTracks = $derived(
     menuTracks.map((track) => pages.trackById(track.id) ?? track),
   );
@@ -203,19 +206,52 @@
     if (pages.total > 0) selected = Math.min(Math.max(index, 0), pages.total - 1);
   }
 
+  function addChecked(track: LibraryTrack) {
+    checkedIds.add(track.id);
+    checkedFallback.set(track.id, track);
+  }
+
+  function removeChecked(trackId: number) {
+    checkedIds.delete(trackId);
+    checkedFallback.delete(trackId);
+  }
+
   function toggleChecked(track: LibraryTrack) {
     if (checkedIds.has(track.id)) {
-      checkedIds.delete(track.id);
-      checkedFallback.delete(track.id);
+      removeChecked(track.id);
     } else {
-      checkedIds.add(track.id);
-      checkedFallback.set(track.id, track);
+      addChecked(track);
     }
   }
 
   function clearChecked() {
     checkedIds.clear();
     checkedFallback.clear();
+  }
+
+  function deselectAll() {
+    clearChecked();
+    selected = null;
+  }
+
+  function selectAllLoaded() {
+    for (const track of pages.loadedTracks()) {
+      addChecked(track);
+    }
+  }
+
+  function selectRange(fromIndex: number, toIndex: number) {
+    if (pages.total <= 0) return;
+    const clampedFrom = Math.min(Math.max(fromIndex, 0), pages.total - 1);
+    const clampedTo = Math.min(Math.max(toIndex, 0), pages.total - 1);
+    for (
+      let idx = Math.min(clampedFrom, clampedTo);
+      idx <= Math.max(clampedFrom, clampedTo);
+      idx += 1
+    ) {
+      const item = pages.track(idx);
+      if (item) addChecked(item);
+    }
   }
 
   function resolveCheckedTracks(): LibraryTrack[] {
@@ -228,13 +264,80 @@
   }
 
   function toggleHeaderChecked() {
-    if (checkedIds.size > 0) {
-      clearChecked();
+    if (allLoadedChecked) {
+      deselectAll();
       return;
     }
-    for (const track of pages.loadedTracks()) {
-      checkedIds.add(track.id);
-      checkedFallback.set(track.id, track);
+    selectAllLoaded();
+  }
+
+  function onRowClick(event: MouseEvent, index: number, track: LibraryTrack | undefined) {
+    if (!track) {
+      select(index);
+      return;
+    }
+    if (event.shiftKey) {
+      selectRange(selected ?? index, index);
+      select(index);
+      return;
+    }
+    if (event.ctrlKey || event.metaKey) {
+      if (!someChecked) {
+        if (selected === index) {
+          selected = null;
+        } else {
+          if (selected !== null) {
+            const current = pages.track(selected);
+            if (current) addChecked(current);
+          }
+          addChecked(track);
+          select(index);
+        }
+      } else if (checkedIds.has(track.id)) {
+        removeChecked(track.id);
+        if (selected === index) selected = null;
+      } else {
+        addChecked(track);
+        select(index);
+      }
+      return;
+    }
+    if (event.detail <= 1 && selected === index && !someChecked) {
+      selected = null;
+      return;
+    }
+    select(index);
+  }
+
+  function onTickClick(event: MouseEvent, index: number, track: LibraryTrack | undefined) {
+    event.stopPropagation();
+    if (!track) return;
+    if (event.shiftKey) {
+      selectRange(selected ?? index, index);
+      select(index);
+      return;
+    }
+    const isChecked = checkedIds.has(track.id);
+    const isSelected = selected === index;
+    const visuallyTicked = someChecked ? isChecked : isSelected;
+    if (visuallyTicked) {
+      removeChecked(track.id);
+      if (isSelected) selected = null;
+      return;
+    }
+    if (!someChecked && selected !== null) {
+      const current = pages.track(selected);
+      if (current) addChecked(current);
+    }
+    addChecked(track);
+  }
+
+  function onViewportClick(event: MouseEvent) {
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+    if (target.closest('.head, [role="row"], .selection-bar')) return;
+    if (someChecked || selected !== null) {
+      deselectAll();
     }
   }
 
@@ -302,15 +405,7 @@
     if (to !== undefined) {
       event.preventDefault();
       if (event.shiftKey && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
-        const start = selected ?? 0;
-        const clampedTo = pages.total > 0 ? Math.min(Math.max(to, 0), pages.total - 1) : 0;
-        for (let idx = Math.min(start, clampedTo); idx <= Math.max(start, clampedTo); idx += 1) {
-          const item = pages.track(idx);
-          if (item) {
-            checkedIds.add(item.id);
-            checkedFallback.set(item.id, item);
-          }
-        }
+        selectRange(selected ?? 0, to);
       }
       select(to);
     } else if (event.key === 'Enter' && selected !== null) {
@@ -350,12 +445,50 @@
           targets.map((track) => track.id),
         );
       }
-    } else if (event.key === 'Escape' && checkedIds.size > 0) {
+    } else if (event.key === 'Escape' && (checkedIds.size > 0 || selected !== null)) {
       event.preventDefault();
-      clearChecked();
+      deselectAll();
+    }
+  }
+
+  function typing(target: EventTarget | null): boolean {
+    return (
+      target instanceof HTMLElement &&
+      (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+    );
+  }
+
+  function onWindowKeyDown(event: KeyboardEvent) {
+    if (
+      event.defaultPrevented ||
+      menuOpen ||
+      event.altKey ||
+      document.querySelector('dialog[open], [role="menu"]')
+    ) {
+      return;
+    }
+    if (typing(event.target)) return;
+    const command = event.ctrlKey || event.metaKey;
+    if (command && event.key.toLowerCase() === 'a') {
+      if (pages.total > 0) {
+        event.preventDefault();
+        if (event.shiftKey) {
+          deselectAll();
+        } else {
+          selectAllLoaded();
+          gridEl?.focus();
+        }
+      }
+      return;
+    }
+    if (!command && event.key === 'Escape' && (checkedIds.size > 0 || selected !== null)) {
+      event.preventDefault();
+      deselectAll();
     }
   }
 </script>
+
+<svelte:window onkeydown={onWindowKeyDown} />
 
 {#snippet headerButton(label: string, field: TrackSortField, numeric = false)}
   {@const sortState = headerSort(field)}
@@ -392,6 +525,9 @@
     <div class="selection-bar" role="region" aria-label="Selected tracks">
       <span class="selection-count numeric">{checkedIds.size} selected</span>
       <div class="selection-actions">
+        {#if !allLoadedChecked}
+          <Button variant="quiet" size="sm" onclick={selectAllLoaded}>Select all</Button>
+        {/if}
         <Button
           size="sm"
           onclick={(event) =>
@@ -411,13 +547,16 @@
             Remove from {activeCollection.name}
           </Button>
         {/if}
-        <Button variant="quiet" size="sm" onclick={clearChecked}>Clear</Button>
+        <Button variant="quiet" size="sm" onclick={deselectAll}>Deselect</Button>
       </div>
     </div>
   {/if}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="viewport"
     bind:this={viewport}
+    onclick={onViewportClick}
     onscroll={() => (scrollTop = viewport?.scrollTop ?? 0)}
   >
     <div class="head" role="rowgroup" bind:this={head}>
@@ -425,16 +564,16 @@
         <TableCell header compact>
           <button
             type="button"
-            class={['tick', 'header-tick', { filled: someChecked }]}
+            class={['tick', 'header-tick', { filled: hasAnySelection }]}
             role="checkbox"
-            aria-label={someChecked ? 'Clear ticked tracks' : 'Tick all loaded tracks'}
-            aria-checked={allLoadedChecked ? 'true' : someChecked ? 'mixed' : 'false'}
+            aria-label={allLoadedChecked ? 'Deselect all tracks' : 'Select all tracks'}
+            aria-checked={allLoadedChecked ? 'true' : hasAnySelection ? 'mixed' : 'false'}
             tabindex={-1}
             onclick={toggleHeaderChecked}
           >
             {#if allLoadedChecked}
               <Icon name="check" size="xs" />
-            {:else if someChecked}
+            {:else if hasAnySelection}
               <span class="tick-dash" aria-hidden="true"></span>
             {/if}
           </button>
@@ -469,17 +608,20 @@
           {@const track = pages.track(index)}
           {@const isSelected = index === selected}
           {@const isChecked = track ? checkedIds.has(track.id) : false}
+          {@const isVisuallyTicked = someChecked ? isChecked : isSelected}
+          {@const isMissing = Boolean(track && track.missing_since != null)}
           {@const isPreviewTrack = Boolean(track && previewTrackId === track.id)}
-          {@const isPreviewPlaying = isPreviewTrack && previewPlaying}
+          {@const isPreviewPlaying = isPreviewTrack && previewPlaying && !isMissing}
           <TableRow
             id="{id}-row-{index}"
             aria-rowindex={index + 2}
             selected={isSelected}
             style="grid-template-columns: var(--active-columns)"
-            onclick={() => select(index)}
+            onclick={(event) => onRowClick(event, index, track)}
             ondblclick={() => {
               select(index);
-              if (track && onpreview) onpreview(track);
+              if (track && isMissing && onrelink) onrelink(track);
+              else if (track && onpreview) onpreview(track);
               else onopen?.();
             }}
           >
@@ -488,19 +630,16 @@
             <TableCell compact>
               <button
                 type="button"
-                class={['tick', { filled: isSelected || isChecked }]}
+                class={['tick', { filled: isVisuallyTicked }]}
                 role="checkbox"
                 aria-label={track ? `Tick ${track.title}` : 'Tick row'}
                 aria-checked={isChecked}
                 tabindex={-1}
                 disabled={!track}
-                onclick={(event) => {
-                  event.stopPropagation();
-                  if (track) toggleChecked(track);
-                }}
+                onclick={(event) => onTickClick(event, index, track)}
                 ondblclick={(event) => event.stopPropagation()}
               >
-                {#if isSelected || isChecked}
+                {#if isVisuallyTicked}
                   <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
                     <path
                       d="M2.2 6.2 4.8 8.8 9.8 3.4"
@@ -520,29 +659,37 @@
                 class={[
                   'status-cell',
                   {
-                    shown: Boolean(track) && (isSelected || isPreviewTrack),
+                    shown: Boolean(track) && (isMissing || isSelected || isPreviewTrack),
                     playing: isPreviewPlaying,
+                    missing: isMissing,
                   },
                 ]}
                 aria-label={track
-                  ? isPreviewPlaying
-                    ? `Pause ${track.title}`
-                    : `Play ${track.title}`
+                  ? isMissing
+                    ? `Missing file for ${track.title} — Relink`
+                    : isPreviewPlaying
+                      ? `Pause ${track.title}`
+                      : `Play ${track.title}`
                   : 'Play track'}
-                aria-pressed={isPreviewPlaying}
+                aria-pressed={isMissing ? undefined : isPreviewPlaying}
                 disabled={!track}
                 tabindex={-1}
                 onclick={(event) => {
                   event.stopPropagation();
                   if (track) {
                     select(index);
-                    onpreview?.(track);
+                    if (isMissing) onrelink?.(track);
+                    else onpreview?.(track);
                   }
                 }}
                 ondblclick={(event) => event.stopPropagation()}
               >
                 <span class="status-icon" aria-hidden="true">
-                  <Icon name={isPreviewPlaying ? 'pause' : 'play'} size={13} filled />
+                  <Icon
+                    name={isMissing ? 'missing' : isPreviewPlaying ? 'pause' : 'play'}
+                    size={13}
+                    filled={!isMissing}
+                  />
                 </span>
               </button>
             </TableCell>
@@ -618,6 +765,7 @@
   {activeCollection}
   showFavourite={menuShowFavourite}
   onToggleFavourite={ontogglefavourite}
+  onRelink={onrelink}
   onAdd={onaddtocollection}
   onRemove={removeTracksFromCollection}
   onCreateAndAdd={oncreatecollectionandadd}
@@ -781,6 +929,7 @@
     opacity: 1;
   }
 
+  .status-cell.missing .status-icon,
   :global(.row:hover) .status-cell:not(.shown, :disabled) .status-icon {
     color: var(--color-text-2);
   }
@@ -902,6 +1051,10 @@
 
     .status-cell.playing {
       border: var(--border-width) solid Highlight;
+    }
+
+    .status-cell.missing {
+      border: var(--border-width) solid CanvasText;
     }
   }
 

@@ -1,10 +1,13 @@
 <script lang="ts">
+  import { invoke, isTauri } from '@tauri-apps/api/core';
+
   import Sheet from './lib/design/Sheet.svelte';
   import type { LibraryCollection } from './lib/ipc/bindings/LibraryCollection';
   import type { LibraryTrack } from './lib/ipc/bindings/LibraryTrack';
   import { core } from './lib/ipc/core';
   import Inspector from './lib/library/Inspector.svelte';
   import Library from './lib/library/Library.svelte';
+  import RelinkSheet, { type RelinkClient } from './lib/library/RelinkSheet.svelte';
   import ScanFolder from './lib/library/ScanFolder.svelte';
   import type { SourcesClient } from './lib/library/SourcesSettings.svelte';
   import { TrackPages } from './lib/library/track-pages.svelte';
@@ -31,6 +34,17 @@
     removeSource: (source_id) => core.call('remove_source', { source_id }),
     setIgnoredFolders: (folders) => core.call('set_ignored_folders', { folders }),
   };
+  const desktop = isTauri();
+  const relinkClient: RelinkClient = {
+    candidates: (track_id, search_folder) =>
+      core.call('relink_candidates', { track_id, search_folder: search_folder ?? null }),
+    preview: (track_id, candidate_path) =>
+      core.call('preview_relink', { track_id, candidate_path }),
+    apply: (track_id, candidate_path, force) =>
+      core.call('apply_relink', { track_id, candidate_path, force }),
+    pickAudioFile: desktop ? () => invoke<string | null>('pick_audio_file') : undefined,
+    pickFolder: desktop ? () => invoke<string | null>('pick_folder') : undefined,
+  };
 
   let shell: HTMLDivElement;
   let space = $state<SpaceName>('Library');
@@ -43,6 +57,9 @@
   let settingsMounted = $state(false);
   let scanOpen = $state(false);
   let scanMounted = $state(false);
+  let relinkOpen = $state(false);
+  let relinkMounted = $state(false);
+  let relinkTarget = $state<LibraryTrack | null>(null);
   let sourcesRevision = $state(0);
   let mixPlaying = $state(false);
   let searchText = $state('');
@@ -164,6 +181,9 @@
     mergeCollectionSummary(updated);
     pages.removeTracksFromLocalCollection(collectionId, trackIds);
     if (activeCollectionId === collectionId) {
+      if (track && trackIds.includes(track.id)) {
+        pages.selected = null;
+      }
       await pages.refresh();
     }
   }
@@ -181,6 +201,17 @@
   function openScan() {
     scanMounted = true;
     scanOpen = true;
+  }
+
+  function openRelink(item: LibraryTrack) {
+    relinkTarget = item;
+    relinkMounted = true;
+    relinkOpen = true;
+  }
+
+  function previewTrack(item: LibraryTrack) {
+    if (item.missing_since != null) return;
+    void preview.toggleOrPlayTrack(item.id);
   }
 
   const track = $derived(pages.selectedTrack);
@@ -320,7 +351,7 @@
       if (preview.trackId !== null) {
         event.preventDefault();
         void preview.togglePlay();
-      } else if (track) {
+      } else if (track && track.missing_since == null) {
         event.preventDefault();
         void preview.loadAndPlay(track.id);
       }
@@ -390,7 +421,8 @@
           {activeCollection}
           loadFacets={() => core.call('library_facets')}
           onopen={showInspector}
-          onpreview={(item) => void preview.toggleOrPlayTrack(item.id)}
+          onpreview={previewTrack}
+          onrelink={openRelink}
           onscan={openScan}
           ontogglefavourite={toggleFavourite}
           onclearsearch={clearSearch}
@@ -412,7 +444,8 @@
         {collections}
         {activeCollection}
         onclose={() => (inspectorHidden = true)}
-        onpreview={(item) => void preview.toggleOrPlayTrack(item.id)}
+        onpreview={previewTrack}
+        onrelink={openRelink}
         ontogglefavourite={toggleFavourite}
         onaddtocollection={addTracksToCollection}
         onremovefromcollection={removeTracksFromCollection}
@@ -439,11 +472,11 @@
         durationMs={preview.durationMs}
         volume={preview.volume}
         muted={preview.muted}
-        canPlay={preview.trackId !== null || track != null}
+        canPlay={preview.trackId !== null || (track != null && track.missing_since == null)}
         error={preview.error}
         ontoggleplay={() => {
           if (preview.trackId !== null) void preview.togglePlay();
-          else if (track) void preview.loadAndPlay(track.id);
+          else if (track && track.missing_since == null) void preview.loadAndPlay(track.id);
         }}
         onseek={(ms) => void preview.seek(ms)}
         onvolume={(vol) => void preview.setVolume(vol)}
@@ -463,13 +496,28 @@
       {collections}
       {activeCollection}
       onclose={() => (sheetOpen = false)}
-      onpreview={(item) => void preview.toggleOrPlayTrack(item.id)}
+      onpreview={previewTrack}
+      onrelink={openRelink}
       ontogglefavourite={toggleFavourite}
       onaddtocollection={addTracksToCollection}
       onremovefromcollection={removeTracksFromCollection}
       oncreatecollectionandadd={createCollectionAndAdd}
     />
   </Sheet>
+{/if}
+
+{#if relinkMounted}
+  <RelinkSheet
+    bind:open={relinkOpen}
+    track={relinkTarget ? (pages.trackById(relinkTarget.id) ?? relinkTarget) : null}
+    client={relinkClient}
+    onrelinked={(updated) => {
+      pages.replaceLocalTrack(updated);
+      relinkTarget = updated;
+      void pages.refresh();
+      void loadCollections();
+    }}
+  />
 {/if}
 
 {#if settingsMounted}

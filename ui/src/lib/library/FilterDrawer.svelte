@@ -251,6 +251,25 @@
         {/each}
       </div>
     </section>
+
+    <ModularDivider />
+
+    <section class="section">
+      <div class="section-head">
+        <MonoLabel text="File status" tone="secondary" />
+        {#if facets != null}
+          <span class="bounds numeric">{facets.missing_count} missing</span>
+        {/if}
+      </div>
+      <label class="format-check">
+        <input
+          type="checkbox"
+          checked={Boolean(query.missing_only)}
+          onchange={() => onchange({ ...query, missing_only: query.missing_only ? null : true })}
+        />
+        <span>Missing files only</span>
+      </label>
+    </section>
   </div>
 
   {#snippet actions()}

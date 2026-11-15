@@ -62,6 +62,7 @@ pub struct ScanReport {
     pub added: usize,
     pub changed: usize,
     pub unchanged: usize,
+    pub missing_changed: usize,
     pub unreadable: Vec<Unreadable>,
 }
 
@@ -252,14 +253,10 @@ pub fn scan(
 
     let stamps = database.file_stamps(source)?;
     let has_identities = database.has_identified_assets()?;
-    let walked_paths: HashSet<String> = if has_identities {
-        files
-            .iter()
-            .filter_map(|path| stored_path(&root, path))
-            .collect()
-    } else {
-        HashSet::new()
-    };
+    let walked_paths: HashSet<String> = files
+        .iter()
+        .filter_map(|path| stored_path(&root, path))
+        .collect();
     let mut claimed_moves: HashSet<i64> = HashSet::new();
     let mut missing_identified_exists: Option<bool> = None;
 
@@ -269,6 +266,7 @@ pub fn scan(
         added: 0,
         changed: 0,
         unchanged: 0,
+        missing_changed: 0,
         unreadable: Vec::new(),
     };
     let mut read = Vec::new();
@@ -347,8 +345,45 @@ pub fn scan(
     }
     database.record_scan(source, &read)?;
 
+    let now_ms = resonance_db::now_unix_ms();
+    let mut presence_updates: Vec<(i64, Option<i64>)> = Vec::new();
+    for asset in database.included_assets_presence(source)? {
+        if walked_paths.contains(&asset.path) {
+            if asset.missing_since.is_some() {
+                presence_updates.push((asset.asset_id, None));
+            }
+        } else if asset.missing_since.is_none()
+            && !identity::full_asset_path(&report.source_folder, &asset.path).exists()
+        {
+            presence_updates.push((asset.asset_id, Some(now_ms)));
+        }
+    }
+    report.missing_changed = database.set_assets_missing_since(&presence_updates)?;
+
     report.unreadable = unreadable;
     Ok(report)
+}
+
+pub(crate) fn scan_single_file(file_path: &Path, stored: String) -> io::Result<ScannedFile> {
+    let format = AudioFormat::of(file_path).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "not a supported audio file extension",
+        )
+    })?;
+    let now = fs::metadata(file_path).and_then(|metadata| stamp(&metadata))?;
+    let (audio, tags) = match file_tags::read(file_path) {
+        Ok(contents) => (Some(contents.audio), contents.tags),
+        Err(_) => (None, Vec::new()),
+    };
+    Ok(ScannedFile {
+        path: stored,
+        size_bytes: now.size_bytes,
+        modified_ns: now.modified_ns,
+        format,
+        audio,
+        tags,
+    })
 }
 
 fn try_reconcile_moved_on_scan(

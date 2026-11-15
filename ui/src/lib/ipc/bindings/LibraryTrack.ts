@@ -14,4 +14,8 @@ key_tag: string | null, format: string, location: string, size_bytes: number,
 /**
  * Missing when the file could not be read as audio.
  */
-audio: TrackAudio | null, collections: Array<TrackCollection>, };
+audio: TrackAudio | null, collections: Array<TrackCollection>, 
+/**
+ * Unix epoch milliseconds when the file was found missing on disk, if missing.
+ */
+missing_since: number | null, };

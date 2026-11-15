@@ -7,6 +7,14 @@ use rusqlite::{OptionalExtension, Transaction, params};
 
 use crate::{Database, DbError, SourceId};
 
+/// Presence state of an included asset inside a library source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceAssetPresence {
+    pub asset_id: i64,
+    pub path: String,
+    pub missing_since: Option<i64>,
+}
+
 /// A music folder in the library and how scans and watchers treat its subfolders.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceConfig {
@@ -281,5 +289,67 @@ impl Database {
         };
         transaction.commit()?;
         Ok(removed)
+    }
+
+    /// Every included asset in `source` with its relative path and current `missing_since` state.
+    pub fn included_assets_presence(
+        &self,
+        source: SourceId,
+    ) -> Result<Vec<SourceAssetPresence>, DbError> {
+        let mut stmt = self.connection.prepare(
+            "SELECT id, path, missing_since
+             FROM asset
+             WHERE source_id = ?1 AND included = 1
+             ORDER BY id",
+        )?;
+        let rows = stmt
+            .query_map([source.0], |row| {
+                Ok(SourceAssetPresence {
+                    asset_id: row.get(0)?,
+                    path: row.get(1)?,
+                    missing_since: row.get(2)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Batch-updates `asset.missing_since` and returns how many rows changed.
+    pub fn set_assets_missing_since(
+        &mut self,
+        updates: &[(i64, Option<i64>)],
+    ) -> Result<usize, DbError> {
+        if updates.is_empty() {
+            return Ok(0);
+        }
+        let tx = self.connection.transaction()?;
+        let mut changed = 0usize;
+        {
+            let mut stmt = tx.prepare("UPDATE asset SET missing_since = ?2 WHERE id = ?1")?;
+            for &(asset_id, missing_since) in updates {
+                changed += stmt.execute(params![asset_id, missing_since])?;
+            }
+        }
+        tx.commit()?;
+        Ok(changed)
+    }
+
+    /// Returns the existing `SourceId` for `folder` or creates an un-watched, non-recursive source
+    /// when a track is manually relinked to a file outside existing library folders.
+    pub fn source_for_unwatched_folder(&mut self, folder: &str) -> Result<SourceId, DbError> {
+        let known = self
+            .connection
+            .query_row("SELECT id FROM source WHERE folder = ?1", [folder], |row| {
+                row.get(0)
+            })
+            .optional()?;
+        if let Some(id) = known {
+            return Ok(SourceId(id));
+        }
+        self.connection.execute(
+            "INSERT INTO source (folder, include_subfolders, watch) VALUES (?1, 0, 0)",
+            [folder],
+        )?;
+        Ok(SourceId(self.connection.last_insert_rowid()))
     }
 }

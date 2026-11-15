@@ -10,24 +10,28 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 pub use collections::{CollectionSummary, TrackCollection};
-pub use identity::{IdentityMatch, PendingAsset, StoredAssetIdentity};
+pub use identity::{
+    IdentityMatch, PendingAsset, StoredAssetIdentity, StoredRelinkCandidate,
+    StoredTrackRelinkTarget,
+};
 use resonance_core::collections::CollectionNameError;
 use resonance_core::library::{
     AudioFacts, AudioFormat, ScannedFile, TagField, is_asset_path_included,
 };
 use rusqlite::{Connection, OptionalExtension, Row, params};
-pub use search::LibraryFacets;
-pub use sources::SourceConfig;
+pub use search::{LibraryFacets, now_unix_ms};
+pub use sources::{SourceAssetPresence, SourceConfig};
 
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
-const MIGRATIONS: [&str; 6] = [
+const MIGRATIONS: [&str; 7] = [
     include_str!("../migrations/0001_library.sql"),
     include_str!("../migrations/0002_sources.sql"),
     include_str!("../migrations/0003_identity.sql"),
     include_str!("../migrations/0004_search_and_sort.sql"),
     include_str!("../migrations/0005_asset_fts_delete_trigger.sql"),
     include_str!("../migrations/0006_collections.sql"),
+    include_str!("../migrations/0007_missing_files.sql"),
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -115,6 +119,7 @@ pub struct TrackRow {
     pub file: ScannedFile,
     pub favourite: bool,
     pub collections: Vec<TrackCollection>,
+    pub missing_since: Option<i64>,
 }
 
 /// The connection that writes. Readers open their own.
@@ -239,9 +244,9 @@ impl Database {
             let mut update_asset = transaction.prepare(
                 "UPDATE asset SET size_bytes = ?2, modified_ns = ?3, format = ?4, duration_ms = ?5,
                      sample_rate = ?6, channels = ?7, bit_depth = ?8, bitrate_kbps = ?9,
-                     included = ?10, sort_title = ?11, sort_artist = ?12, tag_album = ?13,
-                     tag_genre = ?14, tag_label = ?15, tag_key = ?16, sort_key = ?17,
-                     tag_bpm = ?18, tag_year = ?19
+                     included = ?10, missing_since = NULL, sort_title = ?11, sort_artist = ?12,
+                     tag_album = ?13, tag_genre = ?14, tag_label = ?15, tag_key = ?16,
+                     sort_key = ?17, tag_bpm = ?18, tag_year = ?19
                  WHERE id = ?1",
             )?;
             let mut clear_tags = transaction.prepare("DELETE FROM file_tag WHERE asset_id = ?1")?;
@@ -434,7 +439,7 @@ impl Database {
 /// 585 ms instead of 13 ms.
 const TRACKS_IN_ORDER: &str = "SELECT asset.id, asset.track_id, source.folder, asset.path,
          asset.size_bytes, asset.modified_ns, asset.format, asset.duration_ms, asset.sample_rate,
-         asset.channels, asset.bit_depth, asset.bitrate_kbps, track.favourite
+         asset.channels, asset.bit_depth, asset.bitrate_kbps, track.favourite, asset.missing_since
      FROM source
      CROSS JOIN asset ON asset.source_id = source.id
      JOIN track ON track.id = asset.track_id
@@ -467,6 +472,7 @@ pub(crate) fn track_row(row: &Row<'_>) -> Result<(i64, TrackRow), DbError> {
         None => None,
     };
     let favourite_raw: i64 = row.get(12)?;
+    let missing_since: Option<i64> = row.get(13)?;
     let track = TrackRow {
         track_id: row.get(1)?,
         source_folder: row.get(2)?,
@@ -480,6 +486,7 @@ pub(crate) fn track_row(row: &Row<'_>) -> Result<(i64, TrackRow), DbError> {
         },
         favourite: favourite_raw != 0,
         collections: Vec::new(),
+        missing_since,
     };
     Ok((row.get(0)?, track))
 }
@@ -785,5 +792,49 @@ mod tests {
             .execute("UPDATE asset SET included = 0 WHERE track_id = 1", [])
             .expect("asset excludes");
         assert!(db.track_by_id(1).expect("lookup succeeds").is_none());
+    }
+
+    #[test]
+    fn migrating_from_v6_adds_missing_since_and_filters_missing_tracks() {
+        use resonance_core::search::TrackQuery;
+
+        let mut v6 = Connection::open_in_memory().expect("in-memory sqlite opens");
+        v6.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("foreign keys enable");
+        for (i, sql) in MIGRATIONS[..6].iter().enumerate() {
+            v6.execute_batch(sql).expect("prior migration runs");
+            v6.pragma_update(None, "user_version", i64::try_from(i + 1).expect("fits"))
+                .expect("user_version stamps");
+        }
+        v6.execute("INSERT INTO source (folder) VALUES ('D:\\Club')", [])
+            .expect("source inserts");
+        v6.execute("INSERT INTO track DEFAULT VALUES", [])
+            .expect("track inserts");
+        v6.execute(
+            "INSERT INTO asset (track_id, source_id, path, size_bytes, modified_ns, format, sort_title)
+             VALUES (1, 1, '01/missing_cut.flac', 100, 1000, 'flac', 'missing cut')",
+            [],
+        )
+        .expect("asset inserts");
+
+        migrate(&mut v6).expect("v6 migrates to v7");
+        let mut db = Database { connection: v6 };
+        assert_eq!(db.tracks().expect("tracks read")[0].missing_since, None);
+
+        db.set_assets_missing_since(&[(1, Some(1_730_000_000_000))])
+            .expect("marks missing");
+        assert_eq!(
+            db.tracks().expect("tracks read")[0].missing_since,
+            Some(1_730_000_000_000)
+        );
+        assert_eq!(db.library_facets().expect("facets").missing_count, 1);
+        assert_eq!(
+            db.query_track_count(&TrackQuery {
+                missing_only: true,
+                ..TrackQuery::default()
+            })
+            .expect("missing count"),
+            1
+        );
     }
 }

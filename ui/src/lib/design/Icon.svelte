@@ -28,7 +28,9 @@
     | 'sidebar-collapse'
     | 'arrow-right'
     | 'volume'
-    | 'volume-mute';
+    | 'volume-mute'
+    | 'missing'
+    | 'relink';
 </script>
 
 <script lang="ts">
@@ -42,6 +44,7 @@
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import ChevronUp from '@lucide/svelte/icons/chevron-up';
   import Circle from '@lucide/svelte/icons/circle';
+  import CircleAlert from '@lucide/svelte/icons/circle-alert';
   import Clock from '@lucide/svelte/icons/clock';
   import Disc3 from '@lucide/svelte/icons/disc-3';
   import Ellipsis from '@lucide/svelte/icons/ellipsis';
@@ -50,6 +53,7 @@
   import Inbox from '@lucide/svelte/icons/inbox';
   import Info from '@lucide/svelte/icons/info';
   import Library from '@lucide/svelte/icons/library';
+  import Link2 from '@lucide/svelte/icons/link-2';
   import ListMusic from '@lucide/svelte/icons/list-music';
   import PanelLeftClose from '@lucide/svelte/icons/panel-left-close';
   import Pause from '@lucide/svelte/icons/pause';
@@ -102,6 +106,8 @@
     'arrow-right': ArrowRight,
     volume: Volume2,
     'volume-mute': VolumeX,
+    missing: CircleAlert,
+    relink: Link2,
   };
 
   const pixelSize = $derived.by(() => {

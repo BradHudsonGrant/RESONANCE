@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, renameSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test } from '@playwright/test';
@@ -405,4 +405,115 @@ test('preview plays from row, Inspector, double-click and Spacebar with PlayerBa
   await page.setViewportSize({ width: 1100, height: 700 });
   const playerBox = await player.boundingBox();
   expect(playerBox && playerBox.x + playerBox.width <= 1100).toBe(true);
+});
+
+test('missing files stay in the library and collections, warn on mismatched audio, and relink to moved copies', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1586, height: 992 });
+  await page.goto('/');
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible({ timeout: 10_000 });
+
+  const sidebar = page.getByRole('navigation', { name: 'Spaces' });
+  const table = page.getByRole('grid', { name: 'Tracks' });
+  const inspector = page.getByRole('complementary', { name: 'Inspector' });
+
+  // Assign Kofi Bell - Third Rail to a collection and favourites before its file disappears.
+  await sidebar.getByRole('button', { name: 'New collection' }).click();
+  const createInput = sidebar.getByRole('textbox', { name: 'New collection name' });
+  await createInput.fill('Crate');
+  await createInput.press('Enter');
+  const crateRow = sidebar.getByRole('button', { name: /^Crate/ });
+  await expect(crateRow).toBeVisible();
+
+  await table.getByText('Kofi Bell - Third Rail').click();
+  await inspector.getByRole('button', { name: 'Favourite track' }).click();
+  await expect(inspector.getByRole('button', { name: 'Favourite track' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await inspector.getByRole('button', { name: 'Add to collection' }).click();
+  await page.getByRole('menuitemcheckbox', { name: /Crate/ }).click();
+  await expect(crateRow).toContainText('1');
+
+  const originalGarage = join(musicFolder, 'Garage', 'Kofi Bell - Third Rail.aiff');
+  const relocatedDir = join(musicFolder, '..', 'relocated');
+  const relocatedGarage = join(relocatedDir, 'Kofi Bell - Third Rail Moved.aiff');
+  const unrelatedWav = join(musicFolder, 'House', 'Ada Marsh - First Light.wav');
+
+  mkdirSync(relocatedDir, { recursive: true });
+  try {
+    copyFileSync(originalGarage, relocatedGarage);
+    rmSync(originalGarage, { force: true });
+
+    // The watched source flags the file missing without removing the track or its collection membership.
+    await expect(
+      table.getByRole('button', { name: 'Missing file for Kofi Bell - Third Rail — Relink' }),
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText('6 tracks', { exact: true })).toBeVisible();
+    await expect(crateRow).toContainText('1');
+    await expect(inspector.getByText('Missing file')).toBeVisible();
+    await expect(
+      inspector.getByRole('button', { name: 'Play Kofi Bell - Third Rail' }),
+    ).toBeDisabled();
+
+    // Filter drawer isolates missing files cleanly.
+    await page.getByRole('button', { name: 'Filters' }).click();
+    const drawer = page.getByRole('dialog', { name: 'Filters' });
+    await drawer.getByRole('checkbox', { name: 'Missing files only' }).check();
+    await expect(table.getByText('Kofi Bell - Third Rail')).toBeVisible();
+    await expect(table.getByText('Ada Marsh - First Light')).toHaveCount(0);
+    await drawer.getByRole('button', { name: 'Clear' }).click();
+    await drawer.getByRole('button', { name: 'Done' }).click();
+
+    // Reselect Kofi Bell - Third Rail after clearing filters and inspect a mismatched recording.
+    await table.getByText('Kofi Bell - Third Rail').click();
+    await inspector.getByRole('button', { name: 'Relink…' }).click();
+    const relinkDialog = page.getByRole('dialog', { name: 'Relink missing file' });
+    await expect(relinkDialog).toBeVisible();
+
+    await relinkDialog.getByRole('textbox', { name: 'Replacement file path' }).fill(unrelatedWav);
+    await relinkDialog.getByRole('button', { name: 'Inspect' }).click();
+    await expect(relinkDialog.getByRole('alert')).toContainText('does not match the missing track');
+    await expect(relinkDialog.getByRole('button', { name: 'Relink selected file' })).toBeDisabled();
+
+    // Searching the relocated folder finds the exact copy and relinks in one click.
+    await relinkDialog
+      .getByRole('textbox', { name: 'Folder to search for matching copies' })
+      .fill(relocatedDir);
+    await relinkDialog.getByRole('button', { name: 'Search folder' }).click();
+    await expect(relinkDialog.getByText('Exact file copy')).toBeVisible();
+    await relinkDialog
+      .getByRole('button', { name: /Relink to .*Kofi Bell - Third Rail Moved\.aiff/i })
+      .click();
+    await expect(relinkDialog).toBeHidden();
+
+    // Track count, collection membership and favourite state remain intact and missing clears.
+    await expect(page.getByText('6 tracks', { exact: true })).toBeVisible();
+    await expect(crateRow).toContainText('1');
+    await expect(inspector.getByText('Missing file')).toHaveCount(0);
+    await expect(inspector.getByRole('button', { name: 'Favourite track' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(inspector.getByRole('button', { name: 'Remove Crate' })).toBeVisible();
+    await expect(inspector).toContainText('Kofi Bell - Third Rail Moved.aiff');
+    await expect(
+      inspector.getByRole('button', { name: 'Play Kofi Bell - Third Rail' }),
+    ).toBeEnabled();
+
+    // Clicking the selected row again deselects it, Ctrl+A selects all tracks, and Deselect clears all.
+    await table.getByText('Kofi Bell - Third Rail').click();
+    await expect(inspector).toContainText('Select a track in the table');
+    await page.keyboard.press('Control+a');
+    await expect(table.getByText('6 selected')).toBeVisible();
+    await table.getByRole('button', { name: 'Deselect' }).click();
+    await expect(table.getByRole('region', { name: 'Selected tracks' })).toHaveCount(0);
+    await expect(table.locator('[role="row"][aria-selected="true"]')).toHaveCount(0);
+  } finally {
+    if (!existsSync(originalGarage) && existsSync(relocatedGarage)) {
+      copyFileSync(relocatedGarage, originalGarage);
+    }
+    rmSync(relocatedDir, { recursive: true, force: true });
+  }
 });

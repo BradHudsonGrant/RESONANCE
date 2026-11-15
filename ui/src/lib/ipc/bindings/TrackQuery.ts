@@ -4,4 +4,4 @@ import type { TrackFilterPill } from "./TrackFilterPill";
 import type { TrackFormat } from "./TrackFormat";
 import type { TrackSortField } from "./TrackSortField";
 
-export type TrackQuery = { text?: string | null, pill?: TrackFilterPill | null, bpm_min?: number | null, bpm_max?: number | null, keys?: Array<string> | null, year_min?: number | null, year_max?: number | null, label?: string | null, formats?: Array<TrackFormat> | null, collection_id?: number | null, sort?: TrackSortField | null, direction?: SortDirection | null, };
+export type TrackQuery = { text?: string | null, pill?: TrackFilterPill | null, bpm_min?: number | null, bpm_max?: number | null, keys?: Array<string> | null, year_min?: number | null, year_max?: number | null, label?: string | null, formats?: Array<TrackFormat> | null, collection_id?: number | null, missing_only?: boolean | null, sort?: TrackSortField | null, direction?: SortDirection | null, };
