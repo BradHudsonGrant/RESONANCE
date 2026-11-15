@@ -21,6 +21,7 @@
     | 'close'
     | 'more'
     | 'info'
+    | 'chevron-up'
     | 'chevron-down'
     | 'chevron-right'
     | 'headphones'
@@ -37,6 +38,7 @@
   import Check from '@lucide/svelte/icons/check';
   import ChevronDown from '@lucide/svelte/icons/chevron-down';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
+  import ChevronUp from '@lucide/svelte/icons/chevron-up';
   import Circle from '@lucide/svelte/icons/circle';
   import Clock from '@lucide/svelte/icons/clock';
   import Disc3 from '@lucide/svelte/icons/disc-3';
@@ -88,6 +90,7 @@
     close: X,
     more: Ellipsis,
     info: Info,
+    'chevron-up': ChevronUp,
     'chevron-down': ChevronDown,
     'chevron-right': ChevronRight,
     headphones: Headphones,

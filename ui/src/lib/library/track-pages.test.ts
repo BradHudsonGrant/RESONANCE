@@ -237,4 +237,55 @@ describe('TrackPages', () => {
     pages.setLocalFavourite(6, false);
     expect(pages.track(0)?.favourite).toBe(false);
   });
+
+  it('dispatches the first query immediately and coalesces rapid follow-ups while one is in flight', async () => {
+    const sentTexts: (string | null | undefined)[] = [];
+    const resolvers: (() => void)[] = [];
+
+    const pages = new TrackPages((offset, _limit, query) => {
+      sentTexts.push(query.text ?? null);
+      if (sentTexts.length === 1) {
+        return Promise.resolve({
+          total: 2,
+          library_total: 10,
+          offset,
+          tracks: [fakeTrack(0), fakeTrack(1)],
+        });
+      }
+      return new Promise((resolve) => {
+        const text = query.text ?? '';
+        resolvers.push(() =>
+          resolve({
+            total: 1,
+            library_total: 10,
+            offset,
+            tracks: [{ ...fakeTrack(0), title: `Hit:${text}` }],
+          }),
+        );
+      });
+    });
+
+    await pages.load();
+    expect(sentTexts).toEqual([null]);
+
+    // First keystroke dispatches synchronously with zero timer wait.
+    const firstKey = pages.setQuery({ text: 'a' });
+    expect(sentTexts).toEqual([null, 'a']);
+
+    // Intermediate keystrokes while 'a' is in flight do not queue redundant reads.
+    const secondKey = pages.setQuery({ text: 'ab' });
+    const thirdKey = pages.setQuery({ text: 'abc' });
+    expect(sentTexts).toEqual([null, 'a']);
+
+    // Once 'a' returns, only the latest query ('abc') is sent, skipping 'ab'.
+    resolvers.shift()?.();
+    await settled();
+    expect(sentTexts).toEqual([null, 'a', 'abc']);
+    expect(pages.track(0)?.title).toBe('Track 0');
+
+    resolvers.shift()?.();
+    await Promise.all([firstKey, secondKey, thirdKey]);
+    expect(sentTexts).toEqual([null, 'a', 'abc']);
+    expect(pages.track(0)?.title).toBe('Hit:abc');
+  });
 });

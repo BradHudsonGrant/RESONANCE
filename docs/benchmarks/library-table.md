@@ -214,7 +214,7 @@ Across five release runs (`6,000` scrolling frames on 100,000 rows), every pass 
 
 ## 15 November 2026, M2 search, filters, sort and scroll on 100,000 rows
 
-Machine: Intel Core Ultra 9 285H, `64 GB` RAM, Microsoft Windows 11 Pro. Headless Microsoft Edge `157.0.4341.60` ran the UI at `1440 × 900` CSS pixels (`1.25` device pixel ratio, `4.2 ms` refresh interval at 240 Hz) through Vite in `benchmark` mode against a release `resonance` process serving a `100,000`-track synthetic library (`50` tracks marked favourite). Query timings measure full WebSocket JSON round-trips from the page over `/core` across `20` warm calls after one cold call (`library_facets` used `10` warm calls).
+Same machine and release protocol (`1440 × 900` CSS pixels, `1.25` device pixel ratio, `4.2 ms` refresh at 240 Hz) in headless Microsoft Edge `157.0.4341.60` through Vite in `benchmark` mode against a release `resonance` process serving the `100,000`-track synthetic library (`50` tracks marked favourite). Query timings measure full WebSocket JSON round-trips from the page over `/core` across `20` warm calls after one cold call (`library_facets` used `10` warm calls).
 
 | Query case                                                 | Hits    | Cold    | Median  | 95th percentile |
 | ---------------------------------------------------------- | ------- | ------- | ------- | --------------- |
@@ -236,7 +236,7 @@ Machine: Intel Core Ultra 9 285H, `64 GB` RAM, Microsoft Windows 11 Pro. Headles
 | Combined FTS5, BPM, key and `BPM` asc sort                 | 19      | 19.4 ms | 18.5 ms | 19.8 ms         |
 | `library_facets` (labels, BPM and year bounds)             | —       | 12.9 ms | 12.7 ms | 13.5 ms         |
 
-End-to-end live search in `CommandBar` (from input fill to rendered DOM update, including the `60 ms` non-empty input debounce) took `100.8 ms` for `"Island Field"`, `117.3 ms` for `"zzznomatch"` and `46.9 ms` when clearing back to empty.
+End-to-end live search in `CommandBar` (from `input` event to rendered DOM update over `11` runs after warm-up, using immediate dispatch with single-request in-flight coalescing and no input timer) took `14.6 ms` median (`21.8 ms` 95th percentile) for `"Island Field"`, `6.7 ms` median (`10.7 ms` 95th percentile) for `"zzznomatch"`, and `11.8 ms` median (`12.6 ms` 95th percentile) when clearing back to `100,000` rows.
 
 Five `measureTableScroll()` runs on the updated `TrackTable` (sortable column headers and status-column favourite buttons, `600` fling frames and `600` jump frames per run at `4.2 ms` display refresh):
 

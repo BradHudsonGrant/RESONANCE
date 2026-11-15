@@ -66,6 +66,7 @@
     'close',
     'more',
     'info',
+    'chevron-up',
     'chevron-down',
     'chevron-right',
     'headphones',
