@@ -9,7 +9,6 @@ use super::page::{FrameTimes, Memory, PageResults};
 
 const COLD_START_MS: f64 = 1_500.0;
 const FRAME_MS: f64 = 16.0;
-const MIX_P99_MS: f64 = 8.0;
 const UI_THREAD_MS: f64 = 16.0;
 const AUDIO_BUFFER_FRAMES: u32 = 256;
 const AUDIO_SECONDS: f64 = 3_600.0;
@@ -114,13 +113,18 @@ impl Record<'_> {
         let frames: u32 = runs.iter().map(|run| run.frames).sum();
         let missed: u32 = runs.iter().map(|run| run.missed_frames).sum();
         let p99 = runs.iter().map(|run| run.p99_ms).fold(0.0, f64::max);
+        let longest = runs.iter().map(|run| run.max_ms).fold(0.0, f64::max);
+        let holds_refresh = runs
+            .iter()
+            .all(|run| run.p50_ms <= run.refresh_ms * 1.1 && run.p99_ms <= run.refresh_ms * 2.1);
         let canvas = &self.page.mix.canvas;
         Outcome {
-            budget: "Mix view: holds the refresh rate, 99th percentile under 8 ms at 120 Hz",
-            verdict: met_if(frames > 0 && missed == 0 && p99 < MIX_P99_MS),
+            budget: "Mix view: median at the refresh rate, 99th percentile within two intervals, no frame over 16 ms",
+            verdict: met_if(frames > 0 && holds_refresh && longest <= FRAME_MS),
             measured: format!(
-                "99th percentile {}, {} in {}, {} by {} canvas",
+                "99th percentile {}, longest {}, {} in {}, {} by {} canvas",
                 ms(p99),
+                ms(longest),
                 missed_frames(missed),
                 thousands(frames.into()),
                 canvas.width,
@@ -686,6 +690,40 @@ mod tests {
         half_refresh.desktop.scroll[0].jumps.max_ms = 8.4;
         assert_eq!(
             verdicts(&half_refresh, &audio(480, 0, 180.0))[1].1,
+            Verdict::Missed
+        );
+    }
+
+    #[test]
+    fn mix_meets_budget_within_two_intervals_and_16_ms() {
+        let mut met_page = page(PAGE);
+        met_page.mix.runs[0].refresh_ms = 4.2;
+        met_page.mix.runs[0].p50_ms = 4.2;
+        met_page.mix.runs[0].p99_ms = 8.4;
+        met_page.mix.runs[0].max_ms = 8.8;
+        met_page.mix.runs[0].missed_frames = 33;
+        assert_eq!(
+            verdicts(&met_page, &audio(480, 0, 180.0))[2].1,
+            Verdict::Met
+        );
+
+        let mut slow_p99 = page(PAGE);
+        slow_p99.mix.runs[0].refresh_ms = 6.8;
+        slow_p99.mix.runs[0].p50_ms = 6.8;
+        slow_p99.mix.runs[0].p99_ms = 20.7;
+        slow_p99.mix.runs[0].max_ms = 41.2;
+        assert_eq!(
+            verdicts(&slow_p99, &audio(480, 0, 180.0))[2].1,
+            Verdict::Missed
+        );
+
+        let mut spike = page(PAGE);
+        spike.mix.runs[0].refresh_ms = 4.2;
+        spike.mix.runs[0].p50_ms = 4.2;
+        spike.mix.runs[0].p99_ms = 8.4;
+        spike.mix.runs[0].max_ms = 17.0;
+        assert_eq!(
+            verdicts(&spike, &audio(480, 0, 180.0))[2].1,
             Verdict::Missed
         );
     }

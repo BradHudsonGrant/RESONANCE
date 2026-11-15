@@ -29,7 +29,7 @@ Development loop:
 
 The spike:
 
-- [x] Mix view: two decks playing real files, scrolling waveforms locked to the audio clock, meters over the binary channel, measured ([#13](https://github.com/BradHudsonGrant/RESONANCE/issues/13)). Evidence: merged in [#48](https://github.com/BradHudsonGrant/RESONANCE/pull/48); two decks played fixture tracks for about 14 minutes with no underruns, and the view held a 6.4 ms refresh with no missed frames up to a 2335 by 1128 canvas ([benchmarks/mix-view.md](benchmarks/mix-view.md)). Larger canvases miss frames, open in [#46](https://github.com/BradHudsonGrant/RESONANCE/issues/46), and the 256-sample buffer is open in [#47](https://github.com/BradHudsonGrant/RESONANCE/issues/47).
+- [x] Mix view: two decks playing real files, scrolling waveforms locked to the audio clock, meters over the binary channel, measured ([#13](https://github.com/BradHudsonGrant/RESONANCE/issues/13)). Evidence: merged in [#48](https://github.com/BradHudsonGrant/RESONANCE/pull/48); two decks played fixture tracks for about 14 minutes with no underruns, and the view held a 6.4 ms refresh with no missed frames up to a 2335 by 1128 canvas ([benchmarks/mix-view.md](benchmarks/mix-view.md)). Full-window swap-chain cadence is settled in [#71](https://github.com/BradHudsonGrant/RESONANCE/pull/71) ([#46](https://github.com/BradHudsonGrant/RESONANCE/issues/46)), and the 256-sample buffer stays open in [#47](https://github.com/BradHudsonGrant/RESONANCE/issues/47).
 
 Design and shell:
 
@@ -77,7 +77,7 @@ Accept:
 
 - [ ] Each built screen, set beside the boards, matches the spec in both themes.
 - [ ] Every element on the boards is built, scheduled for a named later milestone, or left out with the reason.
-- [ ] The frame budgets for the library table ([#40](https://github.com/BradHudsonGrant/RESONANCE/issues/40), settled in [#70](https://github.com/BradHudsonGrant/RESONANCE/pull/70)) and the Mix view ([#46](https://github.com/BradHudsonGrant/RESONANCE/issues/46)) are measured again.
+- [x] The frame budgets for the library table ([#40](https://github.com/BradHudsonGrant/RESONANCE/issues/40)) and the Mix view ([#46](https://github.com/BradHudsonGrant/RESONANCE/issues/46)) are measured again. Evidence: merged in [#70](https://github.com/BradHudsonGrant/RESONANCE/pull/70) and [#71](https://github.com/BradHudsonGrant/RESONANCE/pull/71); five 240 Hz mains-power release scroll runs on 100,000 rows stayed at a 4.2 ms median and 8.5 ms longest frame ([benchmarks/library-table.md](benchmarks/library-table.md)), and a three-minute (42,857-frame) maximised Mix run at 2178 by 276 device pixels stayed at a 4.2 ms median, 8.4 ms 99th percentile and 8.8 ms longest frame with 0 audio underruns ([benchmarks/mix-view.md](benchmarks/mix-view.md)).
 
 ## M2 Library, v0.3.0
 

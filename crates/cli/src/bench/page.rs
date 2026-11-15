@@ -107,6 +107,7 @@ pub struct Size {
 pub struct MixRun {
     pub frames: u32,
     pub refresh_ms: f64,
+    pub p50_ms: f64,
     pub p99_ms: f64,
     pub max_ms: f64,
     pub missed_frames: u32,
