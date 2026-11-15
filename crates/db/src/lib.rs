@@ -404,6 +404,27 @@ impl Database {
             |row| row.get(0),
         )?)
     }
+
+    /// Returns the track row for `track_id` (preferring its primary included asset), or `None`.
+    pub fn track_by_id(&self, track_id: i64) -> Result<Option<TrackRow>, DbError> {
+        let asset_id: Option<i64> = self
+            .connection
+            .query_row(
+                "SELECT id FROM asset
+                 WHERE track_id = ?1 AND included = 1
+                 ORDER BY is_primary DESC, id ASC
+                 LIMIT 1",
+                [track_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(asset_id) = asset_id else {
+            return Ok(None);
+        };
+        Ok(search::load_tracks_by_ids(&self.connection, &[asset_id])?
+            .into_iter()
+            .next())
+    }
 }
 
 /// Library order: by source folder, then by path. Read sources by their folder index and each
@@ -726,5 +747,43 @@ mod tests {
             .execute("DELETE FROM track WHERE id = 1", [])
             .expect("track deletes");
         assert_eq!(db.collections().expect("lists")[0].track_count, 0);
+    }
+
+    #[test]
+    fn track_by_id_returns_primary_included_track_or_none() {
+        use resonance_core::library::{AudioFacts, AudioFormat, ScannedFile, TagField};
+
+        let mut db = Database::open_in_memory().expect("in-memory sqlite opens");
+        let source = db.source("D:\\Club").expect("source opens");
+        let files = [ScannedFile {
+            path: "deep/opener.flac".to_owned(),
+            size_bytes: 1_234,
+            modified_ns: 0,
+            format: AudioFormat::Flac,
+            audio: Some(AudioFacts {
+                duration_ms: 185_000,
+                sample_rate: Some(44_100),
+                channels: Some(2),
+                bit_depth: Some(16),
+                bitrate_kbps: Some(900),
+            }),
+            tags: vec![(TagField::Title, "Opener".to_owned())],
+        }];
+        db.record_scan(source, &files).expect("scan writes");
+
+        let found = db
+            .track_by_id(1)
+            .expect("lookup succeeds")
+            .expect("track exists");
+        assert_eq!(found.track_id, 1);
+        assert_eq!(found.file.title(), "Opener");
+        assert_eq!(found.source_folder, "D:\\Club");
+
+        assert!(db.track_by_id(999).expect("lookup succeeds").is_none());
+
+        db.connection
+            .execute("UPDATE asset SET included = 0 WHERE track_id = 1", [])
+            .expect("asset excludes");
+        assert!(db.track_by_id(1).expect("lookup succeeds").is_none());
     }
 }

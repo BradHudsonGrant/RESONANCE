@@ -16,6 +16,11 @@ pub(crate) struct Clock {
     latency_ns: AtomicU64,
     played_frames: [AtomicU64; DECKS],
     playing: [AtomicU32; DECKS],
+    preview_generation: AtomicU32,
+    preview_state_seq: AtomicU32,
+    preview_played_frames: AtomicU64,
+    preview_playing: AtomicU32,
+    preview_ended: AtomicU32,
 }
 
 /// One callback's view of the clock.
@@ -28,6 +33,11 @@ pub(crate) struct ClockReading {
     /// Frames each deck had played before that buffer, at the device's sample rate.
     pub played_frames: [u64; DECKS],
     pub playing: [bool; DECKS],
+    pub preview_generation: u32,
+    pub preview_state_seq: u32,
+    pub preview_played_frames: u64,
+    pub preview_playing: bool,
+    pub preview_ended: bool,
 }
 
 impl Clock {
@@ -42,6 +52,16 @@ impl Clock {
             self.played_frames[deck].store(reading.played_frames[deck], Ordering::Relaxed);
             self.playing[deck].store(u32::from(reading.playing[deck]), Ordering::Relaxed);
         }
+        self.preview_generation
+            .store(reading.preview_generation, Ordering::Relaxed);
+        self.preview_state_seq
+            .store(reading.preview_state_seq, Ordering::Relaxed);
+        self.preview_played_frames
+            .store(reading.preview_played_frames, Ordering::Relaxed);
+        self.preview_playing
+            .store(u32::from(reading.preview_playing), Ordering::Relaxed);
+        self.preview_ended
+            .store(u32::from(reading.preview_ended), Ordering::Relaxed);
         self.sequence
             .store(sequence.wrapping_add(2), Ordering::Release);
     }
@@ -56,6 +76,11 @@ impl Clock {
             let mut reading = ClockReading {
                 anchor_ns: self.anchor_ns.load(Ordering::Relaxed),
                 latency_ns: self.latency_ns.load(Ordering::Relaxed),
+                preview_generation: self.preview_generation.load(Ordering::Relaxed),
+                preview_state_seq: self.preview_state_seq.load(Ordering::Relaxed),
+                preview_played_frames: self.preview_played_frames.load(Ordering::Relaxed),
+                preview_playing: self.preview_playing.load(Ordering::Relaxed) != 0,
+                preview_ended: self.preview_ended.load(Ordering::Relaxed) != 0,
                 ..ClockReading::default()
             };
             for deck in 0..DECKS {
@@ -148,6 +173,7 @@ mod tests {
             latency_ns: 21_000_000,
             played_frames: [48_000, 96_000],
             playing: [true, false],
+            ..ClockReading::default()
         };
 
         clock.publish(&reading);

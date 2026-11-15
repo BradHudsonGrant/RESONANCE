@@ -18,10 +18,13 @@
     pages: TrackPages;
     /** The place in library order of the selected track. */
     selected?: number | null;
+    previewTrackId?: number | null;
+    previewPlaying?: boolean;
     collections?: LibraryCollection[];
     activeCollection?: LibraryCollection | null;
     /** Enter or a double click on a row. */
     onopen?: () => void;
+    onpreview?: (track: LibraryTrack) => void;
     ontogglefavourite?: (track: LibraryTrack) => void;
     onsort?: (sort: TrackSortField, direction: SortDirection) => void;
     onaddtocollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
@@ -40,9 +43,12 @@
   let {
     pages,
     selected = $bindable(null),
+    previewTrackId = null,
+    previewPlaying = false,
     collections = [],
     activeCollection = null,
     onopen,
+    onpreview,
     ontogglefavourite,
     onsort,
     onaddtocollection,
@@ -463,6 +469,8 @@
           {@const track = pages.track(index)}
           {@const isSelected = index === selected}
           {@const isChecked = track ? checkedIds.has(track.id) : false}
+          {@const isPreviewTrack = Boolean(track && previewTrackId === track.id)}
+          {@const isPreviewPlaying = isPreviewTrack && previewPlaying}
           <TableRow
             id="{id}-row-{index}"
             aria-rowindex={index + 2}
@@ -471,7 +479,8 @@
             onclick={() => select(index)}
             ondblclick={() => {
               select(index);
-              onopen?.();
+              if (track && onpreview) onpreview(track);
+              else onopen?.();
             }}
           >
             <!-- The cells stay while a row waits for its page, so a jump changes text and does
@@ -489,6 +498,7 @@
                   event.stopPropagation();
                   if (track) toggleChecked(track);
                 }}
+                ondblclick={(event) => event.stopPropagation()}
               >
                 {#if isSelected || isChecked}
                   <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
@@ -505,19 +515,36 @@
               </button>
             </TableCell>
             <TableCell compact>
-              <div class="status-cell">
-                {#if isSelected}
-                  <svg
-                    class="status-icon"
-                    viewBox="0 0 14 14"
-                    width="14"
-                    height="14"
-                    aria-hidden="true"
-                  >
-                    <path d="M3.5 2.4 11.5 7 3.5 11.6Z" fill="currentColor" />
-                  </svg>
-                {/if}
-              </div>
+              <button
+                type="button"
+                class={[
+                  'status-cell',
+                  {
+                    shown: Boolean(track) && (isSelected || isPreviewTrack),
+                    playing: isPreviewPlaying,
+                  },
+                ]}
+                aria-label={track
+                  ? isPreviewPlaying
+                    ? `Pause ${track.title}`
+                    : `Play ${track.title}`
+                  : 'Play track'}
+                aria-pressed={isPreviewPlaying}
+                disabled={!track}
+                tabindex={-1}
+                onclick={(event) => {
+                  event.stopPropagation();
+                  if (track) {
+                    select(index);
+                    onpreview?.(track);
+                  }
+                }}
+                ondblclick={(event) => event.stopPropagation()}
+              >
+                <span class="status-icon" aria-hidden="true">
+                  <Icon name={isPreviewPlaying ? 'pause' : 'play'} size={13} filled />
+                </span>
+              </button>
             </TableCell>
             <TableCell numeric size="sm" tone="muted">
               {track ? index + 1 : ''}
@@ -545,6 +572,7 @@
                     event.stopPropagation();
                     if (track) ontogglefavourite?.(track);
                   }}
+                  ondblclick={(event) => event.stopPropagation()}
                 >
                   <Icon name="star" size="xs" filled={Boolean(track?.favourite)} />
                 </button>
@@ -565,6 +593,7 @@
                       });
                     }
                   }}
+                  ondblclick={(event) => event.stopPropagation()}
                 >
                   <Icon name="more" size="xs" />
                 </button>
@@ -722,9 +751,46 @@
     justify-content: center;
     width: var(--control-height-xs);
     height: var(--control-height-xs);
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-xs);
+    background: transparent;
+    color: var(--color-text);
+    cursor: pointer;
+    transition:
+      background-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out);
+  }
+
+  .status-cell:disabled {
+    cursor: default;
   }
 
   .status-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-text);
+    opacity: 0;
+    transition: opacity var(--duration-fast) var(--ease-out);
+  }
+
+  .status-cell.shown .status-icon,
+  :global(.row:hover) .status-cell:not(:disabled) .status-icon,
+  .status-cell:focus-visible:not(:disabled) .status-icon {
+    opacity: 1;
+  }
+
+  :global(.row:hover) .status-cell:not(.shown, :disabled) .status-icon {
+    color: var(--color-text-2);
+  }
+
+  .status-cell:hover:not(:disabled),
+  .status-cell:focus-visible:not(:disabled) {
+    background: var(--color-surface-2);
+  }
+
+  .status-cell:hover:not(:disabled) .status-icon {
     color: var(--color-text);
   }
 
@@ -832,6 +898,10 @@
       background: Highlight;
       color: HighlightText;
       forced-color-adjust: none;
+    }
+
+    .status-cell.playing {
+      border: var(--border-width) solid Highlight;
     }
   }
 

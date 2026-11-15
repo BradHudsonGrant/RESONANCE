@@ -41,7 +41,10 @@ export default async function startCore(): Promise<() => void> {
   const core: ChildProcess = spawn(
     binary,
     ['--data-folder', join(e2e, 'data'), 'serve', '--connection-file', connectionFile],
-    { stdio: 'inherit' },
+    {
+      stdio: 'inherit',
+      env: { ...process.env, RESONANCE_SILENT_AUDIO: '1' },
+    },
   );
   for (let tries = 0; !existsSync(connectionFile); tries++) {
     if (tries > 200 || core.exitCode !== null) throw new Error('The core did not start.');

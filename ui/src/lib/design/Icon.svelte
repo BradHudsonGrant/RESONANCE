@@ -26,7 +26,9 @@
     | 'chevron-right'
     | 'headphones'
     | 'sidebar-collapse'
-    | 'arrow-right';
+    | 'arrow-right'
+    | 'volume'
+    | 'volume-mute';
 </script>
 
 <script lang="ts">
@@ -57,6 +59,8 @@
   import Settings from '@lucide/svelte/icons/settings';
   import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
   import Star from '@lucide/svelte/icons/star';
+  import Volume2 from '@lucide/svelte/icons/volume-2';
+  import VolumeX from '@lucide/svelte/icons/volume-x';
   import X from '@lucide/svelte/icons/x';
 
   interface Props {
@@ -96,6 +100,8 @@
     headphones: Headphones,
     'sidebar-collapse': PanelLeftClose,
     'arrow-right': ArrowRight,
+    volume: Volume2,
+    'volume-mute': VolumeX,
   };
 
   const pixelSize = $derived.by(() => {

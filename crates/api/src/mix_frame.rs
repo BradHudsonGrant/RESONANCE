@@ -5,7 +5,7 @@
 //! Numbers are little-endian. The page reads these frames in `ui/src/lib/mix/frames.ts`, which
 //! has to match the offsets here.
 //!
-//! A telemetry frame is 120 bytes:
+//! A telemetry frame is 144 bytes:
 //!
 //! | Offset | Type | Field |
 //! | --- | --- | --- |
@@ -25,6 +25,7 @@
 //! | 52 | u32 | stream errors |
 //! | 56 | 32 bytes | deck A |
 //! | 88 | 32 bytes | deck B |
+//! | 120 | 24 bytes | preview channel |
 //!
 //! Counts are totals since the device opened, wrapping at 2^32. Each deck is:
 //!
@@ -37,6 +38,15 @@
 //! | 24 | u32 | generation, 0 for an empty deck |
 //! | 28 | u8 | 1 while playing |
 //!
+//! The preview channel is 24 bytes:
+//!
+//! | Offset | Type | Field |
+//! | --- | --- | --- |
+//! | 0 | f64 | position being heard, in seconds |
+//! | 8 | f64 | duration, in seconds |
+//! | 16 | u32 | generation, 0 when unloaded |
+//! | 20 | u8 | 1 while playing |
+//!
 //! A waveform frame is a 16-byte header and then a peak and an RMS byte for each bin:
 //!
 //! | Offset | Type | Field |
@@ -48,13 +58,14 @@
 //! | 12 | u32 | bins |
 
 use resonance_core::waveform::{BINS_PER_SECOND, Waveform};
-use resonance_engine::{DeckId, DeckTelemetry, Telemetry};
+use resonance_engine::{DeckId, DeckTelemetry, PreviewTelemetry, Telemetry};
 
 pub const TELEMETRY: u8 = 1;
 pub const WAVEFORM: u8 = 2;
-pub const TELEMETRY_LENGTH: usize = 120;
+pub const TELEMETRY_LENGTH: usize = 144;
 const DECKS_AT: usize = 56;
 const DECK_LENGTH: usize = 32;
+const PREVIEW_AT: usize = 120;
 const WAVEFORM_HEADER_LENGTH: usize = 16;
 
 struct Writer {
@@ -120,8 +131,18 @@ pub fn telemetry(telemetry: &Telemetry) -> Vec<u8> {
         frame.pad_to(DECKS_AT + index * DECK_LENGTH);
         write_deck(&mut frame, deck);
     }
+    frame.pad_to(PREVIEW_AT);
+    write_preview(&mut frame, &telemetry.preview);
     frame.pad_to(TELEMETRY_LENGTH);
     frame.bytes
+}
+
+fn write_preview(frame: &mut Writer, preview: &PreviewTelemetry) {
+    frame
+        .f64(preview.position_seconds)
+        .f64(preview.duration_seconds)
+        .u32(preview.generation)
+        .u8(u8::from(preview.playing));
 }
 
 fn write_deck(frame: &mut Writer, deck: &DeckTelemetry) {
@@ -186,6 +207,12 @@ mod tests {
                     meter: [0.0, 0.25],
                 },
             ],
+            preview: PreviewTelemetry {
+                generation: 9,
+                playing: true,
+                position_seconds: 12.5,
+                duration_seconds: 245.0,
+            },
             engine: EngineTelemetry {
                 sample_rate: 48_000,
                 requested_buffer_frames: 256,
@@ -224,6 +251,10 @@ mod tests {
         assert_eq!(f32_at(&frame, 108), 0.25);
         assert_eq!(u32_at(&frame, 112), 4);
         assert_eq!(frame[116], 0);
+        assert_eq!(f64_at(&frame, 120), 12.5);
+        assert_eq!(f64_at(&frame, 128), 245.0);
+        assert_eq!(u32_at(&frame, 136), 9);
+        assert_eq!(frame[140], 1);
     }
 
     #[test]

@@ -7,7 +7,7 @@ use lofty::error::FileParseError;
 use lofty::prelude::{AudioFile, ItemKey, TaggedFileExt};
 use lofty::probe::Probe;
 use lofty::tag::Tag;
-use resonance_core::library::{AudioFacts, TagField};
+use resonance_core::library::{AudioFacts, TagField, id3v2_tag_end, is_mp4_ftyp_box};
 
 #[derive(Debug)]
 pub enum FileReadError {
@@ -112,24 +112,14 @@ impl symphonia::core::io::MediaSource for OffsetFile {
     }
 }
 
-/// Where the audio file proper starts.
-///
-/// Some taggers put an ID3v2 tag in front of an MP4 file. The MP4 behind it is whole, but every
-/// reader expects it at byte zero, so the tag is stepped over. Anything else starts at zero.
 fn start_of_audio_file(file: &mut File) -> io::Result<u64> {
     let mut header = [0; 10];
     let mut next = [0; 8];
-    let tagged = file.read_exact(&mut header).is_ok()
-        && header.starts_with(b"ID3")
-        && header[6..].iter().all(|byte| byte & 0x80 == 0);
-    if tagged {
-        let size = header[6..]
-            .iter()
-            .fold(0u64, |size, &byte| (size << 7) | u64::from(byte));
-        let footer = if header[5] & 0x10 == 0 { 0 } else { 10 };
-        let after = 10 + size + footer;
+    if file.read_exact(&mut header).is_ok()
+        && let Some(after) = id3v2_tag_end(&header)
+    {
         file.seek(SeekFrom::Start(after))?;
-        if file.read_exact(&mut next).is_ok() && &next[4..] == b"ftyp" {
+        if file.read_exact(&mut next).is_ok() && is_mp4_ftyp_box(&next) {
             return Ok(after);
         }
     }

@@ -17,6 +17,7 @@ use rtrb::{Consumer, Producer, RingBuffer};
 use crate::DECKS;
 use crate::decode::DeckFeed;
 use crate::error::EngineError;
+use crate::preview::PreviewFeed;
 use crate::published::{ClockReading, Published};
 
 /// The buffer the stream asks the device for.
@@ -26,13 +27,34 @@ pub const REQUESTED_BUFFER_FRAMES: u32 = 256;
 /// clipping.
 const DECK_GAIN: f32 = 0.5;
 
-/// Room for commands on their way to the callback. The queue that brings old feeds back is the
-/// same size, so it cannot fill while the control side empties it before each command.
-const CONTROL_CAPACITY: usize = 16;
+/// One-pole gain smoother time constant (~5 ms settling time) so play, pause, seek and volume
+/// changes never click.
+const GAIN_RAMP_TAU_SECONDS: f32 = 0.005 / 3.0;
+
+/// Room for commands on their way to the callback. The retirement queue has double capacity so
+/// replacing active and fading feeds in the same callback cannot drop on the audio thread.
+const CONTROL_CAPACITY: usize = 128;
+
+pub(crate) enum RetiredFeed {
+    Deck(DeckFeed),
+    Preview(PreviewFeed),
+}
+
+impl RetiredFeed {
+    pub(crate) fn discard(self) {
+        match self {
+            Self::Deck(feed) => drop(feed),
+            Self::Preview(feed) => drop(feed),
+        }
+    }
+}
 
 pub(crate) enum Control {
     Load { deck: usize, feed: DeckFeed },
     Play { deck: usize, playing: bool },
+    PreviewLoad { feed: PreviewFeed, play: bool },
+    PreviewPlay { playing: bool, state_seq: u32 },
+    PreviewSetGain { gain: f32 },
 }
 
 /// The device as the stream opened it.
@@ -65,10 +87,17 @@ impl Drop for Output {
 pub(crate) struct Opened {
     pub output: Output,
     pub controls: Producer<Control>,
-    pub retired: Consumer<DeckFeed>,
+    pub retired: Consumer<RetiredFeed>,
 }
 
-pub(crate) fn open(published: &Arc<Published>, epoch: Instant) -> Result<Opened, EngineError> {
+pub(crate) fn open(
+    published: &Arc<Published>,
+    epoch: Instant,
+    force_silent: bool,
+) -> Result<Opened, EngineError> {
+    if force_silent || use_silent_output() {
+        return open_silent(published, epoch);
+    }
     let (renderer, controls, retired) = Renderer::new(published, epoch);
     let (ready, opened) = mpsc::sync_channel(1);
     let (stop, stopped) = mpsc::channel::<()>();
@@ -98,6 +127,52 @@ pub(crate) fn open(published: &Arc<Published>, epoch: Instant) -> Result<Opened,
     })
 }
 
+fn use_silent_output() -> bool {
+    matches!(
+        std::env::var("RESONANCE_SILENT_AUDIO").as_deref(),
+        Ok("1" | "true")
+    )
+}
+
+fn open_silent(published: &Arc<Published>, epoch: Instant) -> Result<Opened, EngineError> {
+    const SILENT_RATE: u32 = 48_000;
+    const SILENT_CHANNELS: u16 = 2;
+    const SILENT_PERIOD_FRAMES: u32 = 480;
+    let (mut renderer, controls, retired) = Renderer::new(published, epoch);
+    renderer.set_format(SILENT_RATE, usize::from(SILENT_CHANNELS));
+    published
+        .counters
+        .period_frames
+        .store(SILENT_PERIOD_FRAMES, Ordering::Relaxed);
+    let (stop, stopped) = mpsc::channel::<()>();
+    let thread = thread::Builder::new()
+        .name("silent audio output".to_owned())
+        .spawn(move || {
+            let mut out =
+                vec![0.0f32; SILENT_PERIOD_FRAMES as usize * usize::from(SILENT_CHANNELS)];
+            let step = Duration::from_millis(10);
+            while stopped.recv_timeout(step) == Err(mpsc::RecvTimeoutError::Timeout) {
+                renderer.render_with_latency(&mut out, step);
+            }
+        })
+        .map_err(EngineError::Thread)?;
+    Ok(Opened {
+        output: Output {
+            stop: Some(stop),
+            thread: Some(thread),
+            device: Device {
+                name: "Silent output".to_owned(),
+                sample_rate: SILENT_RATE,
+                channels: SILENT_CHANNELS,
+                requested_buffer_frames: REQUESTED_BUFFER_FRAMES,
+                period_frames: SILENT_PERIOD_FRAMES,
+            },
+        },
+        controls,
+        retired,
+    })
+}
+
 fn start(
     mut renderer: Renderer,
     published: &Arc<Published>,
@@ -113,7 +188,7 @@ fn start(
     let supported = device.default_output_config()?;
     let channels = supported.channels();
     let sample_rate = supported.sample_rate();
-    renderer.channels = usize::from(channels.max(1));
+    renderer.set_format(sample_rate, usize::from(channels.max(1)));
     let errors = Arc::clone(published);
     let stream = device.build_output_stream::<f32, _, _>(
         StreamConfig {
@@ -156,12 +231,28 @@ struct Deck {
     played_frames: u64,
 }
 
+#[derive(Default)]
+struct PreviewChannel {
+    feed: Option<PreviewFeed>,
+    fading_feed: Option<PreviewFeed>,
+    playing: bool,
+    ended: bool,
+    played_frames: u64,
+    generation: u32,
+    state_seq: u32,
+    target_gain: f32,
+    current_gain: f32,
+    fade_out_gain: f32,
+}
+
 struct Renderer {
     controls: Consumer<Control>,
-    retired: Producer<DeckFeed>,
+    retired: Producer<RetiredFeed>,
     decks: [Deck; DECKS],
+    preview: PreviewChannel,
     published: Arc<Published>,
     channels: usize,
+    gain_alpha: f32,
     epoch: Instant,
     first_callback: bool,
 }
@@ -170,25 +261,41 @@ impl Renderer {
     fn new(
         published: &Arc<Published>,
         epoch: Instant,
-    ) -> (Self, Producer<Control>, Consumer<DeckFeed>) {
+    ) -> (Self, Producer<Control>, Consumer<RetiredFeed>) {
         let (controls, controls_in_callback) = RingBuffer::new(CONTROL_CAPACITY);
-        let (retired_in_callback, retired) = RingBuffer::new(CONTROL_CAPACITY);
-        let renderer = Self {
+        let (retired_in_callback, retired) = RingBuffer::new(CONTROL_CAPACITY * 2);
+        let mut renderer = Self {
             controls: controls_in_callback,
             retired: retired_in_callback,
             decks: Default::default(),
+            preview: PreviewChannel {
+                target_gain: 1.0,
+                ..PreviewChannel::default()
+            },
             published: Arc::clone(published),
             channels: 2,
+            gain_alpha: 0.0,
             epoch,
             first_callback: true,
         };
+        renderer.set_format(48_000, 2);
         (renderer, controls, retired)
     }
 
+    fn set_format(&mut self, sample_rate: u32, channels: usize) {
+        self.channels = channels.max(1);
+        let tau_samples = GAIN_RAMP_TAU_SECONDS * (sample_rate.max(1) as f32);
+        self.gain_alpha = 1.0 - (-1.0 / tau_samples).exp();
+    }
+
     fn render(&mut self, out: &mut [f32], info: &OutputCallbackInfo) {
-        let entered = Instant::now();
         let stamp = info.timestamp();
         let latency = stamp.playback.saturating_duration_since(stamp.callback);
+        self.render_with_latency(out, latency);
+    }
+
+    fn render_with_latency(&mut self, out: &mut [f32], latency: Duration) {
+        let entered = Instant::now();
         while let Ok(control) = self.controls.pop() {
             self.apply(control);
         }
@@ -197,6 +304,11 @@ impl Renderer {
         let mut reading = ClockReading {
             anchor_ns: nanos(entered.saturating_duration_since(self.epoch)),
             latency_ns: nanos(latency),
+            preview_generation: self.preview.generation,
+            preview_state_seq: self.preview.state_seq,
+            preview_played_frames: self.preview.played_frames,
+            preview_playing: self.preview.playing,
+            preview_ended: self.preview.ended,
             ..ClockReading::default()
         };
         for (index, deck) in self.decks.iter_mut().enumerate() {
@@ -204,6 +316,13 @@ impl Renderer {
             reading.playing[index] = deck.playing;
             deck.render(index, out, self.channels, frames, &self.published);
         }
+        self.preview.render(
+            out,
+            self.channels,
+            frames,
+            &mut self.retired,
+            self.gain_alpha,
+        );
         self.published.clock.publish(&reading);
         self.count(u32::try_from(frames).unwrap_or(u32::MAX), entered);
     }
@@ -215,7 +334,7 @@ impl Renderer {
                 if let Some(old) = deck.feed.replace(feed) {
                     // Freeing a feed would free memory here, so it goes back to be dropped
                     // elsewhere. The queue has room: see CONTROL_CAPACITY.
-                    let _ = self.retired.push(old);
+                    let _ = self.retired.push(RetiredFeed::Deck(old));
                 }
                 deck.playing = false;
                 deck.played_frames = 0;
@@ -223,6 +342,34 @@ impl Renderer {
             Control::Play { deck, playing } => {
                 let deck = &mut self.decks[deck];
                 deck.playing = playing && deck.feed.is_some();
+            }
+            Control::PreviewLoad { feed, play } => {
+                if let Some(old) = self.preview.feed.take() {
+                    if self.preview.playing && self.preview.current_gain > 0.0 {
+                        if let Some(stale) = self.preview.fading_feed.take() {
+                            let _ = self.retired.push(RetiredFeed::Preview(stale));
+                        }
+                        self.preview.fade_out_gain = self.preview.current_gain;
+                        self.preview.fading_feed = Some(old);
+                    } else {
+                        let _ = self.retired.push(RetiredFeed::Preview(old));
+                    }
+                }
+                self.preview.played_frames = feed.start_frame;
+                self.preview.generation = feed.generation;
+                self.preview.state_seq = feed.state_seq;
+                self.preview.feed = Some(feed);
+                self.preview.playing = play;
+                self.preview.ended = false;
+                self.preview.current_gain = 0.0;
+            }
+            Control::PreviewPlay { playing, state_seq } => {
+                self.preview.state_seq = state_seq;
+                self.preview.playing =
+                    playing && self.preview.feed.is_some() && !self.preview.ended;
+            }
+            Control::PreviewSetGain { gain } => {
+                self.preview.target_gain = gain.clamp(0.0, 1.0);
             }
         }
     }
@@ -284,13 +431,7 @@ impl Deck {
             for (frame, &[left, right]) in pairs.enumerate() {
                 peak[0] = peak[0].max(left.abs());
                 peak[1] = peak[1].max(right.abs());
-                let at = frame * channels;
-                if channels == 1 {
-                    out[at] += 0.5 * DECK_GAIN * (left + right);
-                } else {
-                    out[at] += DECK_GAIN * left;
-                    out[at + 1] += DECK_GAIN * right;
-                }
+                mix_sample(out, frame * channels, channels, DECK_GAIN, left, right);
             }
             chunk.commit_all();
         }
@@ -308,6 +449,111 @@ impl Deck {
                     .missing_frames
                     .fetch_add((frames - played) as u64, Ordering::Relaxed);
             }
+        }
+    }
+}
+
+fn mix_sample(out: &mut [f32], at: usize, channels: usize, gain: f32, left: f32, right: f32) {
+    if channels == 1 {
+        out[at] += 0.5 * gain * (left + right);
+    } else {
+        out[at] += gain * left;
+        out[at + 1] += gain * right;
+    }
+}
+
+fn mix_chunk_with_ramp(
+    samples: &mut rtrb::Consumer<f32>,
+    out: &mut [f32],
+    channels: usize,
+    frames: usize,
+    gain: &mut f32,
+    target_gain: f32,
+    alpha: f32,
+) -> usize {
+    let take = samples.slots().min(frames * 2) & !1;
+    if let Ok(chunk) = samples.read_chunk(take) {
+        let (first, second) = chunk.as_slices();
+        let pairs = first
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .chain(second.as_chunks::<2>().0);
+        for (frame, &[left, right]) in pairs.enumerate() {
+            *gain += alpha * (target_gain - *gain);
+            if (target_gain - *gain).abs() < 1e-5 {
+                *gain = target_gain;
+            }
+            mix_sample(out, frame * channels, channels, *gain, left, right);
+        }
+        chunk.commit_all();
+    }
+    take / 2
+}
+
+impl PreviewChannel {
+    fn render(
+        &mut self,
+        out: &mut [f32],
+        channels: usize,
+        frames: usize,
+        retired: &mut Producer<RetiredFeed>,
+        alpha: f32,
+    ) {
+        if let Some(mut fading) = self.fading_feed.take() {
+            let faded_frames = mix_chunk_with_ramp(
+                &mut fading.samples,
+                out,
+                channels,
+                frames,
+                &mut self.fade_out_gain,
+                0.0,
+                alpha,
+            );
+            if self.fade_out_gain == 0.0
+                || faded_frames < frames
+                || (fading.finished.load(Ordering::Acquire) && fading.samples.is_empty())
+            {
+                self.fade_out_gain = 0.0;
+                let _ = retired.push(RetiredFeed::Preview(fading));
+            } else {
+                self.fading_feed = Some(fading);
+            }
+        }
+
+        let Some(feed) = self.feed.as_mut() else {
+            self.playing = false;
+            self.current_gain = 0.0;
+            return;
+        };
+        let desired_gain = if self.playing { self.target_gain } else { 0.0 };
+        if !self.playing && self.current_gain == 0.0 {
+            return;
+        }
+
+        let consumed = mix_chunk_with_ramp(
+            &mut feed.samples,
+            out,
+            channels,
+            frames,
+            &mut self.current_gain,
+            desired_gain,
+            alpha,
+        );
+        self.played_frames += consumed as u64;
+
+        if !self.playing && consumed < frames {
+            self.current_gain = 0.0;
+        }
+
+        if self.playing
+            && consumed < frames
+            && feed.finished.load(Ordering::Acquire)
+            && feed.samples.is_empty()
+        {
+            self.playing = false;
+            self.ended = true;
+            self.current_gain = 0.0;
         }
     }
 }
@@ -347,10 +593,25 @@ mod tests {
         }
     }
 
+    fn preview_feed(frames: usize, left: f32, right: f32, finished: bool) -> PreviewFeed {
+        let (mut producer, samples) = RingBuffer::new(4096);
+        for _ in 0..frames {
+            producer.push(left).unwrap();
+            producer.push(right).unwrap();
+        }
+        PreviewFeed {
+            samples,
+            finished: Arc::new(AtomicBool::new(finished)),
+            start_frame: 0,
+            generation: 1,
+            state_seq: 1,
+        }
+    }
+
     struct Harness {
         renderer: Renderer,
         controls: Producer<Control>,
-        retired: Consumer<DeckFeed>,
+        retired: Consumer<RetiredFeed>,
         published: Arc<Published>,
     }
 
@@ -500,5 +761,92 @@ mod tests {
         assert_eq!(harness.count(&counters.late_callbacks), 1);
         assert_eq!(harness.count(&counters.starved_callbacks), 1);
         assert_eq!(harness.count(&counters.callbacks), 4);
+    }
+
+    #[test]
+    fn preview_ramps_smoothly_on_start_volume_change_pause_and_seek() {
+        let mut harness = Harness::new();
+        harness.send(Control::PreviewSetGain { gain: 0.8 });
+        harness.send(Control::PreviewLoad {
+            feed: preview_feed(2000, 1.0, -1.0, false),
+            play: true,
+        });
+
+        let start = harness.render(480);
+        // Starts ramped from near zero instead of jumping straight to 0.8.
+        assert!(start[0].abs() < 0.05, "first sample {}", start[0]);
+        assert!((start[start.len() - 2] - 0.8).abs() < 0.01);
+
+        // Volume drop ramps smoothly without a single-sample step jump.
+        harness.send(Control::PreviewSetGain { gain: 0.25 });
+        let vol = harness.render(480);
+        let prev = start[start.len() - 2];
+        assert!((vol[0] - prev).abs() < 0.05);
+        assert!((vol[vol.len() - 2] - 0.25).abs() < 0.01);
+
+        // Pausing fades down to zero smoothly and stops advancing thereafter.
+        harness.send(Control::PreviewPlay {
+            playing: false,
+            state_seq: 2,
+        });
+        let fade = harness.render(960);
+        assert!((fade[0] - vol[vol.len() - 2]).abs() < 0.05);
+        assert_eq!(fade[fade.len() - 2], 0.0);
+
+        let paused = harness.render(128);
+        assert!(paused.iter().all(|s| *s == 0.0));
+        let played_while_paused = harness.published.clock.read().preview_played_frames;
+        harness.render(128);
+        assert_eq!(
+            harness.published.clock.read().preview_played_frames,
+            played_while_paused
+        );
+
+        // Seeking over an active stream retires the displaced feed cleanly.
+        harness.send(Control::PreviewLoad {
+            feed: preview_feed(500, 0.5, 0.5, false),
+            play: true,
+        });
+        harness.render(64);
+        assert!(matches!(harness.retired.pop(), Ok(RetiredFeed::Preview(_))));
+    }
+
+    #[test]
+    fn preview_track_that_ends_stops_playing() {
+        let mut harness = Harness::new();
+        harness.send(Control::PreviewLoad {
+            feed: preview_feed(64, 0.5, 0.5, true),
+            play: true,
+        });
+
+        harness.render(128);
+        harness.render(128);
+
+        let clock = harness.published.clock.read();
+        assert!(!clock.preview_playing);
+        assert!(clock.preview_ended);
+        assert_eq!(clock.preview_played_frames, 64);
+        assert_eq!(harness.count(&harness.published.counters.underruns), 0);
+    }
+
+    #[test]
+    fn preview_superseded_short_feed_retires_when_its_buffered_samples_run_out() {
+        let mut harness = Harness::new();
+        harness.send(Control::PreviewLoad {
+            feed: preview_feed(320, 0.8, 0.8, false),
+            play: true,
+        });
+        // Plays 288 of the 320 frames so `current_gain > 0.0` and only 32 frames remain.
+        harness.render(288);
+        assert!(harness.retired.pop().is_err());
+
+        // Superseding with a new load moves the remaining 32 frames (`finished == false`) into
+        // `fading_feed`, which runs dry during the 128-frame callback and retires at once.
+        harness.send(Control::PreviewLoad {
+            feed: preview_feed(256, 0.4, 0.4, false),
+            play: true,
+        });
+        harness.render(128);
+        assert!(matches!(harness.retired.pop(), Ok(RetiredFeed::Preview(_))));
     }
 }

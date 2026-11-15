@@ -5,9 +5,10 @@
 
 export const TELEMETRY = 1;
 export const WAVEFORM = 2;
-const TELEMETRY_LENGTH = 120;
+const TELEMETRY_LENGTH = 144;
 const DECKS_AT = 56;
 const DECK_LENGTH = 32;
+const PREVIEW_AT = 120;
 const WAVEFORM_HEADER_LENGTH = 16;
 
 export interface DeckReading {
@@ -39,8 +40,17 @@ export interface EngineReading {
   streamErrors: number;
 }
 
+export interface PreviewReading {
+  /** Zero while nothing is loaded on the preview channel. */
+  generation: number;
+  playing: boolean;
+  positionSeconds: number;
+  durationSeconds: number;
+}
+
 export interface Telemetry {
   decks: [DeckReading, DeckReading];
+  preview: PreviewReading;
   engine: EngineReading;
 }
 
@@ -63,9 +73,19 @@ function emptyDeck(): DeckReading {
   };
 }
 
+function emptyPreview(): PreviewReading {
+  return {
+    generation: 0,
+    playing: false,
+    positionSeconds: 0,
+    durationSeconds: 0,
+  };
+}
+
 export function emptyTelemetry(): Telemetry {
   return {
     decks: [emptyDeck(), emptyDeck()],
+    preview: emptyPreview(),
     engine: {
       sampleRate: 0,
       requestedBufferFrames: 0,
@@ -117,6 +137,11 @@ export function readTelemetry(frame: ArrayBuffer, into: Telemetry): void {
     deck.generation = view.getUint32(at + 24, true);
     deck.playing = view.getUint8(at + 28) === 1;
   }
+  const preview = into.preview;
+  preview.positionSeconds = view.getFloat64(PREVIEW_AT, true);
+  preview.durationSeconds = view.getFloat64(PREVIEW_AT + 8, true);
+  preview.generation = view.getUint32(PREVIEW_AT + 16, true);
+  preview.playing = view.getUint8(PREVIEW_AT + 20) === 1;
 }
 
 export function readWaveform(frame: ArrayBuffer): WaveformFrame {

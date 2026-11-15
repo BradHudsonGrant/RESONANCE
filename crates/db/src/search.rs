@@ -461,7 +461,10 @@ fn build_query_sql(query: &TrackQuery, count_only: bool) -> (String, Vec<Value>)
     )
 }
 
-fn load_tracks_by_ids(connection: &Connection, ids: &[i64]) -> Result<Vec<TrackRow>, DbError> {
+pub(crate) fn load_tracks_by_ids(
+    connection: &Connection,
+    ids: &[i64],
+) -> Result<Vec<TrackRow>, DbError> {
     if ids.is_empty() {
         return Ok(Vec::new());
     }

@@ -72,6 +72,8 @@
     'headphones',
     'sidebar-collapse',
     'arrow-right',
+    'volume',
+    'volume-mute',
   ];
 
   const segmentedItems = [
