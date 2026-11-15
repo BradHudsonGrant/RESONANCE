@@ -18,38 +18,70 @@
 
   // Rows drawn beyond the edges of the view, so a fast scroll does not open a gap.
   const OVERSCAN = 8;
+  const INITIAL_ROWS = 8;
 
   const id = $props.id();
   const checkedIds = new SvelteSet<number>();
   let viewport: HTMLDivElement | undefined = $state();
+  let head: HTMLDivElement | undefined = $state();
   let rowHeight = $state(33);
   let scrollTop = $state(0);
   let viewportHeight = $state(0);
   let headHeight = $state(0);
+  let overscan = $state(0);
 
   // The header sticks to the top of the scrolling area, so the rows show below it.
   const rowsHeight = $derived(Math.max(0, viewportHeight - headHeight));
-  const first = $derived(Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN));
+  const first = $derived(Math.max(0, Math.floor(scrollTop / rowHeight) - overscan));
   const shown = $derived(
-    Math.max(0, Math.min(pages.total - first, Math.ceil(rowsHeight / rowHeight) + 2 * OVERSCAN)),
+    Math.max(
+      0,
+      Math.min(
+        pages.total - first,
+        viewportHeight > 0 ? Math.ceil(rowsHeight / rowHeight) + 2 * overscan : INITIAL_ROWS,
+      ),
+    ),
   );
   const rowsInView = $derived(Math.max(1, Math.floor(rowsHeight / rowHeight)));
 
+  // Reading sizes inside ResizeObserver waits until Blink has laid out the table, so mounting it
+  // forces no synchronous style or layout pass.
   $effect(() => {
-    if (!viewport) return;
-    const height = parseFloat(getComputedStyle(viewport).getPropertyValue('--row-height'));
-    if (height > 0) rowHeight = height;
+    if (!viewport || !head) return;
+    let rowHeightRead = false;
+    const sized = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.target === viewport) viewportHeight = entry.contentRect.height;
+        else if (entry.target === head) {
+          headHeight = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
+        }
+      }
+      if (!rowHeightRead && viewport) {
+        rowHeightRead = true;
+        const height = parseFloat(getComputedStyle(viewport).getPropertyValue('--row-height'));
+        if (height > 0) rowHeight = height;
+      }
+    });
+    sized.observe(viewport);
+    sized.observe(head);
+    return () => sized.disconnect();
   });
 
   $effect(() => pages.want(first, first + shown));
 
-  // The cold-start budget runs from launch to this mark.
+  // The cold-start budget runs from launch to this mark, and the off-screen overscan rows fill
+  // in the next task once the visible slice is ready.
   let filledOnce = false;
+  let overscanTimer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => {
-    if (filledOnce || shown === 0 || !pages.track(first)) return;
+    if (filledOnce || viewportHeight === 0 || shown === 0 || !pages.track(first)) return;
     filledOnce = true;
     performance.mark('tracks-filled');
+    overscanTimer = setTimeout(() => {
+      overscan = OVERSCAN;
+    });
   });
+  $effect(() => () => clearTimeout(overscanTimer));
 
   $effect(() => {
     if (selected !== null) reveal(selected);
@@ -118,10 +150,9 @@
   <div
     class="viewport"
     bind:this={viewport}
-    bind:clientHeight={viewportHeight}
     onscroll={() => (scrollTop = viewport?.scrollTop ?? 0)}
   >
-    <div class="head" role="rowgroup" bind:offsetHeight={headHeight}>
+    <div class="head" role="rowgroup" bind:this={head}>
       <TableRow header aria-rowindex={1} style="grid-template-columns: var(--active-columns)">
         <TableCell header compact>
           <span

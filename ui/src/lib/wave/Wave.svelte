@@ -66,12 +66,14 @@
 
   onMount(() => {
     const isCachedStatic = variant === 'thumb' || variant === 'card';
+    let cssWidth = 0;
+    let cssHeight = 0;
 
     if (isCachedStatic) {
       const paintStatic = () => {
         const dpr = Math.min(devicePixelRatio || 1, 2);
-        const width = Math.max(1, Math.round((canvas.clientWidth || 60) * dpr));
-        const height = Math.max(1, Math.round((canvas.clientHeight || 60) * dpr));
+        const width = Math.max(1, Math.round((cssWidth || canvas.clientWidth || 60) * dpr));
+        const height = Math.max(1, Math.round((cssHeight || canvas.clientHeight || 60) * dpr));
         drawWaveThumb(canvas, {
           seed,
           bands,
@@ -83,10 +85,15 @@
         });
       };
 
-      const sized = new ResizeObserver(paintStatic);
+      const sized = new ResizeObserver(([entry]) => {
+        if (entry) {
+          cssWidth = entry.contentRect.width;
+          cssHeight = entry.contentRect.height;
+        }
+        paintStatic();
+      });
       sized.observe(canvas);
       const stopThemes = onThemeChange(paintStatic);
-      paintStatic();
 
       return () => {
         sized.disconnect();
@@ -94,22 +101,30 @@
       };
     }
 
-    const renderer = WaveRenderer.on(canvas);
-    if (!renderer) return;
+    let disposed = false;
+    let renderer: WaveRenderer | null = null;
+    let visible = true;
+    let lastFrame = performance.now();
+    let request = 0;
 
     const readColours = () => {
+      if (!renderer) return;
       renderer.background = tone(backgroundToken());
       renderer.foreground = tone('--color-text');
     };
     const drawOnce = () => {
+      if (!renderer) return;
       renderer.useDensity(motion.settings.density);
       renderer.draw(motion.surface, motion.settings);
     };
     const resize = () => {
+      if (!renderer) return;
       const dpr = Math.min(devicePixelRatio || 1, 2);
+      const width = cssWidth || canvas.clientWidth || 1;
+      const height = cssHeight || canvas.clientHeight || 1;
       renderer.resize(
-        Math.max(1, Math.round(canvas.clientWidth * dpr)),
-        Math.max(1, Math.round(canvas.clientHeight * dpr)),
+        Math.max(1, Math.round(width * dpr)),
+        Math.max(1, Math.round(height * dpr)),
         dpr,
       );
       drawOnce();
@@ -119,9 +134,6 @@
       drawOnce();
     };
 
-    let visible = true;
-    let lastFrame = performance.now();
-    let request = 0;
     const frame = (now: number) => {
       request = requestAnimationFrame(frame);
       if (!visible || document.hidden || reducedMotion.matches || paused) {
@@ -137,7 +149,13 @@
     };
 
     const seen = new IntersectionObserver(([entry]) => (visible = entry?.isIntersecting ?? true));
-    const sized = new ResizeObserver(resize);
+    const sized = new ResizeObserver(([entry]) => {
+      if (entry) {
+        cssWidth = entry.contentRect.width;
+        cssHeight = entry.contentRect.height;
+      }
+      resize();
+    });
     seen.observe(canvas);
     sized.observe(canvas);
     const stopThemes = onThemeChange(() => {
@@ -145,17 +163,27 @@
       drawOnce();
     });
     reducedMotion.addEventListener('change', onReducedMotion);
-    readColours();
-    resize();
-    request = requestAnimationFrame(frame);
+
+    void WaveRenderer.prepare(canvas, () => disposed).then((ready) => {
+      if (!ready || disposed) {
+        ready?.release();
+        return;
+      }
+      renderer = ready;
+      readColours();
+      resize();
+      lastFrame = performance.now();
+      request = requestAnimationFrame(frame);
+    });
 
     return () => {
+      disposed = true;
       cancelAnimationFrame(request);
       seen.disconnect();
       sized.disconnect();
       stopThemes();
       reducedMotion.removeEventListener('change', onReducedMotion);
-      renderer.release();
+      renderer?.release();
     };
   });
 </script>

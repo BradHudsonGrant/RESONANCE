@@ -5,7 +5,6 @@
   import Library from './lib/library/Library.svelte';
   import ScanFolder from './lib/library/ScanFolder.svelte';
   import { TrackPages } from './lib/library/track-pages.svelte';
-  import Mix from './lib/mix/Mix.svelte';
   import CommandBar, { type Command } from './lib/shell/CommandBar.svelte';
   import PlayerBar from './lib/shell/PlayerBar.svelte';
   import SettingsSheet from './lib/shell/SettingsSheet.svelte';
@@ -26,8 +25,20 @@
   let inspectorHidden = $state(false);
   let sheetOpen = $state(false);
   let settingsOpen = $state(false);
+  let settingsMounted = $state(false);
   let scanOpen = $state(false);
+  let scanMounted = $state(false);
   let mixPlaying = $state(false);
+
+  function openSettings() {
+    settingsMounted = true;
+    settingsOpen = true;
+  }
+
+  function openScan() {
+    scanMounted = true;
+    scanOpen = true;
+  }
 
   const track = $derived(pages.selectedTrack);
   const inspectorDocked = $derived(space === 'Library' && !inspectorHidden);
@@ -72,11 +83,11 @@
     space === 'Mix'
       ? { name: 'Go to the library', shortcut: '1', run: () => (space = 'Library') }
       : { name: 'Go to Mix', shortcut: '4', run: () => (space = 'Mix') },
-    { name: 'Scan a music folder', run: () => (scanOpen = true) },
+    { name: 'Scan a music folder', run: openScan },
     { name: 'Show or hide the inspector', shortcut: 'I', run: toggleInspector },
     { name: 'Collapse or expand the sidebar', shortcut: '[', run: toggleSidebar },
     { name: 'Collapse or expand the dock', shortcut: 'D', run: toggleDock },
-    { name: 'Open settings', run: () => (settingsOpen = true) },
+    { name: 'Open settings', run: openSettings },
     { name: 'Go to the first track', shortcut: 'Home', run: () => goTo(0) },
     { name: 'Go to the last track', shortcut: 'End', run: () => goTo(pages.total - 1) },
     { name: 'Reload the library', run: reload },
@@ -137,7 +148,7 @@
   data-inspector={inspectorDocked ? undefined : 'hidden'}
 >
   <div class="topbar">
-    <TopBar onsettings={() => (settingsOpen = true)} />
+    <TopBar onsettings={openSettings} />
   </div>
 
   <div class="sidebar">
@@ -154,14 +165,11 @@
     <CommandBar {commands} inputId={commandInput} />
     <main class="workspace-content">
       {#if space === 'Mix'}
-        <Mix onplayingchange={(playing) => (mixPlaying = playing)} />
+        {#await import('./lib/mix/Mix.svelte') then { default: Mix }}
+          <Mix onplayingchange={(playing) => (mixPlaying = playing)} />
+        {/await}
       {:else}
-        <Library
-          {pages}
-          bind:selected={pages.selected}
-          onopen={showInspector}
-          onscan={() => (scanOpen = true)}
-        />
+        <Library {pages} bind:selected={pages.selected} onopen={showInspector} onscan={openScan} />
       {/if}
     </main>
   </div>
@@ -192,13 +200,17 @@
   </Sheet>
 {/if}
 
-<SettingsSheet bind:open={settingsOpen} />
+{#if settingsMounted}
+  <SettingsSheet bind:open={settingsOpen} />
+{/if}
 
-<ScanFolder
-  bind:open={scanOpen}
-  scan={(folder) => core.call('scan', { folder })}
-  onscanned={reload}
-/>
+{#if scanMounted}
+  <ScanFolder
+    bind:open={scanOpen}
+    scan={(folder) => core.call('scan', { folder })}
+    onscanned={reload}
+  />
+{/if}
 
 <style>
   /*
