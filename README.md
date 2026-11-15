@@ -20,7 +20,8 @@ Most DJs will keep playing on their own hardware. Resonance is where they prepar
 
 ## What works today
 
-- Folder scanning into a local SQLite database (`WAL` mode) without modifying any file on disk, reading tags and audio stream facts across MP3, FLAC, WAV, AIFF and M4A.
+- Watched music folders with per-subfolder toggles and an editable ignore list (`SourcesSettings.svelte` and `notify` filesystem watching), scanning read-only into SQLite (`WAL` mode) across MP3, FLAC, WAV, AIFF and M4A (`AAC` and `ALAC`, including files carrying stray leading ID3v2 headers).
+- Track and asset identity by BLAKE3 byte hash, full-scale `i32` decoded-audio hash (`symphonia` gapless + stream checksum verification) and 120-second Chromaprint (`rusty-chromaprint`), keeping track identity intact when files are renamed, moved or retagged outside the app.
 - Virtualised library table holding 100,000 tracks at a 4.2 ms median frame (240 Hz, 0 frames over 16 ms) and a 0.42 s warm cold start in the native desktop shell.
 - Track inspector showing seeded dot-wave artwork, tags, Camelot key, format specs and file location, collapsing to a drawer on narrow windows.
 - Two-deck Mix view playing audio through WASAPI with scrolling WebGL2 peak and RMS waveforms, binary playhead and meter telemetry, and 0 audio underruns across three-minute full-window runs.
@@ -28,7 +29,7 @@ Most DJs will keep playing on their own hardware. Resonance is where they prepar
 
 ## Status
 
-`M0 Foundations` (`v0.1.0`) and `M1 Design` (`v0.2.0`) are complete. `M2 Library` (`v0.3.0`) comes next: watched source folders with subfolder toggles, track identity by audio hash and fingerprint, text search and filters, collections, preview playback, missing-file relinking and the persistent Activity queue.
+`M0 Foundations` (`v0.1.0`) and `M1 Design` (`v0.2.0`) are complete, and `M2 Library` (`v0.3.0`) is underway: watched source folders with subfolder toggles (`#81`) and decoded-audio hash + Chromaprint identity (`#83`) have landed on `master`, with FTS5 text search and filters, collections, preview playback, missing-file relinking and the persistent Activity queue up next.
 
 After `M2`, the roadmap builds identification and tag writing (`M3`), quality checks and seamless file replacement (`M4`), beat/key/energy/phrase analysis (`M5`), similarity and natural-language discovery (`M6`), full deck controls and hardware mappings (`M7`), live mix coaching (`M8`), session replay (`M9`), set building (`M10`), rekordbox and Engine DJ library sync (`M11`), and stems (`M12`). Every checklist item and its evidence live in [docs/roadmap.md](docs/roadmap.md).
 
@@ -67,9 +68,10 @@ That writes `target/release/bundle/nsis/Resonance_<version>_x64-setup.exe` with 
    npm ci --prefix ui
    ```
 
-2. Load tracks into the development library. Scan a music folder read-only into `target/dev/data`:
+2. Load tracks into the development library. Scan a music folder read-only into `target/dev/data` (and optionally run a foreground identity pass with `just identify`):
    ```powershell
    just scan C:\path\to\music
+   just identify
    ```
    Or generate a 100,000-track synthetic library in `target/dev/synthetic`:
    ```powershell

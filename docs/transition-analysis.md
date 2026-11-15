@@ -19,8 +19,20 @@ Five traps in the initial milestone notes need addressing as M2 to M6 are built:
 | Phrases (M5) | `allin1` (`mir-aidj/all-in-one`) takes four-stem HTDemucs spectrograms (`[4, steps, 24]`), relies on custom NATTEN C++/CUDA kernels that resist plain ONNX export, and outputs pop labels (`verse`, `chorus`, `bridge`). Running it in Tier 2 would force Tier 3 stem separation on every track. | Keep `allin1` in `tools/models/` as an offline Python benchmark only. In Tier 2, segment over bar-synchronous harmonic, percussive and sub-band features with dance labels (`intro`, `buildup`, `drop`, `breakdown`, `cooldown`, `outro`). |
 | Embeddings (M6) | CLAP and MERT cosine similarity do not predict blend compatibility, and CLAP checkpoints vary in licence even though the code is MIT/CC0. | Use CLAP in M6 for symmetric vibe and text search ("similar to this"), and verify the chosen checkpoint's commercial licence in the model registry (for example `music_audioset_epoch_15_esc_90.14.pt` under MIT, or an Apache-2.0 encoder such as `dasheng`). Rank "what mixes next" with asymmetric phrase-window scoring. |
 | Vocal activity (M5) | [product.md](product.md) puts vocal activity in Tier 2 for the coach and set builder, while [architecture.md](architecture.md) assigns no algorithm to it. Waiting for Tier 3 vocal stems would leave un-stemmed tracks without vocal clash checks. | Add a Tier 2 vocal presence detector on the harmonic mid-channel (`M = L + R`, 250 Hz to 4 kHz) using pitch-stability and vibrato features or a small mel CNN. |
-| Decode offset (M2, M4) | Lossy decoders (MP3, AAC, Symphonia vs FFmpeg) strip encoder delay and end padding differently. A few milliseconds of padding drift breaks M4's acceptance check (alignment within 1 ms, carried-over cues within 5 ms). | Strip gapless encoder delay and padding canonically at decode time before BLAKE3 audio hashing and Beat This! grid extraction. In M4 Replace, refine `offset_samples` by cross-correlating decoded onset envelopes rather than trusting container headers alone. |
+| Decode offset (M2, M4) | Lossy decoders (MP3, AAC, Symphonia vs FFmpeg) strip encoder delay and end padding differently. A few milliseconds of padding drift breaks M4's acceptance check (alignment within 1 ms, carried-over cues within 5 ms). | Strip gapless encoder delay and padding canonically at decode time (`gapless: true`, `verify: true` in Symphonia `0.6.1`) before BLAKE3 audio hashing and Beat This! grid extraction. In M4 Replace, refine `offset_samples` by cross-correlating decoded onset envelopes rather than trusting container headers alone. |
 | Global key and BPM (M6–M10) | Global key penalises percussive outros that have no pitched content, misses modulations and non-440 Hz masters, and ignores pitch shift when keylock is off. Global BPM misses swing and syncopation clashes. | Score transitions over bar-synchronous feature windows in `core` and `metrics`. |
+
+## Shared decode pass and front-end parameters
+
+Once M4 and M5 land alongside M2's identity worker, a newly imported file decodes once on a background worker thread and feeds every CPU consumer in a single streaming pass:
+
+- full-scale `i32` little-endian BLAKE3 `audio_hash` and stream verification (`DecodedAudioFacts`: sample rate, channel count, exact frame count, packet decode errors and container checksum status);
+- 120-second `i16` Chromaprint (`Configuration::preset_test2()`);
+- integrated loudness, loudness range and 4x-oversampled true peak (`ebur128`), plus clipping, dropout and high-frequency spectral-cutoff checks for lossy transcodes dressed up as lossless;
+- multi-resolution three-band waveform peaks (`< 150 Hz`, `150 Hz–2.5 kHz`, `> 2.5 kHz`) for inline, dock and deck rendering;
+- a mono `44.1 kHz` STFT (`2,048`-sample Hann window, `512`-sample hop, `86.13` frames/s) split by Fitzgerald's 1D median filter (`17` frames in time for `H`, `17` bins in frequency for `P`) alongside the `Beat This!` log-mel spectrogram (`50` frames/s).
+
+Files scanned during M2 already carry `audio_hash` in SQLite (`0003_identity.sql`). Because `analysis_run` keys every result by `(audio_hash, analyser, version, param_hash)`, later milestones populate missing tables without re-running identity or touching user edits.
 
 ## Bar-synchronous feature matrix
 
@@ -111,6 +123,44 @@ Swapping the low band near 150 Hz on the downbeat avoids kick mud ([v3-notes.md]
 - `sub_bass_duty`: fraction of frames in a beat where 30–150 Hz energy stays high. A short punchy kick leaves space between beats for an incoming off-beat bassline; two high-duty rumble, Reese or 808 subs overload headroom unless swapped cleanly on the downbeat.
 - `sub_bass_f0_cents`: dominant fundamental below 150 Hz, showing whether two basslines sit on the same bin (phase cancellation risk) or at a clean interval.
 
+## Sub-millisecond beat grids, bar phase and functional cues
+
+A neural beat tracker gets the pulse right to the nearest spectrogram frame, which is still rough enough for two synced kicks to flam or for a hot cue to click.
+
+### Kick-transient and zero-crossing grid snapping
+
+`Beat This!` emits beat and downbeat activations at 50 frames a second (20 ms per frame). A 10 to 20 ms offset causes low-end comb filtering or a double attack when two decks play in sync, and slices mid-cycle when a cue or loop fires. After `Beat This!` sets the coarse beat positions in Tier 2, a deterministic Rust pass refines every beat marker inside a `+-15 ms` search window:
+
+1. On percussive bars (`percussive_ratio >= 0.15`), pick the steepest positive rise on the `< 150 Hz` percussive envelope so the marker sits at the start of the kick transient rather than the body peak behind it. On beatless bars (`percussive_ratio < 0.15`), fall back to broadband onset flux (`150 Hz–8 kHz`), or keep the interpolated tempo grid when no transient is present.
+2. Walk backwards up to `0.5 ms` (`22` samples at `44.1 kHz`) to the nearest zero-crossing of the summed mono signal (`L + R`) so hot cues and loops jump cleanly without a click.
+
+### Downbeat bar phase and pickup bars
+
+Many club tracks open with a 1, 2 or 4-beat vocal phrase, snare fill or synth note before the first bar-1 kick. Frame-level downbeat trackers often latch onto that opening sound and put beat 1 on beat 3 or beat 4 for the rest of the track.
+
+Instead of trusting early bars in isolation, Tier 2 scores all four global bar phases `p in {0, 1, 2, 3}` across the whole track at once, weighting:
+
+- `Beat This!` downbeat probabilities across full-drum sections;
+- the sharpness of the first full drop impact and `8`, `16` and `32`-bar checkerboard novelty peaks;
+- `< 150 Hz` step-0 weight paired with snare and clap energy (`150 Hz–2.5 kHz`) on beats 2 and 4 (`steps 4 and 12`).
+
+Locking bar phase to the main drops keeps the 4-bar and 8-bar phrase count right from start to finish, and any leading beats ahead of the first true bar 1 are marked as a pickup bar (`bar 0`) rather than shifting the whole grid.
+
+### Proposed functional hot cues and memory cues
+
+DJs set cues at mix decision points rather than verse and chorus labels. From the snapped beat grid, bar summary and phrase roles, Tier 2 generates a `proposed` cue set stored separately from user-placed cues:
+
+| Cue | Where it lands | Why a DJ uses it |
+| --- | --- | --- |
+| `Mix-in` | First clean downbeat (`bar 1 beat 1`, skipping any pickup beats), carrying cold-vocal or beatless-intro flags. | Starting point on the incoming deck without losing bar phase. |
+| `Groove / Bass in` | First phrase downbeat where `< 150 Hz` kick and bass reach full level. | Marks the latest bar where the outgoing deck's low EQ should swap out. |
+| `Breakdown` | Downbeat where `< 150 Hz` drops out into a mid/high or vocal section. | Safe landing spot for a beatless cut or vocal tease. |
+| `Buildup` | Downbeat where `tension_score` begins its climb ahead of a drop. | Aligns two risers for a drop swap or double drop. |
+| `Drop 1` / `Drop 2` | First and second main impact downbeats. | Instant jump for high-energy cuts and phrase checks. |
+| `Mix-out` + loop candidate | `16` or `32` bars before the outro or final energy drop, plus a `4` or `8`-bar clean drum loop candidate when the outro is under `16` bars or ends cold. | Warns before the track runs out and gives an emergency loop on short edits. |
+
+Every proposed cue snaps to the upward zero-crossing just ahead of its beat marker. Re-running analysis updates only unaccepted proposals and never moves or deletes a cue the user placed, edited or locked; M11 exports accepted cues to rekordbox, Engine DJ, Serato and Traktor.
+
 ## Complementarity without Tier 3 stems
 
 HTDemucs stems stay in Tier 3 (on demand) so scanning 100,000 tracks needs neither terabytes of stem cache nor hours of GPU time. Tier 1 and Tier 2 get most of the benefit through three cheaper steps:
@@ -137,6 +187,7 @@ Compatibility between exit phrase `P_A` and entry phrase `P_B` depends on the tr
 
 - Internal bar tension vs loudness. In a buildup with the kick high-passed out, an accelerating snare roll and an upward riser, RMS loudness drops while perceived tension peaks. `tension_score` combines spectral centroid rise, sub-150 Hz drop-out paired with 1–16 kHz rise, onset density acceleration and TIV dissonance so buildups are not mislabelled as cooldowns. Per [ADR 0012](adr/0012-concept-boards-as-design-target.md), Tension is kept out of the Library table and Inspector tabs as a separate UI surface; it lives inside the bar summary for segmentation and drop-swap scoring.
 - Stereo width and tail continuity. Cutting from a wide modern stereo master to a narrow mono vinyl rip collapses the image even at matched LUFS. Mid-to-side energy (`stereo_width`) and `reverb_tail_ratio` flag abrupt spatial drops.
+- Mastering crest factor and midrange density. Integrated LUFS alone treats a dynamic `-14 LUFS` vinyl rip or 90s pressing the same as a heavily limited `-6 LUFS` modern club master turned down by `8 dB`. At matched LUFS the denser master packs far more sustained `400 Hz–4 kHz` RMS energy and buries the dynamic track's snare and vocals, while its clipped peaks carry less transient punch. Storing short-term crest factor (peak-to-RMS in dB across `< 150 Hz` and `400 Hz–4 kHz`) alongside LUFS lets `phi_8` and `coach` flag density mismatches and suggest gentler channel gain with a slight mid trim on the denser deck.
 - Edge-of-track flags. Inspecting the first and last 16 bars of the bar summary yields deterministic flags for cold vocal intros (vocal activity on bar 1 beat 1), beatless intros or outros, and sustained-bass outros ([v3-notes.md](v3-notes.md)).
 - Control-log calibration in Replay. Because Mix logs sample-accurate fader, EQ, filter and tempo moves (`session_event`), Replay (M9) can compare the predicted compatibility of a pair against the measured score the DJ achieved live.
 
@@ -153,7 +204,7 @@ For a candidate transition `i = (track_A, track_B, P_A, P_B, style_S)`, `metrics
 5. `phi_5`: sub-150 Hz envelope fit under style `S`'s EQ curve.
 6. `phi_6`: six-band spectral slot balance and midrange masking margin.
 7. `phi_7`: vocal clash clearance.
-8. `phi_8`: energy, tension and stereo continuity against the set's target line.
+8. `phi_8`: energy, tension, mastering density and stereo continuity against the set's target line.
 
 The linear score is `U(phi_i) = w^T phi_i`, starting at fixed prior weights `w_0`. When the user prefers preview `i` over preview `j`, the Bradley-Terry likelihood is `sigma(w^T (phi_i - phi_j)) = 1 / (1 + exp(-w^T (phi_i - phi_j)))`. Over `M` stored choices `(i_m, j_m)` in SQLite, `core` updates `w` by minimising the strictly convex objective:
 
@@ -168,7 +219,7 @@ With eight parameters and `lambda > 0`, projected gradient descent in Rust conve
 | Milestone | Scope | Check |
 | --- | --- | --- |
 | M2 Library (`v0.3.0`) & M4 Replace (`v0.5.0`) | Canonical gapless encoder-delay and padding stripping in Symphonia before BLAKE3 hashing; onset-envelope cross-correlation for `offset_samples` in Replace. | MP3 and FLAC encodes of the same master align within 1 ms and carry cues across within 5 ms. |
-| M5 Analysis (`v0.6.0`) | Rust median-filtering HPSS on the STFT front end; `tuning_cents` and Bernardes TIVs; three-band 16-step drum grids, swing, LHL syncopation and sub-150 Hz duty cycle; Tier 2 vocal presence; 48-byte/bar SQLite BLOB; multi-feature checkerboard phrases with dance role labels (`allin1` kept offline in `tools/models/`). | Bar summary stays at `9.00 KiB` per 192-bar track; key accuracy benchmarked with and without HPSS and tuning correction against `fixtures-local/` and rekordbox keys; vocal detector false-positive rate measured on fixtures. |
+| M5 Analysis (`v0.6.0`) | Rust median-filtering HPSS on the STFT front end; `< 150 Hz` transient and zero-crossing beat-grid snapping plus four-phase downbeat and pickup-bar locking; `tuning_cents` and Bernardes TIVs; three-band 16-step drum grids, swing, LHL syncopation, sub-150 Hz duty cycle and mastering crest factor; Tier 2 vocal presence; 48-byte/bar SQLite BLOB; multi-feature checkerboard phrases with dance role labels and non-destructive `proposed` functional cues (`allin1` kept offline in `tools/models/`). | Bar summary stays at `9.00 KiB` per 192-bar track; beat markers land within `1 ms` of synthetic and fixture kick onsets without mid-cycle clicks; key accuracy benchmarked with and without HPSS and tuning correction against `fixtures-local/` and rekordbox keys; vocal detector false-positive rate measured on fixtures. |
 | M6 Discovery (`v0.7.0`) | Commercial licence check on the default CLAP checkpoint; symmetric vibe search (CLAP) separated from asymmetric Next-track phrase scoring. | "After this track" queries return phrase-compatible matches inside the 50 ms search budget. |
 | M7 Decks (`v0.8.0`) & M8 Coach (`v0.9.0`) | Continuous `delta_cents` keylock maths, TIV bar dissonance, swing-flam checks and sub-150 Hz duty-cycle overlap rules in `core`, `metrics` and `coach`. | Synthetic pairs with `+3.0%` keylock-off detuning (`+51.2` cents) and known swing offsets trigger the expected prompts within tolerance. |
 | M10 Sets (`v0.11.0`) | 2D `(P_A, P_B)` phrase-pair search conditional on transition style, plus the L2-regularised Bradley-Terry weight update in `core`. | Previews score across 16, 32 and 64-bar windows; seeded synthetic A/B choices move `w` deterministically towards the simulated preference. |
