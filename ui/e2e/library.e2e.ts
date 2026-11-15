@@ -1,4 +1,4 @@
-import { copyFileSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test } from '@playwright/test';
@@ -107,7 +107,7 @@ test('a folder that is not there is reported, and the library stays as it was', 
   ).toBeVisible();
 });
 
-test('subfolder toggles update the library, and a watched source picks up new files', async ({
+test('subfolder toggles update the library, and a watched source picks up new and renamed files', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1586, height: 992 });
@@ -132,6 +132,8 @@ test('subfolder toggles update the library, and a watched source picks up new fi
   await expect(table.getByText('Ada Marsh - First Light')).toBeVisible();
 
   const addedTrack = join(musicFolder, 'House', 'Zara Lin - Sixth Sense.wav');
+  const originalGarage = join(musicFolder, 'Garage', 'Kofi Bell - Third Rail.aiff');
+  const renamedGarage = join(musicFolder, 'Garage', 'Kofi Bell - Rail Yard.aiff');
   try {
     copyFileSync(join(musicFolder, 'House', 'Ada Marsh - First Light.wav'), addedTrack);
     await expect(page.getByText('4 tracks', { exact: true })).toBeVisible({ timeout: 10_000 });
@@ -144,7 +146,15 @@ test('subfolder toggles update the library, and a watched source picks up new fi
 
     await expect(page.getByText('6 tracks', { exact: true })).toBeVisible();
     await expect(table.getByText('Kofi Bell - Third Rail')).toBeVisible();
+
+    renameSync(originalGarage, renamedGarage);
+    await expect(table.getByText('Kofi Bell - Rail Yard')).toBeVisible({ timeout: 10_000 });
+    await expect(table.getByText('Kofi Bell - Third Rail')).toHaveCount(0);
+    await expect(page.getByText('6 tracks', { exact: true })).toBeVisible();
   } finally {
+    if (existsSync(renamedGarage)) {
+      renameSync(renamedGarage, originalGarage);
+    }
     rmSync(addedTrack, { force: true });
   }
 });

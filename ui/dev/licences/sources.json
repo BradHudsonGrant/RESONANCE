@@ -171,6 +171,26 @@
   },
   {
     "ecosystem": "cargo",
+    "name": "rusty-chromaprint",
+    "version": "0.3.0",
+    "revision": "97d67dfed02854ac5d5eaa9ac965b9abe3dff690",
+    "repository": "https://github.com/darksv/rusty-chromaprint",
+    "evidence": "Published rusty-chromaprint-0.3.0/.cargo_vcs_info.json, git.sha1 and path_in_vcs=chromaprint. SOURCE-NOTICE is the unchanged pinned chromaprint/Cargo.toml declaring license = \"MIT\". The pinned tree contains no standalone MIT text, so LICENSE-MIT is the canonical SPDX MIT text.",
+    "files": [
+      {
+        "path": "rusty-chromaprint-0.3.0/SOURCE-NOTICE",
+        "url": "https://raw.githubusercontent.com/darksv/rusty-chromaprint/97d67dfed02854ac5d5eaa9ac965b9abe3dff690/chromaprint/Cargo.toml",
+        "sha256": "1d1f240a2b7a1b83ffe6f46ee19f8a4b85cf2d0e6a7ce7f4cf6f94d6bbe6e2af"
+      },
+      {
+        "path": "rusty-chromaprint-0.3.0/LICENSE-MIT",
+        "url": "https://raw.githubusercontent.com/spdx/license-list-data/v3.26.0/text/MIT.txt",
+        "sha256": "6d7c9e9d7d12c8d3753bdb24417b84819ba4d6c2f025c37948113d86dc81eef9"
+      }
+    ]
+  },
+  {
+    "ecosystem": "cargo",
     "name": "selectors",
     "version": "0.38.0",
     "revision": "572ecba2d1600e7c3d490586692a209faf703baa",

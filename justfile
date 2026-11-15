@@ -87,6 +87,10 @@ serve data_folder="target/dev/data":
 scan folder data_folder="target/dev/data":
     cargo run --quiet --package resonance-cli -- --data-folder "{{ data_folder }}" scan "{{ folder }}"
 
+# Hash and fingerprint any pending files in the library.
+identify data_folder="target/dev/data":
+    cargo run --quiet --package resonance-cli -- --data-folder "{{ data_folder }}" identify
+
 # A made-up library for measuring at scale. Serve it with `just serve target/dev/synthetic`.
 synthetic-library count="100000":
     cargo run --quiet --package resonance-fixtures --bin synthetic-library -- target/dev/synthetic {{ count }}

@@ -9,9 +9,12 @@ publish.workspace = true
 [dependencies]
 resonance-core.workspace = true
 resonance-db.workspace = true
+blake3.workspace = true
 dunce.workspace = true
 lofty.workspace = true
 notify.workspace = true
+rusty-chromaprint.workspace = true
+symphonia.workspace = true
 
 [dev-dependencies]
 resonance-fixtures.workspace = true
