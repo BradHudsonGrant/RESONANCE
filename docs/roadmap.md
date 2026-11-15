@@ -102,7 +102,7 @@ Accept:
 - [ ] Writing tags
 - [ ] Filename templates
 - [ ] Artwork
-- [ ] The Inbox
+- [ ] The Prep space
 - [ ] A place in Settings to enter provider keys (AcoustID, Discogs, any paid provider), kept in the OS credential store
 
 Accept:
@@ -187,7 +187,7 @@ Accept:
 - [ ] On synthetic pairs with known offsets, level differences and key clashes, the coach reports each within tolerance and gives the right prompt.
 - [ ] With Coach off there is no measurable cost.
 
-## M9 Review, v0.10.0
+## M9 Replay, v0.10.0
 
 - [ ] Analysis of Resonance sessions
 - [ ] Analysis of imported recordings
@@ -197,7 +197,7 @@ Accept:
 
 Accept:
 
-- [ ] On a mix rendered from known tracks with known errors, the review finds the transitions and the errors.
+- [ ] On a mix rendered from known tracks with known errors, Replay finds the transitions and the errors.
 - [ ] Exact and estimated figures are labelled.
 
 ## M10 Sets and transitions, v0.11.0
