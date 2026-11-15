@@ -221,15 +221,22 @@ pub(crate) fn collections_by_track_ids(
     connection: &Connection,
     track_ids: &[i64],
 ) -> Result<HashMap<i64, Vec<TrackCollection>>, DbError> {
+    if track_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let has_any: bool = connection
+        .prepare_cached("SELECT EXISTS(SELECT 1 FROM collection_item LIMIT 1)")?
+        .query_row([], |row| row.get(0))?;
+    if !has_any {
+        return Ok(HashMap::new());
+    }
+
     let mut unique = Vec::new();
     let mut seen = HashSet::new();
     for &id in track_ids {
         if seen.insert(id) {
             unique.push(id);
         }
-    }
-    if unique.is_empty() {
-        return Ok(HashMap::new());
     }
 
     let mut map: HashMap<i64, Vec<TrackCollection>> = HashMap::new();
@@ -263,10 +270,19 @@ pub(crate) fn populate_track_collections(
     if tracks.is_empty() {
         return Ok(());
     }
+    let has_any: bool = connection
+        .prepare_cached("SELECT EXISTS(SELECT 1 FROM collection_item LIMIT 1)")?
+        .query_row([], |row| row.get(0))?;
+    if !has_any {
+        for track in tracks {
+            track.collections.clear();
+        }
+        return Ok(());
+    }
     let track_ids: Vec<i64> = tracks.iter().map(|track| track.track_id).collect();
-    let by_track = collections_by_track_ids(connection, &track_ids)?;
+    let mut by_track = collections_by_track_ids(connection, &track_ids)?;
     for track in tracks {
-        track.collections = by_track.get(&track.track_id).cloned().unwrap_or_default();
+        track.collections = by_track.remove(&track.track_id).unwrap_or_default();
     }
     Ok(())
 }

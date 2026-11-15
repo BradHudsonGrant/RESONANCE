@@ -59,20 +59,20 @@ export const dataColumns: DataColumn[] = [
   },
 ];
 
-/** Tick box (30) + Status (22) + # (36) + data columns + Actions (32). */
-export const columnWidths = `30px 22px 36px ${dataColumns.map((col) => col.track).join(' ')} 32px`;
+/** Tick box (30) + Status (22) + # (36) + data columns + Actions (56: star + more). */
+export const columnWidths = `30px 22px 36px ${dataColumns.map((col) => col.track).join(' ')} 56px`;
 
 /** Every non-M5 column stays at every size; narrow workspaces tighten Title and Artist floors. */
 export const compactColumnWidths = [
   '30px',
   '22px',
   '36px',
-  'minmax(108px, 1.8fr)',
-  'minmax(80px, 1.3fr)',
+  'minmax(96px, 1.8fr)',
+  'minmax(68px, 1.3fr)',
   '58px',
   '52px',
   '56px',
-  '32px',
+  '56px',
 ].join(' ');
 
 export const tableMinWidth = '474px';

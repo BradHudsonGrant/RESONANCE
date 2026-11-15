@@ -274,8 +274,23 @@ test('manual collections create, assign via multi-select, inspect, persist and d
   await table.getByText('Kofi Bell - Third Rail').click();
   await expect(inspector.getByRole('button', { name: 'Remove Warm Up' })).toBeVisible();
 
+  const selectedRow = table.locator('[role="row"][aria-selected="true"]');
+  await selectedRow.hover();
+  const playIcon = selectedRow.locator('.status-icon');
+  const rowStar = selectedRow.getByRole('button', { name: 'Favourite Kofi Bell - Third Rail' });
+  await expect(playIcon).toBeVisible();
+  await expect(rowStar).toBeVisible();
+  const [playBox, starBox] = await Promise.all([playIcon.boundingBox(), rowStar.boundingBox()]);
+  expect(playBox && starBox && playBox.x + playBox.width < starBox.x).toBe(true);
+
   await page.setViewportSize({ width: 1100, height: 700 });
   const collapsedLib = sidebar.getByRole('button', { name: 'Library' });
+  const railActive = await collapsedLib.evaluate((el) => ({
+    bg: getComputedStyle(el).backgroundColor,
+    barDisplay: getComputedStyle(el, '::before').display,
+  }));
+  expect(railActive.bg).not.toBe('rgba(0, 0, 0, 0)');
+  expect(railActive.barDisplay).not.toBe('none');
   await collapsedLib.hover();
   await expect(sidebar.getByText('Library · Warm Up')).toBeVisible();
 

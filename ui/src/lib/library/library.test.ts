@@ -275,7 +275,34 @@ describe('Library', () => {
     expect(onaddtocollection).toHaveBeenCalledWith(2, [1]);
 
     const grid = screen.getByRole('grid', { name: 'Tracks' });
+    grid.focus();
     await fireEvent.keyDown(grid, { key: 'ArrowDown' });
+
+    const firstRow = screen
+      .getAllByRole('row')
+      .find((row) => row.getAttribute('aria-selected') === 'true')!;
+    expect(firstRow.querySelector('.status-cell .status-icon')).toBeTruthy();
+    expect(firstRow.querySelector('.status-cell button')).toBeNull();
+    expect(firstRow.querySelector('.row-actions .row-star')).toBeTruthy();
+
+    await fireEvent.keyDown(grid, { key: 'c' });
+    const removeActiveItem = screen.getByRole('menuitem', { name: 'Remove from Warm Up' });
+    const warmItem = screen.getByRole('menuitemcheckbox', { name: /Warm Up/ });
+    const peakItem = screen.getByRole('menuitemcheckbox', { name: /Peak Hour/ });
+    const newItem = screen.getByRole('menuitem', { name: 'New collection…' });
+    expect(document.activeElement).toBe(removeActiveItem);
+    await fireEvent.keyDown(window, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(warmItem);
+    await fireEvent.keyDown(window, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(peakItem);
+    await fireEvent.keyDown(window, { key: 'End' });
+    expect(document.activeElement).toBe(newItem);
+    await fireEvent.keyDown(window, { key: 'Home' });
+    expect(document.activeElement).toBe(removeActiveItem);
+    await fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(grid);
+
     await fireEvent.keyDown(grid, { key: 'ArrowDown', shiftKey: true });
     expect(screen.getByText('2 selected')).toBeTruthy();
 

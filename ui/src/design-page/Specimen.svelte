@@ -206,6 +206,7 @@
       <Button variant="primary"><Icon name="prep" />Replace</Button>
       <Button>Identify</Button>
       <Button active>Active</Button>
+      <Button variant="danger">Delete</Button>
       <Button variant="quiet">Cancel</Button>
       <Button disabled>Unavailable</Button>
       <Button variant="select">EQ Flat</Button>

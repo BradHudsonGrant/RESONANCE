@@ -72,10 +72,7 @@
   let menuShowFavourite = $state(false);
   let menuLabel = $state('Track actions');
 
-  const loaded = $derived(pages.loadedTracks());
-  const allLoadedChecked = $derived(
-    loaded.length > 0 && loaded.every((track) => checkedIds.has(track.id)),
-  );
+  const allLoadedChecked = $derived(pages.allLoadedChecked(checkedIds));
   const someChecked = $derived(checkedIds.size > 0);
   const resolvedMenuTracks = $derived(
     menuTracks.map((track) => pages.trackById(track.id) ?? track),
@@ -229,7 +226,7 @@
       clearChecked();
       return;
     }
-    for (const track of loaded) {
+    for (const track of pages.loadedTracks()) {
       checkedIds.add(track.id);
       checkedFallback.set(track.id, track);
     }
@@ -249,8 +246,13 @@
   }
 
   function closeMenu() {
+    const anchor = menuAnchor;
     menuOpen = false;
-    gridEl?.focus();
+    if (anchor?.isConnected && anchor !== gridEl && anchor.tabIndex >= 0) {
+      anchor.focus();
+    } else {
+      gridEl?.focus();
+    }
   }
 
   async function removeTracksFromCollection(collectionId: number, trackIds: number[]) {
@@ -515,32 +517,6 @@
                     <path d="M3.5 2.4 11.5 7 3.5 11.6Z" fill="currentColor" />
                   </svg>
                 {/if}
-                {#if track}
-                  <button
-                    type="button"
-                    class={[
-                      'status-star',
-                      { fav: track.favourite, hiddenOnSelected: isSelected && !track.favourite },
-                    ]}
-                    aria-label={`Favourite ${track.title}`}
-                    aria-pressed={track.favourite}
-                    tabindex={-1}
-                    onclick={(event) => {
-                      event.stopPropagation();
-                      ontogglefavourite?.(track);
-                    }}
-                  >
-                    <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-                      <path
-                        d="m8 1.8 1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6Z"
-                        fill={track.favourite ? 'currentColor' : 'none'}
-                        stroke="currentColor"
-                        stroke-width="1.35"
-                        stroke-linejoin="round"
-                      />
-                    </svg>
-                  </button>
-                {/if}
               </div>
             </TableCell>
             <TableCell numeric size="sm" tone="muted">
@@ -557,26 +533,42 @@
               </TableCell>
             {/each}
             <TableCell compact>
-              <button
-                type="button"
-                class="more"
-                aria-label={track ? `Actions for ${track.title}` : 'Track actions'}
-                aria-haspopup="menu"
-                disabled={!track}
-                tabindex={-1}
-                onclick={(event) => {
-                  event.stopPropagation();
-                  if (track) {
-                    const targets = targetTracksForAction(track);
-                    openMenuForTracks(targets, event.currentTarget, {
-                      showFavourite: targets.length === 1,
-                      label: `Actions for ${track.title}`,
-                    });
-                  }
-                }}
-              >
-                <Icon name="more" size="xs" />
-              </button>
+              <div class="row-actions">
+                <button
+                  type="button"
+                  class={['row-star', { fav: Boolean(track?.favourite) }]}
+                  aria-label={track ? `Favourite ${track.title}` : 'Favourite track'}
+                  aria-pressed={Boolean(track?.favourite)}
+                  disabled={!track}
+                  tabindex={-1}
+                  onclick={(event) => {
+                    event.stopPropagation();
+                    if (track) ontogglefavourite?.(track);
+                  }}
+                >
+                  <Icon name="star" size="xs" filled={Boolean(track?.favourite)} />
+                </button>
+                <button
+                  type="button"
+                  class="more"
+                  aria-label={track ? `Actions for ${track.title}` : 'Track actions'}
+                  aria-haspopup="menu"
+                  disabled={!track}
+                  tabindex={-1}
+                  onclick={(event) => {
+                    event.stopPropagation();
+                    if (track) {
+                      const targets = targetTracksForAction(track);
+                      openMenuForTracks(targets, event.currentTarget, {
+                        showFavourite: targets.length === 1,
+                        label: `Actions for ${track.title}`,
+                      });
+                    }
+                  }}
+                >
+                  <Icon name="more" size="xs" />
+                </button>
+              </div>
             </TableCell>
             {#if !track}
               <span class="pending" aria-label="Loading"></span>
@@ -725,7 +717,6 @@
   }
 
   .status-cell {
-    position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -735,43 +726,6 @@
 
   .status-icon {
     color: var(--color-text);
-  }
-
-  .status-star {
-    position: absolute;
-    inset: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    border: 0;
-    border-radius: var(--radius-xs);
-    background: transparent;
-    color: var(--color-muted);
-    opacity: 0;
-    cursor: pointer;
-    transition:
-      opacity var(--duration-fast) var(--ease-out),
-      color var(--duration-fast) var(--ease-out);
-  }
-
-  .status-star.fav {
-    color: var(--color-text);
-    opacity: 1;
-  }
-
-  .status-star.hiddenOnSelected {
-    opacity: 0;
-  }
-
-  :global(.row:hover) .status-star,
-  .status-star:focus-visible {
-    opacity: 1;
-    color: var(--color-text);
-  }
-
-  :global(.row:hover) .status-icon {
-    opacity: 0;
   }
 
   .sort-btn {
@@ -809,6 +763,13 @@
     flex: 0 0 auto;
   }
 
+  .row-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-0-5);
+  }
+
+  .row-star,
   .more {
     display: inline-flex;
     align-items: center;
@@ -823,14 +784,35 @@
     cursor: pointer;
     transition:
       background-color var(--duration-fast) var(--ease-out),
-      color var(--duration-fast) var(--ease-out);
+      color var(--duration-fast) var(--ease-out),
+      opacity var(--duration-fast) var(--ease-out);
   }
 
+  .row-star {
+    opacity: 0;
+  }
+
+  .row-star.fav {
+    color: var(--color-text);
+    opacity: 1;
+  }
+
+  :global(.row:hover) .row-star:not(:disabled),
+  .row-star:focus-visible:not(:disabled) {
+    opacity: 1;
+  }
+
+  .row-star:hover:not(:disabled),
+  .row-star:focus-visible:not(:disabled),
   .more:hover:not(:disabled),
   .more:focus-visible:not(:disabled) {
     background: var(--color-surface-2);
     color: var(--color-text);
-    outline: none;
+  }
+
+  .row-star:disabled {
+    cursor: default;
+    opacity: 0;
   }
 
   .more:disabled {

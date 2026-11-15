@@ -220,6 +220,13 @@
   }
 
   @media (forced-colors: active) {
+    .danger:not(:disabled, [aria-disabled='true']) {
+      border-color: Highlight;
+      background: Highlight;
+      color: HighlightText;
+      forced-color-adjust: none;
+    }
+
     .button:disabled,
     .button[aria-disabled='true'] {
       color: GrayText;

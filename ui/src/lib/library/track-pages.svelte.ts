@@ -281,6 +281,23 @@ export class TrackPages {
   }
 
   /**
+   * True when at least one page is cached and every cached track id is in `checkedIds`.
+   * Checks `checkedIds.size` before touching `#pages` so scrolling with nothing ticked does not
+   * subscribe to page reads or allocate an array.
+   */
+  allLoadedChecked(checkedIds: ReadonlySet<number>): boolean {
+    if (checkedIds.size === 0) return false;
+    let count = 0;
+    for (const tracks of this.#pages.values()) {
+      for (const track of tracks) {
+        count += 1;
+        if (!checkedIds.has(track.id)) return false;
+      }
+    }
+    return count > 0;
+  }
+
+  /**
    * Reads the pages that hold the rows from `first` up to `end`, and the rows just past them,
    * nearest the middle of the view first. Pages asked for by an earlier view and not yet sent
    * are dropped.

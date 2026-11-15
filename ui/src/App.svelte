@@ -275,8 +275,8 @@
   };
 
   function onkeydown(event: KeyboardEvent) {
-    // An open sheet is modal and owns the keyboard, so nothing changes behind it.
-    if (event.altKey || document.querySelector('dialog[open]')) return;
+    // An open sheet or menu owns the keyboard, so nothing changes behind it.
+    if (event.altKey || document.querySelector('dialog[open], [role="menu"]')) return;
     const key = event.key.toLowerCase();
     const command = event.ctrlKey || event.metaKey;
 
