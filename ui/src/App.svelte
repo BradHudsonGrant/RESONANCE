@@ -1,5 +1,6 @@
 <script lang="ts">
   import Sheet from './lib/design/Sheet.svelte';
+  import type { LibraryCollection } from './lib/ipc/bindings/LibraryCollection';
   import type { LibraryTrack } from './lib/ipc/bindings/LibraryTrack';
   import { core } from './lib/ipc/core';
   import Inspector from './lib/library/Inspector.svelte';
@@ -43,6 +44,12 @@
   let sourcesRevision = $state(0);
   let mixPlaying = $state(false);
   let searchText = $state('');
+  let collections = $state<LibraryCollection[]>([]);
+  let activeCollectionId = $state<number | null>(null);
+
+  const activeCollection = $derived(
+    collections.find((collection) => collection.id === activeCollectionId) ?? null,
+  );
 
   function setSearch(text: string) {
     searchText = text;
@@ -75,6 +82,93 @@
     } catch {
       pages.setLocalFavourite(target.id, target.favourite);
     }
+  }
+
+  async function loadCollections() {
+    try {
+      const list = await core.call('collections');
+      collections = list;
+      if (activeCollectionId !== null && !list.some((col) => col.id === activeCollectionId)) {
+        activeCollectionId = null;
+        if (pages.query.collection_id != null) {
+          void pages.setQuery({ ...pages.query, collection_id: null });
+        }
+      }
+    } catch {
+      // Initial library load handles core error states; ignore transient collection fetch failure.
+    }
+  }
+
+  function mergeCollectionSummary(updated: LibraryCollection) {
+    const exists = collections.some((col) => col.id === updated.id);
+    collections = exists
+      ? collections.map((col) => (col.id === updated.id ? updated : col))
+      : [...collections, updated];
+  }
+
+  function selectCollection(collectionId: number | null) {
+    activeCollectionId = collectionId;
+    if ((pages.query.collection_id ?? null) !== collectionId) {
+      void pages.setQuery({ ...pages.query, collection_id: collectionId });
+    }
+  }
+
+  async function createCollection(name: string): Promise<LibraryCollection> {
+    const created = await core.call('create_collection', { name });
+    mergeCollectionSummary(created);
+    return created;
+  }
+
+  async function renameCollection(collectionId: number, name: string) {
+    const updated = await core.call('rename_collection', {
+      collection_id: collectionId,
+      name,
+    });
+    mergeCollectionSummary(updated);
+    pages.renameLocalCollection(updated.id, updated.name);
+  }
+
+  async function deleteCollection(collectionId: number) {
+    const remaining = await core.call('delete_collection', {
+      collection_id: collectionId,
+    });
+    collections = remaining;
+    pages.removeLocalCollection(collectionId);
+    if (activeCollectionId === collectionId) {
+      activeCollectionId = null;
+      await pages.setQuery({ ...pages.query, collection_id: null });
+    }
+  }
+
+  async function addTracksToCollection(collectionId: number, trackIds: number[]) {
+    if (trackIds.length === 0) return;
+    const updated = await core.call('add_tracks_to_collection', {
+      collection_id: collectionId,
+      track_ids: trackIds,
+    });
+    mergeCollectionSummary(updated);
+    pages.addTracksToLocalCollection(trackIds, { id: updated.id, name: updated.name });
+    if (activeCollectionId === collectionId) {
+      await pages.refresh();
+    }
+  }
+
+  async function removeTracksFromCollection(collectionId: number, trackIds: number[]) {
+    if (trackIds.length === 0) return;
+    const updated = await core.call('remove_tracks_from_collection', {
+      collection_id: collectionId,
+      track_ids: trackIds,
+    });
+    mergeCollectionSummary(updated);
+    pages.removeTracksFromLocalCollection(collectionId, trackIds);
+    if (activeCollectionId === collectionId) {
+      await pages.refresh();
+    }
+  }
+
+  async function createCollectionAndAdd(name: string, trackIds: number[]) {
+    const created = await createCollection(name);
+    await addTracksToCollection(created.id, trackIds);
   }
 
   function openSettings() {
@@ -130,6 +224,7 @@
     core.onLibraryChange(() => {
       sourcesRevision += 1;
       void pages.refresh();
+      void loadCollections();
     }),
   );
 
@@ -154,11 +249,13 @@
 
   function reload() {
     void pages.load();
+    void loadCollections();
   }
 
   function onScanned() {
     sourcesRevision += 1;
     void pages.refresh();
+    void loadCollections();
   }
 
   function typing(target: EventTarget | null): boolean {
@@ -196,6 +293,7 @@
   }
 
   pages.load();
+  void loadCollections();
 </script>
 
 <svelte:window {onkeydown} />
@@ -216,7 +314,15 @@
       activeSpace={space}
       trackCount={pages.state.kind === 'ready' ? pages.libraryTotal : null}
       wavePaused={space === 'Mix' && mixPlaying}
+      {collections}
+      {activeCollectionId}
       onSelectSpace={(nextSpace) => (space = nextSpace)}
+      onSelectCollection={selectCollection}
+      onCreateCollection={async (name) => {
+        await createCollection(name);
+      }}
+      onRenameCollection={renameCollection}
+      onDeleteCollection={deleteCollection}
       onCollapse={(collapsed) => (sidebarChoice = collapsed ? 'collapsed' : 'expanded')}
     />
   </div>
@@ -239,11 +345,17 @@
         <Library
           {pages}
           bind:selected={pages.selected}
+          {collections}
+          {activeCollection}
           loadFacets={() => core.call('library_facets')}
           onopen={showInspector}
           onscan={openScan}
           ontogglefavourite={toggleFavourite}
           onclearsearch={clearSearch}
+          onclearcollection={() => selectCollection(null)}
+          onaddtocollection={addTracksToCollection}
+          onremovefromcollection={removeTracksFromCollection}
+          oncreatecollectionandadd={createCollectionAndAdd}
         />
       {/if}
     </main>
@@ -253,8 +365,13 @@
     <div class="inspector-dock">
       <Inspector
         {track}
+        {collections}
+        {activeCollection}
         onclose={() => (inspectorHidden = true)}
         ontogglefavourite={toggleFavourite}
+        onaddtocollection={addTracksToCollection}
+        onremovefromcollection={removeTracksFromCollection}
+        oncreatecollectionandadd={createCollectionAndAdd}
       />
     </div>
   {/if}
@@ -278,8 +395,13 @@
     <Inspector
       {track}
       inSheet
+      {collections}
+      {activeCollection}
       onclose={() => (sheetOpen = false)}
       ontogglefavourite={toggleFavourite}
+      onaddtocollection={addTracksToCollection}
+      onremovefromcollection={removeTracksFromCollection}
+      oncreatecollectionandadd={createCollectionAndAdd}
     />
   </Sheet>
 {/if}
@@ -289,7 +411,10 @@
     bind:open={settingsOpen}
     {sourcesClient}
     {sourcesRevision}
-    onsourceschanged={() => void pages.refresh()}
+    onsourceschanged={() => {
+      void pages.refresh();
+      void loadCollections();
+    }}
   />
 {/if}
 

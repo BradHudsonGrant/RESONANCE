@@ -212,6 +212,83 @@ describe('Library', () => {
     expect(screen.getByRole('alert').textContent).toContain('The core is not running.');
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
   });
+
+  it('shows active collection breadcrumb, empty collection state and keeps collection when clearing filters', async () => {
+    const pages = new TrackPages((_offset, _limit, query) =>
+      Promise.resolve({
+        total: query?.text ? 0 : 0,
+        library_total: 4,
+        offset: 0,
+        tracks: [],
+      }),
+    );
+    await pages.load();
+    await pages.setQuery({ collection_id: 7 });
+    const onclearcollection = vi.fn();
+    const activeCollection = { id: 7, name: 'Warm Up', position: 0, track_count: 0 };
+
+    render(Library, { pages, activeCollection, onscan: vi.fn(), onclearcollection });
+
+    expect(screen.getByRole('heading', { name: 'Warm Up' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'This collection is empty' })).toBeTruthy();
+    await fireEvent.click(screen.getByRole('button', { name: 'Show all tracks' }));
+    expect(onclearcollection).toHaveBeenCalledOnce();
+
+    await pages.setQuery({ collection_id: 7, text: 'zzz' });
+    await fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(pages.query.collection_id).toBe(7);
+    expect(pages.query.text).toBeUndefined();
+  });
+
+  it('supports multi-select checkboxes, Shift+Arrow range ticks, shortcuts and row actions', async () => {
+    const pages = new TrackPages(async () => ({
+      total: 3,
+      library_total: 3,
+      offset: 0,
+      tracks: [
+        { ...fakeTrack(0), collections: [{ id: 1, name: 'Warm Up' }] },
+        fakeTrack(1),
+        fakeTrack(2),
+      ],
+    }));
+    await pages.load();
+    const collections = [
+      { id: 1, name: 'Warm Up', position: 0, track_count: 1 },
+      { id: 2, name: 'Peak Hour', position: 1, track_count: 0 },
+    ];
+    const onaddtocollection = vi.fn(async () => {});
+    const onremovefromcollection = vi.fn(async () => {});
+    const oncreatecollectionandadd = vi.fn(async () => {});
+
+    render(Library, {
+      pages,
+      collections,
+      activeCollection: collections[0],
+      onscan: vi.fn(),
+      onaddtocollection,
+      onremovefromcollection,
+      oncreatecollectionandadd,
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Actions for Track 0' }));
+    await fireEvent.click(screen.getByRole('menuitemcheckbox', { name: /Peak Hour/ }));
+    expect(onaddtocollection).toHaveBeenCalledWith(2, [1]);
+
+    const grid = screen.getByRole('grid', { name: 'Tracks' });
+    await fireEvent.keyDown(grid, { key: 'ArrowDown' });
+    await fireEvent.keyDown(grid, { key: 'ArrowDown', shiftKey: true });
+    expect(screen.getByText('2 selected')).toBeTruthy();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Add to collection' }));
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'New collection…' }));
+    const nameInput = screen.getByRole('textbox', { name: 'New collection name' });
+    await fireEvent.input(nameInput, { target: { value: 'Closing' } });
+    await fireEvent.submit(nameInput.closest('form')!);
+    expect(oncreatecollectionandadd).toHaveBeenCalledWith('Closing', [1, 2]);
+
+    await fireEvent.keyDown(grid, { key: 'Delete' });
+    expect(onremovefromcollection).toHaveBeenCalledWith(1, [1, 2]);
+  });
 });
 
 describe('Inspector and track formatting', () => {
@@ -248,6 +325,35 @@ describe('Inspector and track formatting', () => {
 
     await fireEvent.click(within(aside).getByRole('button', { name: 'Hide the inspector' }));
     expect(onclose).toHaveBeenCalledOnce();
+  });
+
+  it('displays collection pills and wires inspector add and remove controls', async () => {
+    const onaddtocollection = vi.fn(async () => {});
+    const onremovefromcollection = vi.fn(async () => {});
+    const track = {
+      ...fakeTrack(4),
+      collections: [{ id: 1, name: 'Warm Up' }],
+    };
+    const collections = [
+      { id: 1, name: 'Warm Up', position: 0, track_count: 1 },
+      { id: 2, name: 'Peak Hour', position: 1, track_count: 0 },
+    ];
+
+    render(Inspector, {
+      track,
+      collections,
+      onclose: vi.fn(),
+      onaddtocollection,
+      onremovefromcollection,
+    });
+
+    const aside = screen.getByRole('complementary', { name: 'Inspector' });
+    await fireEvent.click(within(aside).getByRole('button', { name: 'Remove Warm Up' }));
+    expect(onremovefromcollection).toHaveBeenCalledWith(1, [track.id]);
+
+    await fireEvent.click(within(aside).getByRole('button', { name: 'Add to collection' }));
+    await fireEvent.click(screen.getByRole('menuitemcheckbox', { name: /Peak Hour/ }));
+    expect(onaddtocollection).toHaveBeenCalledWith(2, [track.id]);
   });
 
   it('explains when audio properties are missing and renders a quiet empty state', () => {

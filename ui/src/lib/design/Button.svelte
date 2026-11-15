@@ -5,7 +5,7 @@
   import Icon from './Icon.svelte';
 
   interface Props extends HTMLButtonAttributes {
-    variant?: 'default' | 'primary' | 'quiet' | 'icon' | 'circle' | 'select';
+    variant?: 'default' | 'primary' | 'danger' | 'quiet' | 'icon' | 'circle' | 'select';
     size?: 'xs' | 'sm' | 'md' | 'lg';
     active?: boolean;
     ariaLabel?: string;
@@ -97,6 +97,18 @@
   .primary:active:not(:disabled, [aria-disabled='true']) {
     background: color-mix(in srgb, var(--color-text) 88%, var(--color-background));
     color: var(--color-background);
+  }
+
+  .danger {
+    border-color: var(--color-accent);
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+  }
+
+  .danger:hover:not(:disabled, [aria-disabled='true']),
+  .danger:active:not(:disabled, [aria-disabled='true']) {
+    background: color-mix(in srgb, var(--color-accent) 88%, var(--color-text));
+    color: var(--color-on-accent);
   }
 
   .quiet {

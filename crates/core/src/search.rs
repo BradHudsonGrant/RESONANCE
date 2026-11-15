@@ -34,6 +34,7 @@ pub enum SortDirection {
 pub struct TrackQuery {
     pub text: Option<String>,
     pub pill: FilterPill,
+    pub collection_id: Option<i64>,
     pub bpm_min: Option<f64>,
     pub bpm_max: Option<f64>,
     pub keys: Vec<String>,
@@ -46,9 +47,10 @@ pub struct TrackQuery {
 }
 
 impl TrackQuery {
-    /// Whether any filter pill, search text or drawer criterion narrows the library.
+    /// Whether any filter pill, collection, search text or drawer criterion narrows the library.
     pub fn is_narrowed(&self) -> bool {
         self.pill != FilterPill::All
+            || self.collection_id.is_some()
             || build_fts_match_query(self.text.as_deref().unwrap_or("")).is_some()
             || self.active_filter_count() > 0
     }

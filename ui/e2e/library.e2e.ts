@@ -221,3 +221,86 @@ test('instant search, filter drawer, favourites and column sorting filter the re
   await titleHeader.getByRole('button', { name: 'Title' }).click();
   await expect(titleHeader).toHaveAttribute('aria-sort', 'none');
 });
+
+test('manual collections create, assign via multi-select, inspect, persist and delete safely', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1586, height: 992 });
+  await page.goto('/');
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible({ timeout: 10_000 });
+
+  const sidebar = page.getByRole('navigation', { name: 'Spaces' });
+  const table = page.getByRole('grid', { name: 'Tracks' });
+  const inspector = page.getByRole('complementary', { name: 'Inspector' });
+
+  await sidebar.getByRole('button', { name: 'New collection' }).click();
+  const createInput = sidebar.getByRole('textbox', { name: 'New collection name' });
+  await createInput.fill('Warm Up');
+  await createInput.press('Enter');
+
+  const warmRow = sidebar.getByRole('button', { name: /^Warm Up/ });
+  await expect(warmRow).toBeVisible();
+  await warmRow.click();
+  await expect(page.getByRole('heading', { name: 'Warm Up' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'This collection is empty' })).toBeVisible();
+  await page.getByRole('button', { name: 'Show all tracks' }).click();
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible();
+
+  await table.getByRole('checkbox', { name: 'Tick Ada Marsh - First Light' }).click();
+  await table.getByRole('checkbox', { name: 'Tick Kofi Bell - Third Rail' }).click();
+  await expect(table.getByText('2 selected')).toBeVisible();
+  await table.getByRole('button', { name: 'Add to collection' }).click();
+  await page.getByRole('menuitemcheckbox', { name: /Warm Up/ }).click();
+  await expect(warmRow).toContainText('2');
+
+  await table.getByText('Ada Marsh - First Light').click();
+  await expect(inspector.getByRole('button', { name: 'Remove Warm Up' })).toBeVisible();
+
+  await warmRow.click();
+  await expect(page.getByText('2 tracks', { exact: true })).toBeVisible();
+
+  const sidebarOverflow = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('nav *'))
+      .filter((el) => el.scrollWidth > el.clientWidth + 1)
+      .map((el) => el.textContent?.trim()),
+  );
+  expect(sidebarOverflow).toEqual([]);
+
+  await table.getByText('Ada Marsh - First Light').click();
+  await inspector.getByRole('button', { name: 'Remove Warm Up' }).click();
+  await expect(page.getByText('1 track', { exact: true })).toBeVisible();
+  await expect(warmRow).toContainText('1');
+
+  await table.getByText('Kofi Bell - Third Rail').click();
+  await expect(inspector.getByRole('button', { name: 'Remove Warm Up' })).toBeVisible();
+
+  await page.setViewportSize({ width: 1100, height: 700 });
+  const collapsedLib = sidebar.getByRole('button', { name: 'Library' });
+  await collapsedLib.hover();
+  await expect(sidebar.getByText('Library · Warm Up')).toBeVisible();
+
+  await page.setViewportSize({ width: 1586, height: 992 });
+  await sidebar.getByRole('button', { name: 'Actions for Warm Up' }).click();
+  await page.getByRole('menuitem', { name: 'Rename' }).click();
+  const renameInput = sidebar.getByRole('textbox', { name: 'Rename collection' });
+  await renameInput.fill('Late Night');
+  await renameInput.press('Enter');
+  await expect(page.getByRole('heading', { name: 'Late Night' })).toBeVisible();
+  await expect(inspector.getByRole('button', { name: 'Remove Late Night' })).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await sidebar.getByRole('button', { name: /^Late Night/ }).click();
+  await expect(page.getByText('1 track', { exact: true })).toBeVisible();
+  await expect(table.getByText('Kofi Bell - Third Rail')).toBeVisible();
+
+  await sidebar.getByRole('button', { name: 'Actions for Late Night' }).click();
+  await page.getByRole('menuitem', { name: 'Delete' }).click();
+  const confirmSheet = page.getByRole('dialog', { name: 'Delete collection' });
+  await expect(confirmSheet).toContainText('Tracks and files on disk will stay');
+  await confirmSheet.getByRole('button', { name: 'Delete collection' }).click();
+
+  await expect(sidebar.getByRole('button', { name: /^Late Night/ })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible();
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible();
+});

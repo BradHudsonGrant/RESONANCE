@@ -1,3 +1,4 @@
+mod collections;
 pub mod command;
 pub mod data_folder;
 pub mod error;
@@ -12,8 +13,8 @@ use std::time::Duration;
 
 use command::{
     AppInfo, FavouriteState, IdentifyReport, LibraryFacets, LibraryTrack, MixDeck, MixDeckState,
-    MixDevice, MixState, Request, Response, ScanReport, SortDirection, TrackAudio, TrackFilterPill,
-    TrackFormat, TrackKey, TrackPage, TrackQuery, TrackSortField, UnreadableFile,
+    MixDevice, MixState, Request, Response, ScanReport, SortDirection, TrackAudio, TrackCollection,
+    TrackFilterPill, TrackFormat, TrackKey, TrackPage, TrackQuery, TrackSortField, UnreadableFile,
 };
 use error::ApiError;
 use identity::{IdentityWorker, run_identify_pass, to_command_report};
@@ -165,6 +166,31 @@ impl Api {
             } => self
                 .set_track_favourite(track_id, favourite)
                 .map(Response::SetTrackFavourite),
+            Request::Collections => self.collections().map(Response::Collections),
+            Request::CreateCollection { name } => self
+                .create_collection(&name)
+                .map(Response::CreateCollection),
+            Request::RenameCollection {
+                collection_id,
+                name,
+            } => self
+                .rename_collection(collection_id, &name)
+                .map(Response::RenameCollection),
+            Request::DeleteCollection { collection_id } => self
+                .delete_collection(collection_id)
+                .map(Response::DeleteCollection),
+            Request::AddTracksToCollection {
+                collection_id,
+                track_ids,
+            } => self
+                .add_tracks_to_collection(collection_id, &track_ids)
+                .map(Response::AddTracksToCollection),
+            Request::RemoveTracksFromCollection {
+                collection_id,
+                track_ids,
+            } => self
+                .remove_tracks_from_collection(collection_id, &track_ids)
+                .map(Response::RemoveTracksFromCollection),
             Request::LibraryFacets => self.library_facets().map(Response::LibraryFacets),
             Request::Scan { folder } => self.scan(Path::new(&folder)).map(Response::Scan),
             Request::Identify => self.identify().map(Response::Identify),
@@ -385,6 +411,7 @@ fn core_track_query(query: Option<TrackQuery>) -> CoreTrackQuery {
                 TrackFormat::M4a => AudioFormat::M4a,
             })
             .collect(),
+        collection_id: query.collection_id,
         sort: match query.sort.unwrap_or_default() {
             TrackSortField::Index => CoreTrackSortField::Index,
             TrackSortField::Title => CoreTrackSortField::Title,
@@ -435,6 +462,14 @@ fn library_track(row: &TrackRow) -> LibraryTrack {
             bit_depth: audio.bit_depth,
             bitrate_kbps: audio.bitrate_kbps,
         }),
+        collections: row
+            .collections
+            .iter()
+            .map(|collection| TrackCollection {
+                id: collection.id,
+                name: collection.name.clone(),
+            })
+            .collect(),
     }
 }
 

@@ -1,21 +1,49 @@
 <script lang="ts">
   import Button from '../design/Button.svelte';
+  import DataTag from '../design/DataTag.svelte';
   import Icon from '../design/Icon.svelte';
   import ModularDivider from '../design/ModularDivider.svelte';
   import MonoLabel from '../design/MonoLabel.svelte';
   import Thumb from '../design/Thumb.svelte';
   import Tooltip from '../design/Tooltip.svelte';
+  import type { LibraryCollection } from '../ipc/bindings/LibraryCollection';
   import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
+  import CollectionMenu from './CollectionMenu.svelte';
   import { audioSummary, duration, fileSize, tempo, trackSeed } from './format';
 
   interface Props {
     track: LibraryTrack | undefined;
     inSheet?: boolean;
+    collections?: LibraryCollection[];
+    activeCollection?: LibraryCollection | null;
     onclose: () => void;
     ontogglefavourite?: (track: LibraryTrack) => void;
+    onaddtocollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
+    onremovefromcollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
+    oncreatecollectionandadd?: (name: string, trackIds: number[]) => Promise<void> | void;
   }
 
-  let { track, inSheet = false, onclose, ontogglefavourite }: Props = $props();
+  let {
+    track,
+    inSheet = false,
+    collections = [],
+    activeCollection = null,
+    onclose,
+    ontogglefavourite,
+    onaddtocollection,
+    onremovefromcollection,
+    oncreatecollectionandadd,
+  }: Props = $props();
+
+  let menuOpen = $state(false);
+  let menuAnchor = $state<HTMLElement | null>(null);
+  let menuShowFavourite = $state(false);
+
+  function openMenu(anchor: HTMLElement, includeFavourite: boolean) {
+    menuAnchor = anchor;
+    menuShowFavourite = includeFavourite;
+    menuOpen = true;
+  }
 
   interface DetailCell {
     label: string;
@@ -68,8 +96,14 @@
                   <Icon name="star" size="sm" filled={track.favourite} />
                 </Button>
               </Tooltip>
-              <Tooltip text="Track actions arrive in M2" side="left">
-                <Button variant="icon" aria-label="More actions" aria-disabled="true" tabindex={-1}>
+              <Tooltip text="Track actions" side="left">
+                <Button
+                  variant="icon"
+                  aria-label="More actions"
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpen && menuShowFavourite}
+                  onclick={(event) => openMenu(event.currentTarget, true)}
+                >
                   <Icon name="more" size="sm" />
                 </Button>
               </Tooltip>
@@ -115,6 +149,39 @@
             </div>
           {/each}
         </div>
+      </div>
+
+      <ModularDivider />
+
+      <div class="collections-section">
+        <div class="collections-head">
+          <MonoLabel text="Collections" size="xs" tone="muted" />
+          <Tooltip text="Add to collection" side="left">
+            <Button
+              variant="circle"
+              size="sm"
+              aria-label="Add to collection"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen && !menuShowFavourite}
+              onclick={(event) => openMenu(event.currentTarget, false)}
+            >
+              <Icon name="plus" size="xs" />
+            </Button>
+          </Tooltip>
+        </div>
+        {#if track.collections.length > 0}
+          <div class="collection-pills">
+            {#each track.collections as col (col.id)}
+              <DataTag
+                variant="removable"
+                label={col.name}
+                onRemove={() => track && onremovefromcollection?.(col.id, [track.id])}
+              />
+            {/each}
+          </div>
+        {:else}
+          <p class="collection-empty">None</p>
+        {/if}
       </div>
 
       <ModularDivider />
@@ -172,6 +239,21 @@
     </div>
   {/if}
 </aside>
+
+<CollectionMenu
+  open={menuOpen && track != null}
+  anchorEl={menuAnchor}
+  label={menuShowFavourite ? 'Track actions' : 'Add to collection'}
+  {collections}
+  selectedTracks={track ? [track] : []}
+  {activeCollection}
+  showFavourite={menuShowFavourite}
+  onToggleFavourite={ontogglefavourite}
+  onAdd={onaddtocollection}
+  onRemove={onremovefromcollection}
+  onCreateAndAdd={oncreatecollectionandadd}
+  onClose={() => (menuOpen = false)}
+/>
 
 <style>
   .inspector {
@@ -269,9 +351,29 @@
   }
 
   .details,
+  .collections-section,
   .file-facts {
     display: grid;
     gap: var(--space-3-5);
+  }
+
+  .collections-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+  }
+
+  .collection-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1-5);
+  }
+
+  .collection-empty {
+    margin: 0;
+    color: var(--color-muted);
+    font-size: var(--text-sm);
   }
 
   .detail-row {

@@ -20,6 +20,37 @@ pub enum Request {
         track_id: i64,
         favourite: bool,
     },
+    /// Every manual collection in sidebar display order, with its included track count.
+    Collections,
+    /// Creates a manual collection at the end of the list.
+    CreateCollection {
+        name: String,
+    },
+    /// Renames a manual collection.
+    RenameCollection {
+        #[ts(type = "number")]
+        collection_id: i64,
+        name: String,
+    },
+    /// Deletes a manual collection without deleting its tracks or files on disk.
+    DeleteCollection {
+        #[ts(type = "number")]
+        collection_id: i64,
+    },
+    /// Adds one or more tracks to a manual collection.
+    AddTracksToCollection {
+        #[ts(type = "number")]
+        collection_id: i64,
+        #[ts(type = "Array<number>")]
+        track_ids: Vec<i64>,
+    },
+    /// Removes one or more tracks from a manual collection.
+    RemoveTracksFromCollection {
+        #[ts(type = "number")]
+        collection_id: i64,
+        #[ts(type = "Array<number>")]
+        track_ids: Vec<i64>,
+    },
     /// Distinct labels and BPM/year bounds across the library, for filter controls.
     LibraryFacets,
     /// Reads a folder into the library without changing the files in it.
@@ -74,6 +105,12 @@ pub enum Response {
     AppInfo(AppInfo),
     Tracks(TrackPage),
     SetTrackFavourite(FavouriteState),
+    Collections(Vec<LibraryCollection>),
+    CreateCollection(LibraryCollection),
+    RenameCollection(LibraryCollection),
+    DeleteCollection(Vec<LibraryCollection>),
+    AddTracksToCollection(LibraryCollection),
+    RemoveTracksFromCollection(LibraryCollection),
     LibraryFacets(LibraryFacets),
     Scan(ScanReport),
     Identify(IdentifyReport),
@@ -236,6 +273,9 @@ pub struct TrackQuery {
     #[ts(optional = nullable)]
     pub formats: Option<Vec<TrackFormat>>,
     #[serde(default)]
+    #[ts(optional = nullable, type = "number | null")]
+    pub collection_id: Option<i64>,
+    #[serde(default)]
     #[ts(optional = nullable)]
     pub sort: Option<TrackSortField>,
     #[serde(default)]
@@ -298,6 +338,26 @@ pub struct LibraryTrack {
     pub size_bytes: u64,
     /// Missing when the file could not be read as audio.
     pub audio: Option<TrackAudio>,
+    pub collections: Vec<TrackCollection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct LibraryCollection {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub name: String,
+    #[ts(type = "number")]
+    pub position: i64,
+    pub track_count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct TrackCollection {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]

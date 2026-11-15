@@ -1,13 +1,16 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { SvelteSet } from 'svelte/reactivity';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
+  import Button from '../design/Button.svelte';
   import Icon from '../design/Icon.svelte';
   import TableCell from '../design/TableCell.svelte';
   import TableRow from '../design/TableRow.svelte';
+  import type { LibraryCollection } from '../ipc/bindings/LibraryCollection';
   import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
   import type { SortDirection } from '../ipc/bindings/SortDirection';
   import type { TrackSortField } from '../ipc/bindings/TrackSortField';
+  import CollectionMenu from './CollectionMenu.svelte';
   import { columnWidths, compactColumnWidths, dataColumns, tableMinWidth } from './columns';
   import type { TrackPages } from './track-pages.svelte';
 
@@ -15,10 +18,15 @@
     pages: TrackPages;
     /** The place in library order of the selected track. */
     selected?: number | null;
+    collections?: LibraryCollection[];
+    activeCollection?: LibraryCollection | null;
     /** Enter or a double click on a row. */
     onopen?: () => void;
     ontogglefavourite?: (track: LibraryTrack) => void;
     onsort?: (sort: TrackSortField, direction: SortDirection) => void;
+    onaddtocollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
+    onremovefromcollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
+    oncreatecollectionandadd?: (name: string, trackIds: number[]) => Promise<void> | void;
   }
 
   const columnSortField: Record<string, TrackSortField> = {
@@ -29,7 +37,18 @@
     time: 'duration',
   };
 
-  let { pages, selected = $bindable(null), onopen, ontogglefavourite, onsort }: Props = $props();
+  let {
+    pages,
+    selected = $bindable(null),
+    collections = [],
+    activeCollection = null,
+    onopen,
+    ontogglefavourite,
+    onsort,
+    onaddtocollection,
+    onremovefromcollection,
+    oncreatecollectionandadd,
+  }: Props = $props();
 
   // Rows drawn beyond the edges of the view, so a fast scroll does not open a gap.
   const OVERSCAN = 8;
@@ -37,6 +56,8 @@
 
   const id = $props.id();
   const checkedIds = new SvelteSet<number>();
+  const checkedFallback = new SvelteMap<number, LibraryTrack>();
+  let gridEl: HTMLDivElement | undefined = $state();
   let viewport: HTMLDivElement | undefined = $state();
   let head: HTMLDivElement | undefined = $state();
   let rowHeight = $state(33);
@@ -44,6 +65,21 @@
   let viewportHeight = $state(0);
   let headHeight = $state(0);
   let overscan = $state(0);
+
+  let menuOpen = $state(false);
+  let menuAnchor = $state<HTMLElement | null>(null);
+  let menuTracks = $state<LibraryTrack[]>([]);
+  let menuShowFavourite = $state(false);
+  let menuLabel = $state('Track actions');
+
+  const loaded = $derived(pages.loadedTracks());
+  const allLoadedChecked = $derived(
+    loaded.length > 0 && loaded.every((track) => checkedIds.has(track.id)),
+  );
+  const someChecked = $derived(checkedIds.size > 0);
+  const resolvedMenuTracks = $derived(
+    menuTracks.map((track) => pages.trackById(track.id) ?? track),
+  );
 
   // The header sticks to the top of the scrolling area, so the rows show below it.
   const rowsHeight = $derived(Math.max(0, viewportHeight - headHeight));
@@ -112,6 +148,16 @@
     }
   });
 
+  let lastCollectionId = untrack(() => pages.query.collection_id ?? null);
+  $effect(() => {
+    const nextCollection = pages.query.collection_id ?? null;
+    if (nextCollection !== lastCollectionId) {
+      lastCollectionId = nextCollection;
+      clearChecked();
+      menuOpen = false;
+    }
+  });
+
   const activeSort = $derived<TrackSortField>(pages.query.sort ?? 'index');
   const activeDirection = $derived<SortDirection>(pages.query.direction ?? 'asc');
 
@@ -154,13 +200,87 @@
     if (pages.total > 0) selected = Math.min(Math.max(index, 0), pages.total - 1);
   }
 
-  function toggleChecked(trackId: number) {
-    if (checkedIds.has(trackId)) checkedIds.delete(trackId);
-    else checkedIds.add(trackId);
+  function toggleChecked(track: LibraryTrack) {
+    if (checkedIds.has(track.id)) {
+      checkedIds.delete(track.id);
+      checkedFallback.delete(track.id);
+    } else {
+      checkedIds.add(track.id);
+      checkedFallback.set(track.id, track);
+    }
+  }
+
+  function clearChecked() {
+    checkedIds.clear();
+    checkedFallback.clear();
+  }
+
+  function resolveCheckedTracks(): LibraryTrack[] {
+    const out: LibraryTrack[] = [];
+    for (const trackId of checkedIds) {
+      const live = pages.trackById(trackId) ?? checkedFallback.get(trackId);
+      if (live) out.push(live);
+    }
+    return out;
+  }
+
+  function toggleHeaderChecked() {
+    if (checkedIds.size > 0) {
+      clearChecked();
+      return;
+    }
+    for (const track of loaded) {
+      checkedIds.add(track.id);
+      checkedFallback.set(track.id, track);
+    }
+  }
+
+  function openMenuForTracks(
+    tracks: LibraryTrack[],
+    anchor: HTMLElement | null,
+    options: { showFavourite: boolean; label: string },
+  ) {
+    if (tracks.length === 0) return;
+    menuTracks = tracks;
+    menuAnchor = anchor;
+    menuShowFavourite = options.showFavourite;
+    menuLabel = options.label;
+    menuOpen = true;
+  }
+
+  function closeMenu() {
+    menuOpen = false;
+    gridEl?.focus();
+  }
+
+  async function removeTracksFromCollection(collectionId: number, trackIds: number[]) {
+    await onremovefromcollection?.(collectionId, trackIds);
+    if (activeCollection?.id === collectionId) {
+      for (const trackId of trackIds) {
+        checkedIds.delete(trackId);
+        checkedFallback.delete(trackId);
+      }
+    }
+  }
+
+  function targetTracksForAction(fallbackTrack?: LibraryTrack): LibraryTrack[] {
+    if (fallbackTrack) {
+      if (checkedIds.size > 1 && checkedIds.has(fallbackTrack.id)) {
+        return resolveCheckedTracks();
+      }
+      return [fallbackTrack];
+    }
+    if (checkedIds.size > 0) return resolveCheckedTracks();
+    if (selected !== null) {
+      const track = pages.track(selected);
+      if (track) return [track];
+    }
+    return [];
   }
 
   function onkeydown(event: KeyboardEvent) {
     if (event.altKey || event.ctrlKey || event.metaKey) return;
+    if (menuOpen) return;
     const at = selected ?? -1;
     const moves: Record<string, number> = {
       ArrowDown: at + 1,
@@ -173,6 +293,17 @@
     const to = moves[event.key];
     if (to !== undefined) {
       event.preventDefault();
+      if (event.shiftKey && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+        const start = selected ?? 0;
+        const clampedTo = pages.total > 0 ? Math.min(Math.max(to, 0), pages.total - 1) : 0;
+        for (let idx = Math.min(start, clampedTo); idx <= Math.max(start, clampedTo); idx += 1) {
+          const item = pages.track(idx);
+          if (item) {
+            checkedIds.add(item.id);
+            checkedFallback.set(item.id, item);
+          }
+        }
+      }
       select(to);
     } else if (event.key === 'Enter' && selected !== null) {
       event.preventDefault();
@@ -181,7 +312,7 @@
       const track = pages.track(selected);
       if (track) {
         event.preventDefault();
-        toggleChecked(track.id);
+        toggleChecked(track);
       }
     } else if (event.key.toLowerCase() === 'f' && selected !== null) {
       const track = pages.track(selected);
@@ -189,6 +320,31 @@
         event.preventDefault();
         ontogglefavourite(track);
       }
+    } else if (event.key.toLowerCase() === 'c') {
+      const targets = targetTracksForAction();
+      if (targets.length > 0) {
+        event.preventDefault();
+        const anchor =
+          (selected !== null ? document.getElementById(`${id}-row-${selected}`) : null) ??
+          gridEl ??
+          null;
+        openMenuForTracks(targets, anchor, {
+          showFavourite: false,
+          label: 'Add to collection',
+        });
+      }
+    } else if ((event.key === 'Delete' || event.key === 'Backspace') && activeCollection != null) {
+      const targets = targetTracksForAction();
+      if (targets.length > 0) {
+        event.preventDefault();
+        void removeTracksFromCollection(
+          activeCollection.id,
+          targets.map((track) => track.id),
+        );
+      }
+    } else if (event.key === 'Escape' && checkedIds.size > 0) {
+      event.preventDefault();
+      clearChecked();
     }
   }
 </script>
@@ -210,7 +366,8 @@
 {/snippet}
 
 <div
-  class="table"
+  bind:this={gridEl}
+  class={['table', { 'has-selection': someChecked }]}
   role="grid"
   tabindex="0"
   aria-label="Tracks"
@@ -223,6 +380,33 @@
   style:--table-width={tableMinWidth}
   {onkeydown}
 >
+  {#if someChecked}
+    <div class="selection-bar" role="region" aria-label="Selected tracks">
+      <span class="selection-count numeric">{checkedIds.size} selected</span>
+      <div class="selection-actions">
+        <Button
+          size="sm"
+          onclick={(event) =>
+            openMenuForTracks(resolveCheckedTracks(), event.currentTarget, {
+              showFavourite: false,
+              label: 'Add selected tracks to collection',
+            })}
+        >
+          Add to collection
+        </Button>
+        {#if activeCollection}
+          <Button
+            size="sm"
+            onclick={() =>
+              void removeTracksFromCollection(activeCollection.id, Array.from(checkedIds))}
+          >
+            Remove from {activeCollection.name}
+          </Button>
+        {/if}
+        <Button variant="quiet" size="sm" onclick={clearChecked}>Clear</Button>
+      </div>
+    </div>
+  {/if}
   <div
     class="viewport"
     bind:this={viewport}
@@ -231,12 +415,21 @@
     <div class="head" role="rowgroup" bind:this={head}>
       <TableRow header aria-rowindex={1} style="grid-template-columns: var(--active-columns)">
         <TableCell header compact>
-          <span
-            class="tick header-tick"
-            aria-label="Tick all tracks"
-            aria-disabled="true"
-            title="Batch selection arrives in M2"
-          ></span>
+          <button
+            type="button"
+            class={['tick', 'header-tick', { filled: someChecked }]}
+            role="checkbox"
+            aria-label={someChecked ? 'Clear ticked tracks' : 'Tick all loaded tracks'}
+            aria-checked={allLoadedChecked ? 'true' : someChecked ? 'mixed' : 'false'}
+            tabindex={-1}
+            onclick={toggleHeaderChecked}
+          >
+            {#if allLoadedChecked}
+              <Icon name="check" size="xs" />
+            {:else if someChecked}
+              <span class="tick-dash" aria-hidden="true"></span>
+            {/if}
+          </button>
         </TableCell>
         <TableCell header compact><span class="visually-hidden">Status</span></TableCell>
         <TableCell header numeric ariaSort={headerSort('index')}>
@@ -292,7 +485,7 @@
                 disabled={!track}
                 onclick={(event) => {
                   event.stopPropagation();
-                  if (track) toggleChecked(track.id);
+                  if (track) toggleChecked(track);
                 }}
               >
                 {#if isSelected || isChecked}
@@ -367,16 +560,22 @@
               <button
                 type="button"
                 class="more"
-                aria-label="Track actions"
-                aria-disabled="true"
+                aria-label={track ? `Actions for ${track.title}` : 'Track actions'}
+                aria-haspopup="menu"
+                disabled={!track}
                 tabindex={-1}
-                title="Track actions arrive in M2"
+                onclick={(event) => {
+                  event.stopPropagation();
+                  if (track) {
+                    const targets = targetTracksForAction(track);
+                    openMenuForTracks(targets, event.currentTarget, {
+                      showFavourite: targets.length === 1,
+                      label: `Actions for ${track.title}`,
+                    });
+                  }
+                }}
               >
-                <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-                  <circle cx="3.5" cy="8" r="1.2" fill="currentColor" />
-                  <circle cx="8" cy="8" r="1.2" fill="currentColor" />
-                  <circle cx="12.5" cy="8" r="1.2" fill="currentColor" />
-                </svg>
+                <Icon name="more" size="xs" />
               </button>
             </TableCell>
             {#if !track}
@@ -389,13 +588,58 @@
   </div>
 </div>
 
+<CollectionMenu
+  open={menuOpen && resolvedMenuTracks.length > 0}
+  anchorEl={menuAnchor}
+  label={menuLabel}
+  {collections}
+  selectedTracks={resolvedMenuTracks}
+  {activeCollection}
+  showFavourite={menuShowFavourite}
+  onToggleFavourite={ontogglefavourite}
+  onAdd={onaddtocollection}
+  onRemove={removeTracksFromCollection}
+  onCreateAndAdd={oncreatecollectionandadd}
+  onClose={closeMenu}
+/>
+
 <style>
   .table {
     --active-columns: var(--columns);
     container: track-table / inline-size;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
     height: 100%;
     min-height: 0;
     padding: 0 var(--space-5);
+  }
+
+  .table.has-selection {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .selection-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2) var(--space-4);
+    padding: var(--space-1-5) var(--space-3);
+    border-bottom: var(--border-width) solid var(--color-border);
+    background: var(--color-surface);
+  }
+
+  .selection-count {
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+  }
+
+  .selection-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
   }
 
   .table:focus-visible {
@@ -465,8 +709,14 @@
   }
 
   .header-tick {
-    border-color: var(--color-border);
-    cursor: default;
+    border-color: var(--color-border-control);
+    cursor: pointer;
+  }
+
+  .tick-dash {
+    width: var(--space-2);
+    height: var(--selection-bar-width);
+    background: var(--color-background);
   }
 
   .tick:disabled {
@@ -570,7 +820,22 @@
     border-radius: var(--radius-xs);
     background: transparent;
     color: var(--color-muted);
+    cursor: pointer;
+    transition:
+      background-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out);
+  }
+
+  .more:hover:not(:disabled),
+  .more:focus-visible:not(:disabled) {
+    background: var(--color-surface-2);
+    color: var(--color-text);
+    outline: none;
+  }
+
+  .more:disabled {
     cursor: default;
+    opacity: 0.4;
   }
 
   @container track-table (width < 600px) {
