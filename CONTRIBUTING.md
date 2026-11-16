@@ -33,6 +33,12 @@ The repo has a README (what it is, a screenshot, status, install, build, licence
 
 Write plainly: say what the thing does and why. Avoid "robust", "seamless", "comprehensive", "powerful", lists of three for rhythm, bold used as decoration, and closing lines that sum up what was just said.
 
+## Public repository safety
+
+- Test audio is generated from maths in `crates/fixtures`. Never commit copyrighted audio, embedded album artwork, recorded mixes, or screenshots showing real tracks or cover art; screenshots in `docs/` and pull requests use `just synthetic-library` or generated fixtures only.
+- Never commit SQLite databases (`*.db`, `*.sqlite`), real `rekordbox`, `Engine DJ`, `Serato` or `Traktor` library files, raw HTTP captures containing headers or tokens, or paths naming a local user profile or checkout folder.
+- Never commit third-party encryption keys (such as `rekordbox` `master.db` SQLCipher keys), firmware blobs, or controller mappings copied from copyleft projects. `just repo-safety` (part of `just verify`) checks every tracked path and file in git.
+
 ## Done means
 
 A change is done when it is merged through a PR, CI is green, `just verify` passes on the laptop, the behaviour has a test, the docs that describe it are updated, and nothing in it is a stub.

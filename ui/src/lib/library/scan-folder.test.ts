@@ -7,7 +7,7 @@ import { CoreError } from '../ipc/client';
 import ScanFolder from './ScanFolder.svelte';
 
 const report: ScanReport = {
-  source_folder: 'D:\\Music\\RESONANCE\\fixtures-local',
+  source_folder: 'D:\\Sets\\Fixtures',
   found: 50,
   added: 42,
   changed: 3,

@@ -26,8 +26,8 @@ These are settled. Don't reopen them.
 
 | Topic | Decision |
 | --- | --- |
-| Project folder | On the development laptop the repo is `D:\Music\RESONANCE`, inside the music library, so the scanner must ignore the app's own folder. |
-| GitHub | `BradHudsonGrant/RESONANCE`, private, default branch `master`. The account is on the Free plan. |
+| Project folder | A checkout may sit inside a watched music folder, so the scanner ignores any folder marked with `.resonance-ignore` and the app's own folder. |
+| GitHub | `BradHudsonGrant/RESONANCE`, public under [MIT](../LICENSE) ([ADR 0014](adr/0014-open-source-under-mit.md)), default branch `master`. |
 | Stack | Picked on merit in [architecture.md](architecture.md). Runtime performance comes first, and day-to-day work must not mean rebuilding everything. |
 | Authorship | Commits, PRs and releases carry the author's name only. |
 | Old app | DUBPLATE v3 is read-only reference. Nothing is migrated from it. What it taught us is in [v3-notes.md](v3-notes.md). |
