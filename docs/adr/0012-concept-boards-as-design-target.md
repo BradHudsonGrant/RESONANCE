@@ -6,7 +6,7 @@ Date: 13 November 2026. Status: accepted. Corrected on 14 November 2026 ([#62](h
 
 The M0 skeleton (v0.1.0) followed the brief's own layout: a 56 px icon rail, a 40 px top bar, a plain table beside the inspector, and corners of 4 px on controls and 6 px on panels. The brief treated the dark concept image as mood only, with its own layout taking priority.
 
-Two concept boards in `handoff/` show the intended interface in detail:
+Two concept boards show the intended interface in detail:
 
 - `concept-dark.png`, 1586 by 992, is the whole window. A top bar holds the mark, the wordmark, and audio, Activity and Settings buttons at the right. Under it sit a 256 px sidebar with full names, collections, an active set and the dot wave at its foot, a search and command bar with slash commands, collection cards, a dense table with inline waveforms and energy meters, and an inspector with artwork, traits, an energy curve and transition suggestions. At the bottom are an A to B dock with two decks and the crossfade between them, and a player bar inset as a card.
 - `concept are and design 2.png`, 1448 by 1086, is the brand and UI system: the mark and its explorations, the palette, the type, small graphic elements, an information architecture, sample components, and the product UI in both themes.

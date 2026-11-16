@@ -123,7 +123,7 @@ Bar-synchronous feature storage, continuous tuning maths, phrase compatibility a
 
 ## Dependencies and licences
 
-Only permissive licences in the dependency tree: MIT, Apache-2.0, BSD, ISC, Zlib, MPL-2.0. No GPL or AGPL linking. That keeps both doors open: the source can be opened later, or the app sold. Enforce it with `cargo-deny` in CI.
+Resonance itself is licensed under [MIT](../LICENSE) ([ADR 0014](adr/0014-open-source-under-mit.md)), and only permissive licences sit in the dependency tree: MIT, Apache-2.0, BSD, ISC, Zlib, MPL-2.0 and CC0-1.0 ([ADR 0005](adr/0005-licence-policy.md)). No GPL or AGPL linking. Enforce it with `cargo-deny` in CI.
 
 Read GPL projects such as Mixxx to learn how a controller or a file format behaves. Don't copy their code or mapping files.
 
@@ -135,11 +135,9 @@ Keep secrets (Discogs token, AcoustID key, paid API keys) in the OS credential s
 
 ## Safety while developing
 
-On the development laptop the repo sits inside the music library. These limits apply to anyone and anything working there:
-
-- Don't write, rename, move or delete anything under `D:\Music` outside `D:\Music\RESONANCE`. The library has about 2,700 tracks in rekordbox and it is not test data.
+- Keep all test writes inside the repository and its temporary folders; never touch a live music collection.
 - For real-music tests, `just fixtures-local <music folder>` copies around 50 tracks across styles and formats into `fixtures-local/` (ignored by git). Work on the copies.
-- `D:\Music\ZMusic Manager` and `%APPDATA%\com.bradd.v3` are read-only. Open any database there in read-only mode.
+- Open any external or legacy library databases in read-only mode.
 - Integration work uses copies of rekordbox and Engine DJ data in a sandbox folder.
 - Don't install or upgrade global tools without saying what and why first.
 - Don't download multi-gigabyte models without stating the size first.
@@ -207,4 +205,4 @@ Two things were looked at and left out for now. The Cranelift backend still need
 - DDJ-FLX4 is USB audio and MIDI class compliant. Mixxx's mapping for it is GPL-2.0. manual.mixxx.org/2.6/en/hardware/controllers/pioneer_ddj_flx4
 - Rane System One runs Engine DJ standalone and also works as a controller for Serato DJ Pro from 4.0.3, appearing as a MIDI device. support.rane.com
 - rekordbox 6 and 7 keep the library in a SQLCipher-encrypted `master.db`. The `rbox` crate and pyrekordbox read and write it. docs.rs/crate/rbox, pyrekordbox.readthedocs.io
-- GitHub Free has no protected branches or rulesets on private repositories (docs.github.com, "About protected branches"). It includes 2,000 Actions minutes a month for private repos, with Windows at twice the rate (docs.github.com/en/billing/concepts/product-billing/github-actions).
+- GitHub Free supports branch rulesets and includes Actions runners on public repositories (docs.github.com, "About rulesets" and "About billing for GitHub Actions").

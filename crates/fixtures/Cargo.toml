@@ -4,6 +4,7 @@ description = "Test audio made from maths, a made-up library for measuring at sc
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 publish.workspace = true
 default-run = "resonance-fixtures"
 
