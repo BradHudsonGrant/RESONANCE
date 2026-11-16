@@ -165,6 +165,8 @@ struct PreviewLoaded {
 #[derive(Default)]
 struct Loaded {
     generation: u32,
+    state_seq: u32,
+    desired_playing: bool,
     path: Option<PathBuf>,
     /// From the container until the waveform has counted every frame.
     stated_duration_seconds: f64,
@@ -238,15 +240,20 @@ impl Mix {
             .unwrap_or(0.0);
         let waveform = decode::summarise(path)?;
         let state = self.ensure_running(&mut running)?;
+        let index = deck.index();
+        let state_seq = state.decks[index].state_seq.wrapping_add(1).max(1);
         let feed = decode::feed_deck(decoder, state.output.device.sample_rate)?;
         state.send(Control::Load {
-            deck: deck.index(),
+            deck: index,
             feed,
+            state_seq,
         })?;
         let generation = state.next_generation;
         state.next_generation = state.next_generation.wrapping_add(1).max(1);
-        state.decks[deck.index()] = Loaded {
+        state.decks[index] = Loaded {
             generation,
+            state_seq,
+            desired_playing: false,
             path: Some(path.to_owned()),
             stated_duration_seconds,
             waveform: Some(waveform),
@@ -260,12 +267,29 @@ impl Mix {
             self.set_preview_playing_locked(&mut running, false)?;
         }
         if let Some(state) = running.as_mut() {
+            let index = deck.index();
+            let effective_playing = playing && state.decks[index].path.is_some();
+            let state_seq = state.decks[index].state_seq.wrapping_add(1).max(1);
+            state.decks[index].state_seq = state_seq;
+            state.decks[index].desired_playing = effective_playing;
             state.send(Control::Play {
-                deck: deck.index(),
-                playing,
+                deck: index,
+                playing: effective_playing,
+                state_seq,
             })?;
         }
         Ok(self.status_of(&running))
+    }
+
+    /// True while either Mix deck is playing (immediately reflecting control changes before the
+    /// next audio callback, and automatically clearing when a track reaches natural end-of-file).
+    pub fn any_deck_playing(&self) -> bool {
+        let running = self.lock();
+        let Some(state) = running.as_ref() else {
+            return false;
+        };
+        let clock = self.published.clock.read();
+        (0..DECKS).any(|index| deck_playing(&state.decks[index], &clock, index))
     }
 
     /// Loads `path` into the preview channel at `start_ms` and begins playback, opening the
@@ -537,19 +561,30 @@ impl Mix {
     fn status_of(&self, running: &Option<Running>) -> MixStatus {
         let clock = self.published.clock.read();
         let deck = |id: DeckId| {
-            let loaded = running.as_ref().map(|state| &state.decks[id.index()]);
+            let index = id.index();
+            let loaded = running.as_ref().map(|state| &state.decks[index]);
             DeckStatus {
                 deck: id,
                 generation: loaded.map_or(0, |loaded| loaded.generation),
                 path: loaded.and_then(|loaded| loaded.path.clone()),
                 duration_seconds: loaded.map_or(0.0, Loaded::duration_seconds),
-                playing: running.is_some() && clock.playing[id.index()],
+                playing: loaded.is_some_and(|loaded| deck_playing(loaded, &clock, index)),
             }
         };
         MixStatus {
             device: running.as_ref().map(|state| state.output.device.clone()),
             decks: DeckId::ALL.map(deck),
         }
+    }
+}
+
+fn deck_playing(loaded: &Loaded, clock: &ClockReading, index: usize) -> bool {
+    if loaded.path.is_none() {
+        false
+    } else if clock.deck_state_seq[index] == loaded.state_seq {
+        clock.playing[index]
+    } else {
+        loaded.desired_playing
     }
 }
 

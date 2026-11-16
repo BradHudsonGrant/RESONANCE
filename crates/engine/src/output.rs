@@ -50,11 +50,27 @@ impl RetiredFeed {
 }
 
 pub(crate) enum Control {
-    Load { deck: usize, feed: DeckFeed },
-    Play { deck: usize, playing: bool },
-    PreviewLoad { feed: PreviewFeed, play: bool },
-    PreviewPlay { playing: bool, state_seq: u32 },
-    PreviewSetGain { gain: f32 },
+    Load {
+        deck: usize,
+        feed: DeckFeed,
+        state_seq: u32,
+    },
+    Play {
+        deck: usize,
+        playing: bool,
+        state_seq: u32,
+    },
+    PreviewLoad {
+        feed: PreviewFeed,
+        play: bool,
+    },
+    PreviewPlay {
+        playing: bool,
+        state_seq: u32,
+    },
+    PreviewSetGain {
+        gain: f32,
+    },
 }
 
 /// The device as the stream opened it.
@@ -227,6 +243,7 @@ fn start(
 struct Deck {
     feed: Option<DeckFeed>,
     playing: bool,
+    state_seq: u32,
     /// Frames played from the feed, at the device's rate.
     played_frames: u64,
 }
@@ -314,6 +331,7 @@ impl Renderer {
         for (index, deck) in self.decks.iter_mut().enumerate() {
             reading.played_frames[index] = deck.played_frames;
             reading.playing[index] = deck.playing;
+            reading.deck_state_seq[index] = deck.state_seq;
             deck.render(index, out, self.channels, frames, &self.published);
         }
         self.preview.render(
@@ -329,7 +347,11 @@ impl Renderer {
 
     fn apply(&mut self, control: Control) {
         match control {
-            Control::Load { deck, feed } => {
+            Control::Load {
+                deck,
+                feed,
+                state_seq,
+            } => {
                 let deck = &mut self.decks[deck];
                 if let Some(old) = deck.feed.replace(feed) {
                     // Freeing a feed would free memory here, so it goes back to be dropped
@@ -337,10 +359,16 @@ impl Renderer {
                     let _ = self.retired.push(RetiredFeed::Deck(old));
                 }
                 deck.playing = false;
+                deck.state_seq = state_seq;
                 deck.played_frames = 0;
             }
-            Control::Play { deck, playing } => {
+            Control::Play {
+                deck,
+                playing,
+                state_seq,
+            } => {
                 let deck = &mut self.decks[deck];
+                deck.state_seq = state_seq;
                 deck.playing = playing && deck.feed.is_some();
             }
             Control::PreviewLoad { feed, play } => {
@@ -632,10 +660,15 @@ mod tests {
         }
 
         fn playing(&mut self, deck: usize, feed: DeckFeed) {
-            self.send(Control::Load { deck, feed });
+            self.send(Control::Load {
+                deck,
+                feed,
+                state_seq: 1,
+            });
             self.send(Control::Play {
                 deck,
                 playing: true,
+                state_seq: 2,
             });
         }
 
@@ -667,6 +700,7 @@ mod tests {
         harness.send(Control::Load {
             deck: 0,
             feed: feed(256, 0.5, 0.5, false),
+            state_seq: 1,
         });
 
         let out = harness.render(128);
@@ -735,6 +769,7 @@ mod tests {
         harness.send(Control::Load {
             deck: 0,
             feed: feed(10, 0.25, 0.25, false),
+            state_seq: 3,
         });
         harness.render(4);
 

@@ -24,7 +24,7 @@ use tokio_tungstenite::tungstenite::{Bytes, Message};
 use ts_rs::TS;
 
 use crate::Api;
-use crate::command::{LibraryChanged, Request, Response};
+use crate::command::{ActivityChanged, LibraryChanged, Request, Response};
 use crate::error::ApiError;
 use crate::mix_frame;
 
@@ -149,6 +149,7 @@ async fn serve_connection(
     let (replies, mut to_send) = mpsc::channel::<String>(16);
     let writer_api = Arc::clone(&api);
     let mut watch_revisions = api.watch_revisions();
+    let mut activity_revisions = api.activity_revisions();
     let writer = tokio::spawn(async move {
         let mut telemetry = telemetry;
         let mut sent_waveforms = [0u32; 2];
@@ -166,6 +167,20 @@ async fn serve_connection(
                     let Ok(push) = serde_json::to_string(&Reply {
                         id: None,
                         response: Some(Response::LibraryChanged(LibraryChanged { revision })),
+                        error: None,
+                    }) else {
+                        break;
+                    };
+                    Message::text(push)
+                },
+                changed = activity_revisions.changed() => {
+                    if changed.is_err() {
+                        break;
+                    }
+                    let revision = *activity_revisions.borrow_and_update();
+                    let Ok(push) = serde_json::to_string(&Reply {
+                        id: None,
+                        response: Some(Response::ActivityChanged(ActivityChanged { revision })),
                         error: None,
                     }) else {
                         break;
@@ -201,18 +216,30 @@ async fn serve_connection(
             }
         }
     });
-    while let Some(Ok(message)) = incoming.next().await {
-        let Message::Text(text) = message else {
-            continue;
-        };
-        let reply = serde_json::to_string(&answer(Arc::clone(&api), text.as_str()).await);
-        let Ok(reply) = reply else {
-            break;
-        };
-        if replies.send(reply).await.is_err() {
-            break;
+    let mut in_flight = tokio::task::JoinSet::new();
+    loop {
+        tokio::select! {
+            next_message = incoming.next() => {
+                let Some(Ok(message)) = next_message else {
+                    break;
+                };
+                let Message::Text(text) = message else {
+                    continue;
+                };
+                let call_api = Arc::clone(&api);
+                let call_replies = replies.clone();
+                in_flight.spawn(async move {
+                    let reply = answer(call_api, text.as_str()).await;
+                    if let Ok(encoded) = serde_json::to_string(&reply) {
+                        let _ = call_replies.send(encoded).await;
+                    }
+                });
+            }
+            Some(_) = in_flight.join_next(), if !in_flight.is_empty() => {}
         }
     }
+    in_flight.abort_all();
+    while in_flight.join_next().await.is_some() {}
     drop(replies);
     let _ = writer.await;
 }

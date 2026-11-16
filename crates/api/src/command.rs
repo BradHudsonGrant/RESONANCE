@@ -59,6 +59,20 @@ pub enum Request {
     },
     /// Computes pending byte hashes, decoded-audio hashes and Chromaprint fingerprints.
     Identify,
+    /// Active and recent background jobs for the Activity drawer.
+    JobsSnapshot,
+    /// Cancels a queued or running job.
+    CancelJob {
+        #[ts(type = "number")]
+        job_id: i64,
+    },
+    /// Re-queues a failed or cancelled job.
+    RetryJob {
+        #[ts(type = "number")]
+        job_id: i64,
+    },
+    /// Clears completed, failed and cancelled jobs from recent Activity history.
+    ClearFinishedJobs,
     /// Every configured source folder and the editable ignored-folder list.
     Sources,
     /// Direct subfolders inside a source (or under `parent`), for toggling subfolders on or off.
@@ -162,6 +176,11 @@ pub enum Response {
     LibraryFacets(LibraryFacets),
     Scan(ScanReport),
     Identify(IdentifyReport),
+    JobsSnapshot(ActivitySnapshot),
+    CancelJob(ActivitySnapshot),
+    RetryJob(ActivitySnapshot),
+    ClearFinishedJobs(ActivitySnapshot),
+    ActivityChanged(ActivityChanged),
     Sources(LibrarySources),
     SourceSubfolders(Vec<SourceSubfolder>),
     UpdateSource(LibrarySources),
@@ -216,6 +235,66 @@ pub struct SourceSubfolder {
 pub struct LibraryChanged {
     #[ts(type = "number")]
     pub revision: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct ActivityChanged {
+    #[ts(type = "number")]
+    pub revision: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ActivityJobStatus {
+    Queued,
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ActivityJobTier {
+    Interactive,
+    Metadata,
+    Analysis,
+    OnDemand,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct ActivityJob {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub kind: String,
+    pub tier: ActivityJobTier,
+    pub status: ActivityJobStatus,
+    pub label: String,
+    #[ts(type = "number")]
+    pub done_items: u64,
+    #[ts(type = "number | null")]
+    pub total_items: Option<u64>,
+    pub error_message: Option<String>,
+    /// True when this job is waiting or paused because a Mix deck is playing.
+    pub paused_for_mix: bool,
+    #[ts(type = "number")]
+    pub created_ms: i64,
+    #[ts(type = "number | null")]
+    pub started_ms: Option<i64>,
+    #[ts(type = "number | null")]
+    pub finished_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct ActivitySnapshot {
+    pub active: Vec<ActivityJob>,
+    pub recent: Vec<ActivityJob>,
+    pub mix_backoff_active: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]

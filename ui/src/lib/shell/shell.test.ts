@@ -9,6 +9,7 @@ import { fakeTrack } from '../library/fake-library';
 
 HTMLElement.prototype.showPopover ??= () => {};
 HTMLElement.prototype.hidePopover ??= () => {};
+import ActivitySheet, { type ActivityClient } from './ActivitySheet.svelte';
 import CommandBar, { type Command } from './CommandBar.svelte';
 import PlayerBar from './PlayerBar.svelte';
 import SettingsSheet from './SettingsSheet.svelte';
@@ -57,19 +58,33 @@ describe('theme', () => {
 });
 
 describe('TopBar', () => {
-  it('has Settings, and names the milestone of each tool still to come', () => {
-    render(TopBar, { onsettings: vi.fn() });
+  it('has live Activity and Settings buttons, and names M7 for audio engine status', async () => {
+    const onactivity = vi.fn();
+    render(TopBar, { onsettings: vi.fn(), onactivity });
 
     expect(screen.getByLabelText('Resonance')).toBeTruthy();
     const audio = screen.getByRole('button', { name: 'Audio engine status' });
     const activity = screen.getByRole('button', { name: 'Activity' });
     expect(audio.getAttribute('aria-disabled')).toBe('true');
-    expect(activity.getAttribute('aria-disabled')).toBe('true');
-    expect(activity.tabIndex).toBe(-1);
+    expect(activity.getAttribute('aria-disabled')).toBeNull();
+    expect(activity.tabIndex).toBe(0);
+    expect(activity.querySelector('.activity-dot')).toBeNull();
 
     const tooltips = tooltipTexts();
     expect(tooltips.some((text) => text?.includes('Audio engine status arrives in M7'))).toBe(true);
-    expect(tooltips.some((text) => text?.includes('Activity arrives in M2'))).toBe(true);
+    expect(tooltips.some((text) => text?.trim() === 'Activity')).toBe(true);
+
+    await fireEvent.click(activity);
+    expect(onactivity).toHaveBeenCalledOnce();
+  });
+
+  it('shows the active-job indicator dot and count tooltip while jobs are active', () => {
+    render(TopBar, { onsettings: vi.fn(), activeJobCount: 2, activityOpen: true });
+
+    const activity = screen.getByRole('button', { name: 'Activity' });
+    expect(activity.getAttribute('aria-pressed')).toBe('true');
+    expect(activity.querySelector('.activity-dot')).toBeTruthy();
+    expect(tooltipTexts().some((text) => text?.includes('Activity · 2 active'))).toBe(true);
   });
 
   it('opens Settings', async () => {
@@ -78,6 +93,128 @@ describe('TopBar', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     expect(onsettings).toHaveBeenCalledOnce();
+  });
+});
+
+describe('ActivitySheet', () => {
+  it('renders empty active and recent states when idle', () => {
+    render(ActivitySheet, { open: true });
+    const dialog = screen.getByRole('dialog', { name: 'Activity' });
+
+    expect(within(dialog).getByText('No active jobs.')).toBeTruthy();
+    expect(within(dialog).getByText('No recent jobs.')).toBeTruthy();
+  });
+
+  it('displays active progress, Mix backoff state, errors, and wires Cancel, Retry and Clear finished', async () => {
+    let snapshot = {
+      mix_backoff_active: true,
+      active: [
+        {
+          id: 11,
+          kind: 'scan_source',
+          tier: 'interactive' as const,
+          status: 'running' as const,
+          label: 'Scan Warehouse',
+          done_items: 400,
+          total_items: 1_000,
+          error_message: null,
+          paused_for_mix: false,
+          created_ms: 1_000,
+          started_ms: 1_010,
+          finished_ms: null,
+        },
+        {
+          id: 12,
+          kind: 'identify_library',
+          tier: 'metadata' as const,
+          status: 'queued' as const,
+          label: 'Identify audio files',
+          done_items: 0,
+          total_items: 1_000,
+          error_message: null,
+          paused_for_mix: true,
+          created_ms: 1_020,
+          started_ms: null,
+          finished_ms: null,
+        },
+      ],
+      recent: [
+        {
+          id: 9,
+          kind: 'scan_source',
+          tier: 'interactive' as const,
+          status: 'failed' as const,
+          label: 'Scan UnpluggedDrive',
+          done_items: 0,
+          total_items: null,
+          error_message: 'The folder could not be scanned.',
+          paused_for_mix: false,
+          created_ms: 500,
+          started_ms: 510,
+          finished_ms: 520,
+        },
+        {
+          id: 8,
+          kind: 'identify_library',
+          tier: 'metadata' as const,
+          status: 'completed' as const,
+          label: 'Identify audio files',
+          done_items: 48,
+          total_items: 48,
+          error_message: null,
+          paused_for_mix: false,
+          created_ms: 100,
+          started_ms: 110,
+          finished_ms: 300,
+        },
+      ],
+    };
+
+    const client: ActivityClient = {
+      snapshot: vi.fn(async () => snapshot),
+      cancel: vi.fn(async () => snapshot),
+      retry: vi.fn(async () => snapshot),
+      clearFinished: vi.fn(async () => {
+        snapshot = { ...snapshot, recent: [] };
+        return snapshot;
+      }),
+    };
+    const onsnapshot = vi.fn();
+
+    render(ActivitySheet, { open: true, snapshot, client, onsnapshot });
+    const dialog = screen.getByRole('dialog', { name: 'Activity' });
+
+    expect(
+      within(dialog).getByText(
+        'Background audio identification is paused while a Mix deck is playing.',
+      ),
+    ).toBeTruthy();
+
+    const activeList = within(dialog).getByRole('list', { name: 'Active jobs' });
+    const recentList = within(dialog).getByRole('list', { name: 'Recent jobs' });
+
+    const scanCard = within(activeList).getByRole('listitem', { name: 'Scan Warehouse' });
+    expect(within(scanCard).getByText('Running')).toBeTruthy();
+    expect(within(scanCard).getByText('400 / 1,000')).toBeTruthy();
+    const bar = within(scanCard).getByRole('progressbar', { name: 'Scan Warehouse progress' });
+    expect(bar.getAttribute('aria-valuenow')).toBe('400');
+    expect(bar.getAttribute('aria-valuemax')).toBe('1000');
+
+    const idCard = within(activeList).getByRole('listitem', { name: 'Identify audio files' });
+    expect(within(idCard).getByText('Paused · Mix live')).toBeTruthy();
+
+    await fireEvent.click(within(scanCard).getByRole('button', { name: 'Cancel' }));
+    expect(client.cancel).toHaveBeenCalledWith(11);
+
+    const failedCard = within(recentList).getByRole('listitem', { name: 'Scan UnpluggedDrive' });
+    expect(within(failedCard).getByText('Failed')).toBeTruthy();
+    expect(within(failedCard).getByText('The folder could not be scanned.')).toBeTruthy();
+    await fireEvent.click(within(failedCard).getByRole('button', { name: 'Retry' }));
+    expect(client.retry).toHaveBeenCalledWith(9);
+
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Clear finished' }));
+    expect(client.clearFinished).toHaveBeenCalledOnce();
+    expect(onsnapshot).toHaveBeenLastCalledWith(expect.objectContaining({ recent: [] }));
   });
 });
 

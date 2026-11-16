@@ -30,6 +30,9 @@ export type FrameListener = (frame: ArrayBuffer, arrivedAt: number) => void;
 /** Fired when a background source watcher finds new or modified files on disk. */
 export type LibraryChangeListener = (revision: number) => void;
 
+/** Fired when a background or interactive job starts, advances or finishes. */
+export type ActivityChangeListener = (revision: number) => void;
+
 /** Sends typed commands to the core over one socket, opened on the first call and again after a drop. */
 export class Core {
   #open: () => WebSocket;
@@ -37,6 +40,7 @@ export class Core {
   #waiting = new Map<number, Waiting>();
   #frameListeners = new Set<FrameListener>();
   #libraryListeners = new Set<LibraryChangeListener>();
+  #activityListeners = new Set<ActivityChangeListener>();
   #nextId = 1;
 
   constructor(open: () => WebSocket) {
@@ -72,6 +76,15 @@ export class Core {
     return () => this.#libraryListeners.delete(listener);
   }
 
+  /**
+   * Listens for Activity job queue revisions pushed when jobs start, advance or finish. Returns a
+   * function that stops listening.
+   */
+  onActivityChange(listener: ActivityChangeListener): () => void {
+    this.#activityListeners.add(listener);
+    return () => this.#activityListeners.delete(listener);
+  }
+
   #connected(): Promise<WebSocket> {
     this.#socket ??= new Promise<WebSocket>((resolve, reject) => {
       const socket = this.#open();
@@ -103,6 +116,10 @@ export class Core {
     if (reply.id === null) {
       if (reply.response?.command === 'library_changed') {
         for (const listener of this.#libraryListeners) {
+          listener(reply.response.result.revision);
+        }
+      } else if (reply.response?.command === 'activity_changed') {
+        for (const listener of this.#activityListeners) {
           listener(reply.response.result.revision);
         }
       }

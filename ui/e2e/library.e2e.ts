@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test } from '@playwright/test';
@@ -515,5 +515,99 @@ test('missing files stay in the library and collections, warn on mismatched audi
       copyFileSync(relocatedGarage, originalGarage);
     }
     rmSync(relocatedDir, { recursive: true, force: true });
+  }
+});
+
+test('Activity drawer tracks scan and identity jobs from TopBar and clears finished history', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1586, height: 992 });
+  await page.goto('/');
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible({ timeout: 10_000 });
+
+  const topBarActivity = page.locator('header').getByRole('button', { name: /^Activity/ });
+  await topBarActivity.click();
+  const activity = page.getByRole('dialog', { name: 'Activity' });
+  await expect(activity).toBeVisible();
+  const clearInitial = activity.getByRole('button', { name: 'Clear finished' });
+  if ((await clearInitial.count()) > 0) {
+    await clearInitial.click();
+  }
+  await expect(activity.getByText('No recent jobs.')).toBeVisible();
+  await activity.getByRole('button', { name: 'Done' }).click();
+  await expect(activity).toBeHidden();
+
+  const activityFolder = join(musicFolder, '..', 'crate-batch');
+  mkdirSync(activityFolder, { recursive: true });
+  try {
+    // Write a distinct PCM WAV so byte_hash reconciliation does not merge it into an earlier test's
+    // deleted fixture copy, ensuring both scan_source and identify_library run.
+    const frames = 88_200;
+    const dataBytes = frames * 4;
+    const wav = Buffer.alloc(44 + dataBytes);
+    wav.write('RIFF', 0, 'ascii');
+    wav.writeUInt32LE(36 + dataBytes, 4);
+    wav.write('WAVEfmt ', 8, 'ascii');
+    wav.writeUInt32LE(16, 16);
+    wav.writeUInt16LE(1, 20);
+    wav.writeUInt16LE(2, 22);
+    wav.writeUInt32LE(44_100, 24);
+    wav.writeUInt32LE(44_100 * 4, 28);
+    wav.writeUInt16LE(4, 32);
+    wav.writeUInt16LE(16, 34);
+    wav.write('data', 36, 'ascii');
+    wav.writeUInt32LE(dataBytes, 40);
+    for (let i = 0; i < frames; i++) {
+      const sample = ((i * 211) & 0x3fff) - 0x2000;
+      wav.writeInt16LE(sample, 44 + i * 4);
+      wav.writeInt16LE(-sample, 46 + i * 4);
+    }
+    writeFileSync(join(activityFolder, 'Sol Vane - Night Shift.wav'), wav);
+
+    const commandBox = page.getByRole('combobox', { name: 'Commands' });
+    await commandBox.focus();
+    await page.getByRole('option', { name: 'Scan a music folder' }).click();
+    const scanSheet = page.getByRole('dialog', { name: 'Scan a music folder' });
+    await scanSheet.getByRole('textbox', { name: 'Music folder' }).fill(activityFolder);
+    await scanSheet.getByRole('button', { name: 'Scan folder' }).click();
+    await expect(scanSheet.getByRole('status')).toContainText('1 files:');
+    await scanSheet.getByRole('button', { name: 'Close' }).click();
+
+    await topBarActivity.click();
+    await expect(activity).toBeVisible();
+    await expect(activity.getByText('No active jobs.')).toBeVisible({ timeout: 10_000 });
+
+    const recentList = activity.getByRole('list', { name: 'Recent jobs' });
+    await expect(recentList.getByRole('listitem', { name: 'Scan crate-batch' })).toContainText(
+      'Completed',
+    );
+    await expect(recentList.getByRole('listitem', { name: 'Identify audio files' })).toContainText(
+      'Completed',
+    );
+
+    // Fits cleanly at the 760x480 minimum window size without horizontal overflow.
+    await page.setViewportSize({ width: 760, height: 480 });
+    const hasOverflow = await activity.evaluate((el) => el.scrollWidth > el.clientWidth + 1);
+    expect(hasOverflow).toBe(false);
+
+    await activity.getByRole('button', { name: 'Clear finished' }).click();
+    await expect(activity.getByText('No recent jobs.')).toBeVisible();
+    await activity.getByRole('button', { name: 'Done' }).click();
+    await expect(activity).toBeHidden();
+  } finally {
+    await page.setViewportSize({ width: 1586, height: 992 });
+    if (await activity.isVisible()) {
+      await activity.getByRole('button', { name: 'Done' }).click();
+      await expect(activity).toBeHidden();
+    }
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    const settings = page.getByRole('dialog', { name: 'Settings' });
+    const addedCard = settings.getByRole('region', { name: /crate-batch/i });
+    if ((await addedCard.count()) > 0) {
+      await addedCard.getByRole('button', { name: /Remove/ }).click();
+      await expect(addedCard).toHaveCount(0);
+    }
+    await settings.getByRole('button', { name: 'Done' }).click();
+    rmSync(activityFolder, { recursive: true, force: true });
   }
 });

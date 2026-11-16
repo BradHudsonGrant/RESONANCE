@@ -46,8 +46,16 @@ async fn connect(url: &str, bearer: Option<&str>) -> Result<Socket, Error> {
 
 async fn ask(socket: &mut Socket, text: &str) -> Value {
     socket.send(Message::text(text)).await.unwrap();
-    let reply = socket.next().await.unwrap().unwrap();
-    serde_json::from_str(reply.to_text().unwrap()).unwrap()
+    loop {
+        let reply = socket.next().await.unwrap().unwrap();
+        let parsed: Value = serde_json::from_str(reply.to_text().unwrap()).unwrap();
+        // Unsolicited push notifications (`library_changed`, `activity_changed`) carry neither a
+        // call id nor an error.
+        if parsed["id"].is_null() && parsed["error"].is_null() {
+            continue;
+        }
+        return parsed;
+    }
 }
 
 fn refused_as_unauthorised(result: Result<Socket, Error>) -> bool {

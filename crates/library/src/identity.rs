@@ -286,6 +286,69 @@ pub fn apply_computed_identity(
     Ok(false)
 }
 
+/// Applies a batch of computed identities without holding `database` across filesystem `.exists()`
+/// checks, committing standard updates inside a single SQLite WAL transaction.
+pub fn apply_computed_identity_batch(
+    database: &Mutex<Database>,
+    batch: &[PendingAsset],
+    computed: Vec<Option<AssetIdentity>>,
+) -> Result<IdentifyReport, DbError> {
+    let mut report = IdentifyReport::default();
+    let mut standard_updates: Vec<(i64, resonance_db::FileStamp, AssetIdentity)> =
+        Vec::with_capacity(batch.len());
+
+    for (pending, maybe_identity) in batch.iter().zip(computed) {
+        let Some(identity) = maybe_identity else {
+            report.skipped_unreadable += 1;
+            continue;
+        };
+        report.processed += 1;
+        if identity.audio.is_some() {
+            report.decoded += 1;
+        }
+
+        if pending.is_new {
+            let (by_bytes, by_audio) = {
+                let db = database
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let by_bytes = db.assets_with_byte_hash(&identity.byte_hash)?;
+                let by_audio = match &identity.audio {
+                    Some(audio) => db.assets_with_audio_hash(&audio.hash)?,
+                    None => Vec::new(),
+                };
+                (by_bytes, by_audio)
+            };
+            let matched_id = first_missing_candidate(&by_bytes, Some(pending.asset_id))
+                .or_else(|| first_missing_candidate(&by_audio, Some(pending.asset_id)))
+                .map(|m| m.asset_id);
+            if let Some(original_id) = matched_id {
+                let reconciled = {
+                    let mut db = database
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    db.reconcile_moved_asset(original_id, pending.asset_id, &identity)?
+                };
+                if reconciled {
+                    report.reconciled_moves += 1;
+                    continue;
+                }
+            }
+        }
+
+        standard_updates.push((pending.asset_id, pending.stamp, identity));
+    }
+
+    if !standard_updates.is_empty() {
+        let mut db = database
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        db.record_asset_identities(&standard_updates)?;
+    }
+
+    Ok(report)
+}
+
 /// Computes `AssetIdentity` across `batch` on up to half the machine's logical cores (capped at 8)
 /// so large library passes finish quickly while leaving CPU headroom for the UI and audio engine.
 pub fn compute_batch(

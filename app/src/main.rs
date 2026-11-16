@@ -104,6 +104,7 @@ fn run(options: Options) -> Result<(), AppError> {
         .map_err(ApiError::library_unavailable);
 
     let watch_revisions = api.as_ref().ok().map(|api| api.watch_revisions());
+    let activity_revisions = api.as_ref().ok().map(|api| api.activity_revisions());
 
     let mut context = tauri::generate_context!();
     context.config_mut().app.app_directories_override = Some(AppDirectoriesOverride::Root(folder));
@@ -126,11 +127,25 @@ fn run(options: Options) -> Result<(), AppError> {
                     .on_new_window(|_, _| NewWindowResponse::Deny)
                     .build()?;
             if let Some(mut revisions) = watch_revisions {
+                let library_window = window.clone();
+                tauri::async_runtime::spawn(async move {
+                    while revisions.changed().await.is_ok() {
+                        let revision = *revisions.borrow_and_update();
+                        if library_window
+                            .emit("resonance://library-changed", revision)
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                });
+            }
+            if let Some(mut revisions) = activity_revisions {
                 tauri::async_runtime::spawn(async move {
                     while revisions.changed().await.is_ok() {
                         let revision = *revisions.borrow_and_update();
                         if window
-                            .emit("resonance://library-changed", revision)
+                            .emit("resonance://activity-changed", revision)
                             .is_err()
                         {
                             break;

@@ -128,6 +128,29 @@ impl Database {
         Ok(found.is_some())
     }
 
+    /// Number of present included assets whose identity needs computing.
+    pub fn count_pending_identity_assets(&self, current_decoder: &str) -> Result<u64, DbError> {
+        Ok(self.connection.query_row(
+            "SELECT count(*)
+             FROM asset
+             WHERE asset.included = 1
+               AND asset.missing_since IS NULL
+               AND (
+                   asset.identity_size_bytes IS NULL
+                   OR asset.identity_size_bytes != asset.size_bytes
+                   OR asset.identity_modified_ns IS NULL
+                   OR asset.identity_modified_ns != asset.modified_ns
+                   OR (
+                       asset.format IN ('mp3', 'm4a')
+                       AND asset.audio_decoder IS NOT NULL
+                       AND asset.audio_decoder != ?1
+                   )
+               )",
+            [current_decoder],
+            |row| row.get(0),
+        )?)
+    }
+
     /// Assets with `id > after_asset_id` whose identity needs computing: new files, modified
     /// files, or lossy encodes whose `audio_decoder` differs from `current_decoder`.
     pub fn pending_identity_assets(
@@ -326,6 +349,56 @@ impl Database {
             ],
         )?;
         Ok(changed > 0)
+    }
+
+    /// Records a batch of computed identities inside a single SQLite WAL transaction so background
+    /// identity passes do not pay per-file autocommit overhead.
+    pub fn record_asset_identities(
+        &mut self,
+        updates: &[(i64, FileStamp, AssetIdentity)],
+    ) -> Result<usize, DbError> {
+        if updates.is_empty() {
+            return Ok(0);
+        }
+        let tx = self.connection.transaction()?;
+        let mut changed = 0usize;
+        {
+            let mut stmt = tx.prepare(
+                "UPDATE asset
+                 SET byte_hash = ?2,
+                     audio_hash = ?3,
+                     audio_decoder = ?4,
+                     fingerprint = ?5,
+                     fingerprint_raw = ?6,
+                     fingerprint_duration_s = ?7,
+                     identity_size_bytes = ?8,
+                     identity_modified_ns = ?9
+                 WHERE id = ?1 AND size_bytes = ?8 AND modified_ns = ?9",
+            )?;
+            for (asset_id, stamp, identity) in updates {
+                let audio_bytes = identity
+                    .audio
+                    .as_ref()
+                    .map(|a| a.hash.as_bytes().as_slice());
+                let audio_decoder = identity.audio.as_ref().map(|a| a.decoder.as_str());
+                let fp_encoded = identity.chromaprint.as_ref().map(|fp| fp.encoded.as_str());
+                let fp_raw = identity.chromaprint.as_ref().map(Chromaprint::raw_le_bytes);
+                let fp_duration = identity.chromaprint.as_ref().map(|fp| fp.duration_s);
+                changed += stmt.execute(params![
+                    asset_id,
+                    identity.byte_hash.as_bytes().as_slice(),
+                    audio_bytes,
+                    audio_decoder,
+                    fp_encoded,
+                    fp_raw.as_deref(),
+                    fp_duration,
+                    stamp.size_bytes,
+                    stamp.modified_ns,
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(changed)
     }
 
     /// Reconciles an asset that was scanned as `new_asset_id` when `original_asset_id`'s file was
