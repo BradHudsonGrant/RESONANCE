@@ -5,6 +5,7 @@ members = [
     "crates/db",
     "crates/library",
     "crates/engine",
+    "crates/jobs",
     "crates/api",
     "crates/cli",
     "crates/fixtures",
@@ -24,6 +25,7 @@ resonance-core = { path = "crates/core" }
 resonance-db = { path = "crates/db" }
 resonance-engine = { path = "crates/engine" }
 resonance-fixtures = { path = "crates/fixtures" }
+resonance-jobs = { path = "crates/jobs" }
 resonance-library = { path = "crates/library" }
 # Dual-licensed CC0-1.0 OR Apache-2.0; used under Apache-2.0 (ADR 0005).
 blake3 = "1.8.7"

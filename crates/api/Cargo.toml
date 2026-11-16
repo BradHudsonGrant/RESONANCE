@@ -11,6 +11,7 @@ publish.workspace = true
 resonance-core.workspace = true
 resonance-db.workspace = true
 resonance-engine.workspace = true
+resonance-jobs.workspace = true
 resonance-library.workspace = true
 directories.workspace = true
 futures-util.workspace = true

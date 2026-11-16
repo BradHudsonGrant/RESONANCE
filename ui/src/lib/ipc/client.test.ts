@@ -183,4 +183,33 @@ describe('Core', () => {
     expect(revisions).toEqual([3]);
     await expect(info).resolves.toEqual({ version: '0.2.0' });
   });
+
+  it('delivers unsolicited activity_changed notifications to listeners until unsubscribed', async () => {
+    const { core, sockets } = coreWithSockets();
+    const revisions: number[] = [];
+    const stop = core.onActivityChange((revision) => revisions.push(revision));
+
+    const info = core.call('app_info');
+    sockets[0]!.opens();
+    await settled();
+    sockets[0]!.receives({
+      id: null,
+      response: { command: 'activity_changed', result: { revision: 9 } },
+      error: null,
+    });
+    stop();
+    sockets[0]!.receives({
+      id: null,
+      response: { command: 'activity_changed', result: { revision: 10 } },
+      error: null,
+    });
+    sockets[0]!.receives({
+      id: 1,
+      response: { command: 'app_info', result: { version: '0.2.0' } },
+      error: null,
+    });
+
+    expect(revisions).toEqual([9]);
+    await expect(info).resolves.toEqual({ version: '0.2.0' });
+  });
 });

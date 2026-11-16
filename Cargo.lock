@@ -3271,6 +3271,7 @@ dependencies = [
  "resonance-db",
  "resonance-engine",
  "resonance-fixtures",
+ "resonance-jobs",
  "resonance-library",
  "serde",
  "serde_json",
@@ -3342,6 +3343,15 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "symphonia",
+]
+
+[[package]]
+name = "resonance-jobs"
+version = "0.2.0"
+dependencies = [
+ "resonance-core",
+ "resonance-db",
+ "tokio",
 ]
 
 [[package]]

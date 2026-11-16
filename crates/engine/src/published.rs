@@ -16,6 +16,7 @@ pub(crate) struct Clock {
     latency_ns: AtomicU64,
     played_frames: [AtomicU64; DECKS],
     playing: [AtomicU32; DECKS],
+    deck_state_seq: [AtomicU32; DECKS],
     preview_generation: AtomicU32,
     preview_state_seq: AtomicU32,
     preview_played_frames: AtomicU64,
@@ -33,6 +34,7 @@ pub(crate) struct ClockReading {
     /// Frames each deck had played before that buffer, at the device's sample rate.
     pub played_frames: [u64; DECKS],
     pub playing: [bool; DECKS],
+    pub deck_state_seq: [u32; DECKS],
     pub preview_generation: u32,
     pub preview_state_seq: u32,
     pub preview_played_frames: u64,
@@ -51,6 +53,7 @@ impl Clock {
         for deck in 0..DECKS {
             self.played_frames[deck].store(reading.played_frames[deck], Ordering::Relaxed);
             self.playing[deck].store(u32::from(reading.playing[deck]), Ordering::Relaxed);
+            self.deck_state_seq[deck].store(reading.deck_state_seq[deck], Ordering::Relaxed);
         }
         self.preview_generation
             .store(reading.preview_generation, Ordering::Relaxed);
@@ -86,6 +89,7 @@ impl Clock {
             for deck in 0..DECKS {
                 reading.played_frames[deck] = self.played_frames[deck].load(Ordering::Relaxed);
                 reading.playing[deck] = self.playing[deck].load(Ordering::Relaxed) != 0;
+                reading.deck_state_seq[deck] = self.deck_state_seq[deck].load(Ordering::Relaxed);
             }
             fence(Ordering::Acquire);
             if self.sequence.load(Ordering::Relaxed) == before {

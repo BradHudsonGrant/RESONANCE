@@ -2,6 +2,7 @@
   import { invoke, isTauri } from '@tauri-apps/api/core';
 
   import Sheet from './lib/design/Sheet.svelte';
+  import type { ActivitySnapshot } from './lib/ipc/bindings/ActivitySnapshot';
   import type { LibraryCollection } from './lib/ipc/bindings/LibraryCollection';
   import type { LibraryTrack } from './lib/ipc/bindings/LibraryTrack';
   import { core } from './lib/ipc/core';
@@ -11,6 +12,7 @@
   import ScanFolder from './lib/library/ScanFolder.svelte';
   import type { SourcesClient } from './lib/library/SourcesSettings.svelte';
   import { TrackPages } from './lib/library/track-pages.svelte';
+  import ActivitySheet, { type ActivityClient } from './lib/shell/ActivitySheet.svelte';
   import CommandBar, { type Command } from './lib/shell/CommandBar.svelte';
   import PlayerBar from './lib/shell/PlayerBar.svelte';
   import { PreviewPlayer } from './lib/shell/preview.svelte';
@@ -45,6 +47,12 @@
     pickAudioFile: desktop ? () => invoke<string | null>('pick_audio_file') : undefined,
     pickFolder: desktop ? () => invoke<string | null>('pick_folder') : undefined,
   };
+  const activityClient: ActivityClient = {
+    snapshot: () => core.call('jobs_snapshot'),
+    cancel: (job_id) => core.call('cancel_job', { job_id }),
+    retry: (job_id) => core.call('retry_job', { job_id }),
+    clearFinished: () => core.call('clear_finished_jobs'),
+  };
 
   let shell: HTMLDivElement;
   let space = $state<SpaceName>('Library');
@@ -53,6 +61,13 @@
   let dockChoice = $state<Fold>();
   let inspectorHidden = $state(false);
   let sheetOpen = $state(false);
+  let activityOpen = $state(false);
+  let activityMounted = $state(false);
+  let activitySnapshot = $state<ActivitySnapshot>({
+    active: [],
+    recent: [],
+    mix_backoff_active: false,
+  });
   let settingsOpen = $state(false);
   let settingsMounted = $state(false);
   let scanOpen = $state(false);
@@ -193,6 +208,35 @@
     await addTracksToCollection(created.id, trackIds);
   }
 
+  let activityRefreshInFlight = false;
+  let activityRefreshQueued = false;
+
+  async function refreshActivity() {
+    if (activityRefreshInFlight) {
+      activityRefreshQueued = true;
+      return;
+    }
+    activityRefreshInFlight = true;
+    try {
+      do {
+        activityRefreshQueued = false;
+        const next = await core.call('jobs_snapshot');
+        if (next) {
+          activitySnapshot = next;
+        }
+      } while (activityRefreshQueued);
+    } catch {
+      // Initial library load handles core error states; ignore transient snapshot failure.
+    } finally {
+      activityRefreshInFlight = false;
+    }
+  }
+
+  function openActivity() {
+    activityMounted = true;
+    activityOpen = true;
+  }
+
   function openSettings() {
     settingsMounted = true;
     settingsOpen = true;
@@ -272,12 +316,19 @@
     }),
   );
 
+  $effect(() =>
+    core.onActivityChange(() => {
+      void refreshActivity();
+    }),
+  );
+
   const commands: Command[] = $derived([
     space === 'Mix'
       ? { name: 'Go to the library', shortcut: '1', run: () => (space = 'Library') }
       : { name: 'Go to Mix', shortcut: '4', run: () => (space = 'Mix') },
     { name: 'Scan a music folder', run: openScan },
     { name: 'Manage library sources', run: openSettings },
+    { name: 'Open activity', run: openActivity },
     { name: 'Show or hide the inspector', shortcut: 'I', run: toggleInspector },
     { name: 'Collapse or expand the sidebar', shortcut: '[', run: toggleSidebar },
     { name: 'Collapse or expand the dock', shortcut: 'D', run: toggleDock },
@@ -364,6 +415,7 @@
   pages.load();
   void loadCollections();
   void preview.refresh();
+  void refreshActivity();
 </script>
 
 <svelte:window {onkeydown} />
@@ -376,7 +428,12 @@
   data-inspector={inspectorDocked ? undefined : 'hidden'}
 >
   <div class="topbar">
-    <TopBar onsettings={openSettings} />
+    <TopBar
+      onsettings={openSettings}
+      onactivity={openActivity}
+      activeJobCount={activitySnapshot.active.length}
+      {activityOpen}
+    />
   </div>
 
   <div class="sidebar">
@@ -516,6 +573,17 @@
       relinkTarget = updated;
       void pages.refresh();
       void loadCollections();
+    }}
+  />
+{/if}
+
+{#if activityMounted}
+  <ActivitySheet
+    bind:open={activityOpen}
+    snapshot={activitySnapshot}
+    client={activityClient}
+    onsnapshot={(next) => {
+      activitySnapshot = next;
     }}
   />
 {/if}

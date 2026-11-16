@@ -5,6 +5,7 @@ import type { ApiError } from './bindings/ApiError';
 import type { Request } from './bindings/Request';
 import type { Response } from './bindings/Response';
 import {
+  type ActivityChangeListener,
   type Command,
   CoreError,
   type LibraryChangeListener,
@@ -42,6 +43,21 @@ export class DesktopCore {
     let active = true;
     let unlisten: (() => void) | undefined;
     void listen<number>('resonance://library-changed', (event) => {
+      if (active) listener(event.payload);
+    }).then((stop) => {
+      if (active) unlisten = stop;
+      else stop();
+    });
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }
+
+  onActivityChange(listener: ActivityChangeListener): () => void {
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    void listen<number>('resonance://activity-changed', (event) => {
       if (active) listener(event.payload);
     }).then((stop) => {
       if (active) unlisten = stop;

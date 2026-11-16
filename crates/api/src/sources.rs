@@ -1,24 +1,37 @@
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::PoisonError;
 
 use resonance_core::library::is_subfolder_excluded;
 use resonance_db::{Database, SourceId};
 use resonance_library::folders::list_subfolders;
+use resonance_library::watch::SourceWatcher;
 
-use crate::Api;
 use crate::command::{LibrarySource, LibrarySources, SourceSubfolder};
 use crate::error::ApiError;
+use crate::{Api, LibraryCore};
+
+pub(crate) fn reconcile_watchers_for(
+    core: &LibraryCore,
+    watcher: &SourceWatcher,
+    library: &Database,
+) {
+    let Ok(sources) = library.sources() else {
+        return;
+    };
+    let Ok(ignored) = library.ignored_folders() else {
+        return;
+    };
+    let own_files = core
+        .own_files
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    watcher.reconcile(&sources, &ignored, &own_files);
+}
 
 impl Api {
     pub(crate) fn reconcile_watchers(&self, library: &Database) {
-        let Ok(sources) = library.sources() else {
-            return;
-        };
-        let Ok(ignored) = library.ignored_folders() else {
-            return;
-        };
-        let own_files = self.own_files_snapshot();
-        self.watcher.reconcile(&sources, &ignored, &own_files);
+        reconcile_watchers_for(&self.core, &self.watcher, library);
     }
 
     pub(crate) fn sources_from(&self, library: &Database) -> Result<LibrarySources, ApiError> {
@@ -95,42 +108,53 @@ impl Api {
         watch: bool,
         excluded_subfolders: &[String],
     ) -> Result<LibrarySources, ApiError> {
-        let own_files = self.own_files_snapshot();
-        let mut library = self
+        let folder_to_rescan = {
+            let mut library = self
+                .core
+                .library
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let id = SourceId::from_raw(source_id);
+            let previous = library
+                .source_config(id)
+                .map_err(ApiError::library_unreadable)?
+                .ok_or_else(|| ApiError::bad_request(format!("unknown source {source_id}")))?;
+            let updated = library
+                .update_source(id, include_subfolders, watch, excluded_subfolders)
+                .map_err(ApiError::library_unreadable)?
+                .ok_or_else(|| ApiError::bad_request(format!("unknown source {source_id}")))?;
+
+            let reopened_subfolders = (!previous.include_subfolders && updated.include_subfolders)
+                || (updated.include_subfolders
+                    && previous
+                        .excluded_subfolders
+                        .iter()
+                        .any(|old| !is_subfolder_excluded(old, &updated.excluded_subfolders)));
+
+            if reopened_subfolders {
+                let path = PathBuf::from(&updated.folder);
+                if path.exists() {
+                    Some(path)
+                } else {
+                    self.reconcile_watchers(&library);
+                    return self.sources_from(&library);
+                }
+            } else {
+                self.reconcile_watchers(&library);
+                return self.sources_from(&library);
+            }
+        };
+
+        if let Some(path) = folder_to_rescan {
+            let _ = self.run_scan_job(&path);
+        }
+        let library = self
             .core
             .library
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        let id = SourceId::from_raw(source_id);
-        let previous = library
-            .source_config(id)
-            .map_err(ApiError::library_unreadable)?
-            .ok_or_else(|| ApiError::bad_request(format!("unknown source {source_id}")))?;
-        let updated = library
-            .update_source(id, include_subfolders, watch, excluded_subfolders)
-            .map_err(ApiError::library_unreadable)?
-            .ok_or_else(|| ApiError::bad_request(format!("unknown source {source_id}")))?;
-
-        let reopened_subfolders = (!previous.include_subfolders && updated.include_subfolders)
-            || (updated.include_subfolders
-                && previous
-                    .excluded_subfolders
-                    .iter()
-                    .any(|old| !is_subfolder_excluded(old, &updated.excluded_subfolders)));
-
-        if reopened_subfolders {
-            let path = Path::new(&updated.folder);
-            if path.exists() {
-                let _ = resonance_library::scan::scan(&mut library, path, &own_files);
-            }
-        }
         self.reconcile_watchers(&library);
-        let result = self.sources_from(&library);
-        drop(library);
-        if reopened_subfolders {
-            self.identity.wake();
-        }
-        result
+        self.sources_from(&library)
     }
 
     pub(crate) fn remove_source(&self, source_id: i64) -> Result<LibrarySources, ApiError> {
@@ -150,36 +174,45 @@ impl Api {
         &self,
         folders: &[String],
     ) -> Result<LibrarySources, ApiError> {
-        let own_files = self.own_files_snapshot();
-        let mut library = self
+        let folders_to_rescan = {
+            let mut library = self
+                .core
+                .library
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let previous = library
+                .ignored_folders()
+                .map_err(ApiError::library_unreadable)?;
+            let updated = library
+                .set_ignored_folders(folders)
+                .map_err(ApiError::library_unreadable)?;
+            let unignored_any = previous
+                .iter()
+                .any(|old| !updated.iter().any(|next| next.eq_ignore_ascii_case(old)));
+
+            if unignored_any {
+                library
+                    .sources()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|source| PathBuf::from(source.folder))
+                    .filter(|path| path.exists())
+                    .collect::<Vec<_>>()
+            } else {
+                self.reconcile_watchers(&library);
+                return self.sources_from(&library);
+            }
+        };
+
+        for path in folders_to_rescan {
+            let _ = self.run_scan_job(&path);
+        }
+        let library = self
             .core
             .library
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        let previous = library
-            .ignored_folders()
-            .map_err(ApiError::library_unreadable)?;
-        let updated = library
-            .set_ignored_folders(folders)
-            .map_err(ApiError::library_unreadable)?;
-        let unignored_any = previous
-            .iter()
-            .any(|old| !updated.iter().any(|next| next.eq_ignore_ascii_case(old)));
-
-        if unignored_any && let Ok(configs) = library.sources() {
-            for source in configs {
-                let path = Path::new(&source.folder);
-                if path.exists() {
-                    let _ = resonance_library::scan::scan(&mut library, path, &own_files);
-                }
-            }
-        }
         self.reconcile_watchers(&library);
-        let result = self.sources_from(&library);
-        drop(library);
-        if unignored_any {
-            self.identity.wake();
-        }
-        result
+        self.sources_from(&library)
     }
 }

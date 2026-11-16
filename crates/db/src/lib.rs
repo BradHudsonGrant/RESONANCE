@@ -1,5 +1,6 @@
 mod collections;
 mod identity;
+mod jobs;
 mod search;
 mod sources;
 
@@ -24,7 +25,7 @@ pub use sources::{SourceAssetPresence, SourceConfig};
 
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
-const MIGRATIONS: [&str; 7] = [
+const MIGRATIONS: [&str; 8] = [
     include_str!("../migrations/0001_library.sql"),
     include_str!("../migrations/0002_sources.sql"),
     include_str!("../migrations/0003_identity.sql"),
@@ -32,6 +33,7 @@ const MIGRATIONS: [&str; 7] = [
     include_str!("../migrations/0005_asset_fts_delete_trigger.sql"),
     include_str!("../migrations/0006_collections.sql"),
     include_str!("../migrations/0007_missing_files.sql"),
+    include_str!("../migrations/0008_jobs.sql"),
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -836,5 +838,62 @@ mod tests {
             .expect("missing count"),
             1
         );
+    }
+
+    #[test]
+    fn migrating_from_v7_adds_job_table_and_recovers_interrupted_jobs() {
+        use resonance_core::jobs::{JOB_KIND_SCAN_SOURCE, JobStatus, JobTier, NewJob};
+
+        let mut v7 = Connection::open_in_memory().expect("in-memory sqlite opens");
+        v7.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("foreign keys enable");
+        for (i, sql) in MIGRATIONS[..7].iter().enumerate() {
+            v7.execute_batch(sql).expect("prior migration runs");
+            v7.pragma_update(None, "user_version", i64::try_from(i + 1).expect("fits"))
+                .expect("user_version stamps");
+        }
+        v7.execute("INSERT INTO source (folder) VALUES ('D:\\Club')", [])
+            .expect("source inserts");
+        v7.execute("INSERT INTO track DEFAULT VALUES", [])
+            .expect("track inserts");
+        v7.execute(
+            "INSERT INTO asset (track_id, source_id, path, size_bytes, modified_ns, format, sort_title)
+             VALUES (1, 1, '01/opener.flac', 100, 1000, 'flac', 'opener')",
+            [],
+        )
+        .expect("asset inserts");
+
+        migrate(&mut v7).expect("v7 migrates to v8");
+        let mut db = Database { connection: v7 };
+        assert_eq!(db.schema_version().expect("schema version"), 8);
+        assert_eq!(db.track_count().expect("tracks preserved"), 1);
+
+        let queued = db
+            .enqueue_job(&NewJob {
+                kind: JOB_KIND_SCAN_SOURCE.to_owned(),
+                tier: JobTier::Scan,
+                label: "Scan Club".to_owned(),
+                payload_json: r#"{"folder":"D:\\Club"}"#.to_owned(),
+                total_items: Some(12),
+            })
+            .expect("job inserts");
+        assert_eq!(queued.status, JobStatus::Queued);
+
+        let claimed = db
+            .claim_next_job(true)
+            .expect("claim succeeds")
+            .expect("job claimed");
+        assert_eq!(claimed.id, queued.id);
+        assert_eq!(claimed.status, JobStatus::Running);
+        assert!(claimed.started_ns.is_some());
+
+        let recovered = db.recover_interrupted_jobs().expect("recovery runs");
+        assert_eq!(recovered, 1);
+        let reset = db
+            .job_by_id(queued.id)
+            .expect("job reads")
+            .expect("job exists");
+        assert_eq!(reset.status, JobStatus::Queued);
+        assert_eq!(reset.started_ns, None);
     }
 }

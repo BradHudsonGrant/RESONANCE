@@ -3,23 +3,25 @@ pub mod command;
 pub mod data_folder;
 pub mod error;
 mod identity;
+mod jobs;
 pub mod mix_frame;
 mod relink;
 pub mod serve;
 mod sources;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 use std::time::Duration;
 
 use command::{
     AppInfo, FavouriteState, IdentifyReport, LibraryFacets, LibraryTrack, MixDeck, MixDeckState,
     MixDevice, MixState, PreviewState, Request, Response, ScanReport, SortDirection, TrackAudio,
     TrackCollection, TrackFilterPill, TrackFormat, TrackKey, TrackPage, TrackQuery, TrackSortField,
-    UnreadableFile,
 };
 use error::ApiError;
-use identity::{IdentityWorker, run_identify_pass, to_command_report};
+use identity::{run_identify_pass, to_command_report};
+use jobs::{enqueue_identify_if_needed, execute_job, scan_source_job};
 use resonance_core::library::{AudioFormat, TagField};
 use resonance_core::search::{
     FilterPill as CoreFilterPill, SortDirection as CoreSortDirection, TrackQuery as CoreTrackQuery,
@@ -27,10 +29,12 @@ use resonance_core::search::{
 };
 use resonance_db::{Database, TrackRow};
 use resonance_engine::{DeckId, Mix, MixStatus, PreviewStatus};
+use resonance_jobs::JobRunner;
 use resonance_library::watch::SourceWatcher;
+use sources::reconcile_watchers_for;
 use tokio::sync::watch;
 
-const REPORTED_UNREADABLE_FILES: usize = 100;
+pub(crate) const REPORTED_UNREADABLE_FILES: usize = 100;
 
 #[derive(Clone)]
 struct PreviewTrackMeta {
@@ -43,18 +47,20 @@ struct PreviewTrackMeta {
 }
 
 pub(crate) struct LibraryCore {
-    pub(crate) library: Mutex<Database>,
+    pub(crate) library: Arc<Mutex<Database>>,
     pub(crate) identify_pass: Mutex<()>,
     pub(crate) own_files: Mutex<Vec<PathBuf>>,
     pub(crate) watch_revisions: watch::Sender<u64>,
+    pub(crate) scan_outcomes: Mutex<HashMap<i64, Result<ScanReport, ApiError>>>,
+    pub(crate) jobs: OnceLock<Weak<JobRunner>>,
 }
 
 /// Everything the commands act on. The Tauri shell and the local socket each hold one.
 pub struct Api {
-    pub(crate) watcher: SourceWatcher,
-    pub(crate) identity: Arc<IdentityWorker>,
+    pub(crate) watcher: Arc<SourceWatcher>,
+    pub(crate) jobs: Arc<JobRunner>,
+    mix: Arc<Mix>,
     pub(crate) core: Arc<LibraryCore>,
-    mix: Mix,
     preview_meta: Mutex<Option<PreviewTrackMeta>>,
 }
 
@@ -74,50 +80,73 @@ impl Api {
 
     fn build(library: Database, quiet_window: Option<Duration>, silent: bool) -> Self {
         let (watch_revisions, _) = watch::channel(0u64);
+        let database = Arc::new(Mutex::new(library));
         let core = Arc::new(LibraryCore {
-            library: Mutex::new(library),
+            library: Arc::clone(&database),
             identify_pass: Mutex::new(()),
             own_files: Mutex::new(std::env::current_exe().into_iter().collect()),
             watch_revisions,
+            scan_outcomes: Mutex::new(HashMap::new()),
+            jobs: OnceLock::new(),
         });
-        let identity = Arc::new(IdentityWorker::new(Arc::downgrade(&core)));
-        let weak = Arc::downgrade(&core);
-        let watcher_identity = Arc::downgrade(&identity);
+        let mix = Arc::new(if silent {
+            Mix::new_silent()
+        } else {
+            Mix::new()
+        });
+
+        let watcher_core = Arc::downgrade(&core);
         let callback = move |folder: &Path| {
-            let Some(core) = weak.upgrade() else {
+            let Some(core) = watcher_core.upgrade() else {
                 return;
             };
-            let own_files = core
-                .own_files
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .clone();
-            let changed = {
-                let mut library = core.library.lock().unwrap_or_else(PoisonError::into_inner);
-                resonance_library::scan::scan(&mut library, folder, &own_files).is_ok_and(
-                    |report| report.added > 0 || report.changed > 0 || report.missing_changed > 0,
-                )
+            let Some(jobs) = core.jobs.get().and_then(Weak::upgrade) else {
+                return;
             };
-            if changed {
-                core.watch_revisions.send_modify(|revision| *revision += 1);
-                if let Some(worker) = watcher_identity.upgrade() {
-                    worker.wake();
-                }
+            if let Ok(new_job) = scan_source_job(folder) {
+                let _ = jobs.enqueue_coalesced(&new_job);
             }
         };
-        let watcher = match quiet_window {
+        let watcher = Arc::new(match quiet_window {
             Some(window) => SourceWatcher::with_quiet_window(window, callback),
             None => SourceWatcher::new(callback),
+        });
+
+        let job_core = Arc::downgrade(&core);
+        let job_watcher = Arc::downgrade(&watcher);
+        let mix_for_probe = Arc::downgrade(&mix);
+        let runner = JobRunner::start_with_mix_probe(
+            database,
+            move || {
+                mix_for_probe
+                    .upgrade()
+                    .is_some_and(|mix| mix.any_deck_playing())
+            },
+            move |exec| execute_job(exec, &job_core, &job_watcher),
+        );
+        let jobs = match runner {
+            Ok(runner) => Arc::new(runner),
+            Err(_) => {
+                // `recover_interrupted_jobs` only fails if the database itself is unreadable;
+                // fall back to an in-memory runner handle so `Api::new` stays infallible and
+                // subsequent commands report the underlying database error cleanly.
+                let fallback_db = Arc::new(Mutex::new(
+                    Database::open_in_memory()
+                        .unwrap_or_else(|_| unreachable!("in-memory SQLite database opens")),
+                ));
+                Arc::new(
+                    JobRunner::start(fallback_db, |_| resonance_jobs::JobOutcome::Interrupted)
+                        .unwrap_or_else(|_| unreachable!("in-memory runner starts")),
+                )
+            }
         };
+        let _ = core.jobs.set(Arc::downgrade(&jobs));
+
         let api = Self {
             watcher,
-            identity,
+            jobs,
+            mix,
             core,
-            mix: if silent {
-                Mix::new_silent()
-            } else {
-                Mix::new()
-            },
             preview_meta: Mutex::new(None),
         };
         {
@@ -128,7 +157,7 @@ impl Api {
                 .unwrap_or_else(PoisonError::into_inner);
             api.reconcile_watchers(&guard);
         }
-        api.identity.wake();
+        enqueue_identify_if_needed(&api.core, &api.jobs);
         api
     }
 
@@ -137,12 +166,17 @@ impl Api {
         &self.mix
     }
 
-    /// Subscribes to library revisions bumped when a background source watcher finds new or
-    /// modified files on disk.
+    /// Subscribes to library revisions bumped when a background source watcher or chunked scan
+    /// commits new or modified files.
     pub fn watch_revisions(&self) -> watch::Receiver<u64> {
         let mut receiver = self.core.watch_revisions.subscribe();
         receiver.mark_unchanged();
         receiver
+    }
+
+    /// Subscribes to Activity job queue revisions bumped when jobs start, advance or finish.
+    pub fn activity_revisions(&self) -> watch::Receiver<u64> {
+        self.jobs.revisions()
     }
 
     pub(crate) fn own_files_snapshot(&self) -> Vec<PathBuf> {
@@ -218,6 +252,12 @@ impl Api {
             Request::LibraryFacets => self.library_facets().map(Response::LibraryFacets),
             Request::Scan { folder } => self.scan(Path::new(&folder)).map(Response::Scan),
             Request::Identify => self.identify().map(Response::Identify),
+            Request::JobsSnapshot => self.jobs_snapshot().map(Response::JobsSnapshot),
+            Request::CancelJob { job_id } => self.cancel_job(job_id).map(Response::CancelJob),
+            Request::RetryJob { job_id } => self.retry_job(job_id).map(Response::RetryJob),
+            Request::ClearFinishedJobs => {
+                self.clear_finished_jobs().map(Response::ClearFinishedJobs)
+            }
             Request::Sources => self.sources().map(Response::Sources),
             Request::SourceSubfolders { source_id, parent } => self
                 .source_subfolders(source_id, parent.as_deref())
@@ -236,16 +276,22 @@ impl Api {
             Request::SetIgnoredFolders { folders } => self
                 .set_ignored_folders(&folders)
                 .map(Response::SetIgnoredFolders),
-            Request::MixLoad { deck, path } => self
-                .mix
-                .load(deck_id(deck), Path::new(&path))
-                .map(|status| Response::MixLoad(mix_state(status)))
-                .map_err(ApiError::audio_failed),
-            Request::MixPlay { deck, playing } => self
-                .mix
-                .play(deck_id(deck), playing)
-                .map(|status| Response::MixPlay(mix_state(status)))
-                .map_err(ApiError::audio_failed),
+            Request::MixLoad { deck, path } => {
+                let status = self
+                    .mix
+                    .load(deck_id(deck), Path::new(&path))
+                    .map_err(ApiError::audio_failed)?;
+                self.jobs.set_mix_live(self.mix.any_deck_playing());
+                Ok(Response::MixLoad(mix_state(status)))
+            }
+            Request::MixPlay { deck, playing } => {
+                let status = self
+                    .mix
+                    .play(deck_id(deck), playing)
+                    .map_err(ApiError::audio_failed)?;
+                self.jobs.set_mix_live(self.mix.any_deck_playing());
+                Ok(Response::MixPlay(mix_state(status)))
+            }
             Request::MixStatus => Ok(Response::MixStatus(mix_state(self.mix.status()))),
             Request::PreviewLoadAndPlay { track_id, start_ms } => self
                 .preview_load_and_play(track_id, start_ms)
@@ -376,38 +422,7 @@ impl Api {
     }
 
     fn scan(&self, folder: &Path) -> Result<ScanReport, ApiError> {
-        let own_files = self.own_files_snapshot();
-        let report = {
-            let mut library = self
-                .core
-                .library
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            let report = resonance_library::scan::scan(&mut library, folder, &own_files)
-                .map_err(ApiError::scan_failed)?;
-            self.reconcile_watchers(&library);
-            report
-        };
-        if report.added > 0 || report.changed > 0 {
-            self.identity.wake();
-        }
-        Ok(ScanReport {
-            source_folder: report.source_folder,
-            found: report.found,
-            added: report.added,
-            changed: report.changed,
-            unchanged: report.unchanged,
-            unreadable_count: report.unreadable.len(),
-            unreadable: report
-                .unreadable
-                .into_iter()
-                .take(REPORTED_UNREADABLE_FILES)
-                .map(|file| UnreadableFile {
-                    path: file.path,
-                    reason: file.reason,
-                })
-                .collect(),
-        })
+        self.run_scan_job(folder)
     }
 
     fn identify(&self) -> Result<IdentifyReport, ApiError> {
