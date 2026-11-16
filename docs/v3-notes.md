@@ -1,6 +1,6 @@
 # Notes from DUBPLATE v3
 
-Read on 12 November 2026 from `D:\Music\ZMusic Manager` and a scratch copy of `%APPDATA%\com.bradd.v3\library.db`. Nothing there was changed and no code was copied. v3 is reference only. Nothing is migrated from it.
+Read on 12 November 2026 from the earlier v3 working tree and a scratch copy of its SQLite database. Nothing there was changed and no code was copied. v3 is reference only. Nothing is migrated from it.
 
 ## What v3 was
 
@@ -30,7 +30,7 @@ Each of these is a reason for a choice in [architecture.md](architecture.md) or 
 3. Rules lived in the UI. The set generator, transition scoring and two different Camelot modules were TypeScript. The two Camelot modules disagreed and both had bugs. The Rust `/sets/generate` route was a stub.
 4. Things looked finished that weren't. `AUDIT_REPORT.md` lists them: eleven analysis columns that were always NULL but shown in the UI, a compatibility percentage that painted one number across four axes, random jitter in set scoring, and a grid described as per-beat that was one tempo and one anchor. In the database today, 2,805 tracks have analysis, 723 of them have loudness and 431 have a per-beat grid. Results from five analyser versions sit side by side, because nothing re-ran analysis when the analyser changed.
 5. A path was the identity. `track.path` was unique, every rename or move had to repoint the row, and a file renamed outside the app became one missing track and one new one. Duplicate detection was limited to a single crate so the same track in two folders would not be flagged.
-6. `D:/Music` was hard-coded as the default music root in three places and `D:/Downloads/DUBPLATE-exports` as an export folder.
+6. A drive path was hard-coded as the default music root in three places and a Downloads subfolder as the export folder.
 7. Quarantine folders sat inside the library. The scanner skipped `_replaced` only, so files in `_converted_originals` and `_trash` could be scanned back in as tracks.
 8. The journal could not account for the disk. One table, `export_action_journal`, served every file operation and carried Organise-only columns that other callers filled with placeholders. It holds two rows today, both renames, while 236 quarantined files sit on disk from earlier builds. Tag edits updated the database first and did not roll back if the file write failed.
 9. API tokens were stored as plain text in the `app_kv` table.
@@ -114,9 +114,9 @@ In its own folders:
 
 | Where | What |
 | --- | --- |
-| `%APPDATA%\com.bradd.v3\library.db`, `-wal`, `-shm` | The database |
-| `%LOCALAPPDATA%\com.bradd.v3\EBWebView\` | WebView2 profile and caches |
-| `D:\Music\ZMusic Manager\v3\src-tauri\target\`, `v3\dist\`, `DUBPLATE\` | Build output and the portable app folder |
+| `%APPDATA%\<v3-app-id>\library.db`, `-wal`, `-shm` | The database |
+| `%LOCALAPPDATA%\<v3-app-id>\EBWebView\` | WebView2 profile and caches |
+| `v3\src-tauri\target\`, `v3\dist\`, `DUBPLATE\` | Build output and the portable app folder |
 | `%TEMP%\dubplate_*` | Database copies made by its export tools, removed afterwards |
 
 In the music library:
@@ -142,26 +142,11 @@ Elsewhere:
 | Where | What |
 | --- | --- |
 | The Downloads folder | Analysis, evidence, review, cluster, plan and audit exports as CSV or JSON, and set playlists as `.m3u8` with a `.m3u` beside it |
-| `D:\Downloads\DUBPLATE-exports\<plan id>\` | Move plans and export packages. The folder does not exist today. |
+| A hard-coded Downloads export subfolder | Move plans and export packages |
 | The Recycle Bin | Tidy sent the contents of a quarantine folder there |
 
-## What is on disk now
+## Quarantine and folder rules for Resonance
 
-For the clean-up at 1.0. Sizes measured on 12 November 2026.
+Because v3 placed `_converted_originals`, `_replaced`, `_trash` and `_wrong_match` inside watched music folders rather than under `%APPDATA%`, Resonance's scanner ignore rule matches those four names at any depth by default so quarantined originals and replaced files are never scanned back in as live tracks.
 
-| Path | Files | Size |
-| --- | --- | --- |
-| `D:\Music\ZMusic Manager` | | 8.7 GB, of which `v3\src-tauri\target` is 8.2 GB |
-| `%APPDATA%\com.bradd.v3` | 5 | 106 MB, including `library.db.bak-20260628-173134` and its `-wal`, which no code I found creates |
-| `%LOCALAPPDATA%\com.bradd.v3` | | 121 MB |
-| `D:\Music\Unsorted\_converted_originals` | 197 | 6.4 GB |
-| `D:\Music\New\_converted_originals` | 23 | 1.3 GB |
-| `D:\Music\House\_replaced` | 15 | 120 MB |
-| `D:\Music\Unsorted\_trash` | 1 | 4.7 MB |
-| `D:\Music\_converted_originals\intake` | 0 | empty |
-
-The quarantine folders are inside source folders, so Resonance's ignore rule has to match those four names at any depth.
-
-## The library, as measured
-
-Outside the quarantine folders, `RESONANCE` and `ZMusic Manager`, `D:\Music` holds 7,268 audio files in 113 GB: 6,126 MP3, 584 AIFF, 370 WAV, 130 FLAC and 58 M4A. The biggest folders are `Albums` (3,104 files), `Unsorted` (1,147) and `Old Music` (999). `D:\Music` also contains `rekordbox`, `PioneerDJ` and `MusicBee` folders, which the scanner and the library adapters will meet.
+Real DJ libraries mix MP3, AIFF, WAV, FLAC and M4A across thousands of files and often keep `rekordbox`, `PioneerDJ` and `MusicBee` folders inside the same music root, which the scanner and the library adapters will meet.

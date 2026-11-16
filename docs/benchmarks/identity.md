@@ -10,11 +10,11 @@ Machine: ROG Zephyrus G16, Core Ultra 9 285H (16 logical cores), 64 GB RAM, Wind
 
 ## Lossless equivalence
 
-`05. Hurricane.flac` from `fixtures-local/` was transcoded with `ffmpeg` `8.1` to 24-bit WAV (`pcm_s24le`), 24-bit AIFF (`pcm_s24be`) and ALAC `.m4a` (`alac`). All four files had different `byte_hash` values and produced the same `audio_hash` (`647b4d38bda09bfc7c2c2955301ea24233640379abc318b68d8c329120d6078f`). Automated tests in `crates/library/tests/identity.rs` also check 16-bit WAV, 24-bit zero-padded WAV, AIFF, FLAC and a FLAC copy retagged with cover art.
+A 24-bit FLAC track from `fixtures-local/` was transcoded with `ffmpeg` `8.1` to 24-bit WAV (`pcm_s24le`), 24-bit AIFF (`pcm_s24be`) and ALAC `.m4a` (`alac`). All four files had different `byte_hash` values and produced the same `audio_hash` (`647b4d38bda09bfc7c2c2955301ea24233640379abc318b68d8c329120d6078f`). Automated tests in `crates/library/tests/identity.rs` also check 16-bit WAV, 24-bit zero-padded WAV, AIFF, FLAC and a FLAC copy retagged with cover art.
 
 ## Parity with `fpcalc`
 
-`compute_identity` decoded and fingerprinted all 50 tracks. Official `fpcalc` `1.5.1` decoded 49 and failed on `Unknown Artist - Milk House-1.m4a`, which carries a leading ID3v2 block ahead of its MP4 `ftyp` atom; `open_audio_reader` steps past that header before probing.
+`compute_identity` decoded and fingerprinted all 50 tracks. Official `fpcalc` `1.5.1` decoded 49 and failed on one `.m4a` track in `fixtures-local/` that carries a leading ID3v2 block ahead of its MP4 `ftyp` atom; `open_audio_reader` steps past that header before probing.
 
 Across the 49 tracks both tools decoded:
 

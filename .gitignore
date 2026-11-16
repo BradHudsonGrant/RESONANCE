@@ -16,8 +16,18 @@ fixtures-local/
 *.aif
 *.aiff
 *.m4a
+*.aac
+*.alac
 *.ogg
 *.opus
+*.wma
+
+# Databases and local DJ library sandboxes
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
 
 # Model weights download on first use
 *.onnx
@@ -36,6 +46,10 @@ fixtures-local/
 # Secrets
 .env
 .env.*
+*.pem
+*.key
+*.pfx
+*.p12
 
 # OS and editor files
 Thumbs.db

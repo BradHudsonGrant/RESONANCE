@@ -7,7 +7,7 @@ Machine: ROG Zephyrus G16, Core Ultra 9 285H, 64 GB RAM, Windows 11 Pro.
 The 3.35 MiB Windows installer installed the app at `%LOCALAPPDATA%\Resonance\resonance-app.exe`.
 
 - The first launch showed an empty library.
-- The scan form read `D:\Music\RESONANCE\fixtures-local` and reported `50 files: 50 added, 0 changed, 0 unchanged`. The table showed 50 tracks.
+- The scan form read `fixtures-local` and reported `50 files: 50 added, 0 changed, 0 unchanged`. The table showed 50 tracks.
 - Closing and reopening the installed app kept all 50 tracks.
 
 Uninstall behaviour was not tested.
@@ -25,7 +25,7 @@ The [cold-start budget](../architecture.md#performance-budgets) remains open. A 
 `Resonance_0.1.0_x64-setup.exe` (3.76 MiB, `sha256:83f5ccbf9a4e48ecbc6f78052a52f539e152dd842e97856b9761597b6d0a9007`) was downloaded from the published [`v0.1.0` pre-release](https://github.com/BradHudsonGrant/RESONANCE/releases/tag/v0.1.0) into `target/release-check` and installed in current-user mode at `%LOCALAPPDATA%\Resonance\resonance-app.exe` (13.44 MiB).
 
 - Launched against a fresh data folder, the window showed the empty library state (`No tracks yet`).
-- Scanning `D:\Music\RESONANCE\fixtures-local` through the scan form filled the track table with all 50 tracks (`50 tracks`, `aria-rowcount=51`).
+- Scanning `fixtures-local` through the scan form filled the track table with all 50 tracks (`50 tracks`, `aria-rowcount=51`).
 - Closing and reopening the installed app kept all 50 tracks in the table.
 
 ## 15 November 2026, M1 startup UI-thread trace and cold start
@@ -68,5 +68,5 @@ Cold start (**0.42 s** at the longest of five launches, under `1.5 s`), idle mem
 `Resonance_0.2.0_x64-setup.exe` (3.78 MiB, `sha256:f67e9bfd2e9bb2baf6c84d16a4f2f7efe2ecf167bbd31afc2b77ff0520cb33d9`) was downloaded from the published [`v0.2.0` pre-release](https://github.com/BradHudsonGrant/RESONANCE/releases/tag/v0.2.0) and installed in current-user mode at `%LOCALAPPDATA%\Resonance\resonance-app.exe` (13.46 MiB).
 
 - Launched against a fresh data folder, the window showed the empty library state (`No tracks yet`).
-- Scanning `D:\Music\RESONANCE\fixtures-local` through the scan form reported `50 files: 50 added, 0 changed, 0 unchanged.` and filled the track grid with all 50 tracks (`50 tracks`, `aria-rowcount=51`).
+- Scanning `fixtures-local` through the scan form reported `50 files: 50 added, 0 changed, 0 unchanged.` and filled the track grid with all 50 tracks (`50 tracks`, `aria-rowcount=51`).
 - Closing and reopening the installed app kept all 50 tracks in the grid (`aria-rowcount=51`).

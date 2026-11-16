@@ -7,8 +7,8 @@ export CARGO_HOME := justfile_directory() / "target/cargo-home"
 export NPM_CONFIG_CACHE := justfile_directory() / "target/npm-cache"
 
 # Format check, lint, licence check, tests, build, and the attribution check
-verify: ui-verify fmt-check lint licences test bindings-current build e2e notices-current version-current attribution
-    @echo "verify passed: format, clippy, typos, licences, tests, bindings, build, browser tests, ui, notices, version, attribution"
+verify: ui-verify fmt-check lint licences test bindings-current build e2e notices-current version-current repo-safety attribution
+    @echo "verify passed: format, clippy, typos, licences, tests, bindings, build, browser tests, ui, notices, version, repo-safety, attribution"
 
 fmt-check:
     cargo fmt --all --check
@@ -101,6 +101,10 @@ version new:
 
 version-current:
     node ui/dev/version.ts
+
+# Fail if audio, databases, model weights, binaries, secrets or machine paths are tracked in git
+repo-safety:
+    node ui/dev/repo-safety.ts
 
 # CHANGELOG.md from the commit history. Pass the tag about to be made, such as v0.2.0, to head the newest changes with it.
 changelog tag="":

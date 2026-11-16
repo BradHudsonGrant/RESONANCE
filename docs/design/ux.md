@@ -1,6 +1,6 @@
 # Structure, layout and interaction
 
-The two concept boards in `handoff/` are the design target, with `concept-dark.png` leading ([ADR 0012](../adr/0012-concept-boards-as-design-target.md)). This page says where each job lives, how the window is laid out at every size and how the app behaves. The look is in [visual-language.md](visual-language.md), the components in [components.md](components.md), and each region in [shell.md](shell.md), [library.md](library.md) and [mix.md](mix.md).
+The two concept boards are the design target, with `concept-dark.png` leading ([ADR 0012](../adr/0012-concept-boards-as-design-target.md)). This page says where each job lives, how the window is laid out at every size and how the app behaves. The look is in [visual-language.md](visual-language.md), the components in [components.md](components.md), and each region in [shell.md](shell.md), [library.md](library.md) and [mix.md](mix.md).
 
 ## Structure
 

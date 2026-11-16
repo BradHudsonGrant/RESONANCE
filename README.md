@@ -21,17 +21,17 @@ Most DJs will keep playing on their own hardware. Resonance is where they prepar
 ## What works today
 
 - Watched music folders with per-subfolder toggles and an editable ignore list (`SourcesSettings.svelte` and `notify` filesystem watching), scanning read-only into SQLite (`WAL` mode) across MP3, FLAC, WAV, AIFF and M4A (`AAC` and `ALAC`, including files carrying stray leading ID3v2 headers).
-- Track and asset identity by BLAKE3 byte hash, full-scale `i32` decoded-audio hash (`symphonia` gapless + stream checksum verification) and 120-second Chromaprint (`rusty-chromaprint`), keeping track identity intact when files are renamed, moved or retagged outside the app.
-- Virtualised library table holding 100,000 tracks at a 4.2 ms median frame (240 Hz, 0 frames over 16 ms) and a 0.42 s warm cold start in the native desktop shell.
-- Track inspector showing seeded dot-wave artwork, tags, Camelot key, format specs and file location, collapsing to a drawer on narrow windows.
+- Track and asset identity by BLAKE3 byte hash, full-scale `i32` decoded-audio hash (`symphonia` gapless + stream checksum verification) and 120-second Chromaprint (`rusty-chromaprint`), keeping track identity intact when files are renamed, moved or retagged outside the app, with missing-file flagging and one-click or manual relinking across moved or re-encoded copies.
+- Instant SQLite `FTS5` text search, filter drawer (`BPM`, key, year, label, format and missing files), quick pills (`All tracks`, `Favourites`, `Recent`), sortable columns and manual `track_id`-keyed collections across a virtualised 100,000-track table (`4.2 ms` median frame at 240 Hz, `<= 25.4 ms` p95 search and filter queries, `0.42 s` warm cold start).
+- Track preview playback in `PlayerBar` (`rubato` sinc resampler feeding a lock-free ring buffer with a 5 ms ramp, interactive `ScrubBar` seeking and automatic Mix handoff), alongside a track inspector showing seeded dot-wave artwork, tags, Camelot key, format specs and file location.
 - Two-deck Mix view playing audio through WASAPI with scrolling WebGL2 peak and RMS waveforms, binary playhead and meter telemetry, and 0 audio underruns across three-minute full-window runs.
-- Full M1 design system in dark, light and Windows high-contrast themes (`tokens.css` and 25 Svelte 5 primitives, shown side by side at `/design.html`), keyboard navigation (`Ctrl+K`, `1`–`5`, `[`, `I`, `D`, arrow and selection keys), and browser hot reload against a local Rust core without rebuilding Rust for UI changes.
+- Full M1 design system in dark, light and Windows high-contrast themes (`tokens.css` and 25 Svelte 5 primitives, shown side by side at `/design.html`), keyboard navigation (`Ctrl+K`, `1`–`5`, `[`, `I`, `D`, `Space`, `C`, arrow and selection keys), and browser hot reload against a local Rust core without rebuilding Rust for UI changes.
 
 ## Status
 
-`M0 Foundations` (`v0.1.0`) and `M1 Design` (`v0.2.0`) are complete, and `M2 Library` (`v0.3.0`) is underway: watched source folders with subfolder toggles (`#81`) and decoded-audio hash + Chromaprint identity (`#83`) have landed on `master`, with FTS5 text search and filters, collections, preview playback, missing-file relinking and the persistent Activity queue up next.
+`M0 Foundations` (`v0.1.0`) and `M1 Design` (`v0.2.0`) are complete, and `M2 Library` (`v0.3.0`) is nearly done: watched source folders with subfolder toggles (`#81`), decoded-audio hash and Chromaprint identity (`#83`), `FTS5` search, filters and column sort (`#91`), manual collections (`#94`), preview playback (`#97`), and missing-file relinking (`#98`) have all landed on `master`, leaving the persistent Activity job queue (`#90`) and the remaining M2 budgets (`#55`, `#47`) before `v0.3.0`.
 
-After `M2`, the roadmap builds identification and tag writing (`M3`), quality checks and seamless file replacement (`M4`), beat/key/energy/phrase analysis (`M5`), similarity and natural-language discovery (`M6`), full deck controls and hardware mappings (`M7`), live mix coaching (`M8`), session replay (`M9`), set building (`M10`), rekordbox and Engine DJ library sync (`M11`), and stems (`M12`). Every checklist item and its evidence live in [docs/roadmap.md](docs/roadmap.md).
+After `M2`, the roadmap builds identification and tag writing (`M3`), quality checks and journaled file replacement (`M4`), beat/key/energy/phrase analysis (`M5`), similarity and natural-language discovery (`M6`), full deck controls and hardware mappings (`M7`), live mix coaching (`M8`), session replay (`M9`), set building (`M10`), rekordbox and Engine DJ library sync (`M11`), and stems (`M12`). Every checklist item and its evidence live in [docs/roadmap.md](docs/roadmap.md).
 
 ## Install
 
@@ -124,4 +124,6 @@ Rust workspace (`core`, `db`, `library`, `engine`, `api`, `cli`, `fixtures`), Ta
 
 ## Licence
 
-The code is not yet licensed for reuse. A licence comes if and when the repository becomes public; every third-party dependency is permissive (`MIT`, `Apache-2.0`, `BSD`, `ISC`, `Zlib`, `MPL-2.0`), enforced by `cargo-deny` in CI.
+Released under the [MIT Licence](LICENSE) ([ADR 0014](docs/adr/0014-open-source-under-mit.md)). Every runtime dependency is permissive (`MIT`, `Apache-2.0`, `BSD`, `ISC`, `Zlib`, `MPL-2.0`, `CC0-1.0`), enforced by `cargo-deny` in CI and bundled in [app/THIRD-PARTY-NOTICES.txt](app/THIRD-PARTY-NOTICES.txt).
+
+Resonance is built and maintained solo; external pull requests are not accepted.

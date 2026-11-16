@@ -1,6 +1,6 @@
 # 0005: Licence policy
 
-Date: 12 November 2026. Status: accepted.
+Date: 12 November 2026. Status: accepted. Updated on 16 November 2026 ([ADR 0014](0014-open-source-under-mit.md)): the repository is now public under the MIT licence; the dependency and model rules below remain in force.
 
 ## Context
 
@@ -13,7 +13,7 @@ The repo is private and has no licence yet. The source may be opened later, or t
 - `cargo-deny` enforces this in CI and in `just verify`.
 - Model weights with non-commercial licences are opt-in downloads with the licence shown. The default set must be usable commercially.
 - The installer carries a generated third-party notices file.
-- No LICENSE file while the repo is private. The README says the code is not yet licensed for reuse.
+- No LICENSE file while the repo was private; [ADR 0014](0014-open-source-under-mit.md) adds the MIT `LICENSE` on opening the repository.
 
 ## Why
 

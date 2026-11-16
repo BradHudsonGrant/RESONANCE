@@ -4,6 +4,7 @@ description = "The command layer: typed commands, and the local socket that serv
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 publish.workspace = true
 
 [dependencies]

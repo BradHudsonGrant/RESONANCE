@@ -1,6 +1,6 @@
 # Contributing
 
-How work gets into this repo. Everything below is a requirement.
+Resonance is built and maintained solo, and external pull requests are not accepted ([ADR 0014](docs/adr/0014-open-source-under-mit.md)). This page records the rules the repository follows so anyone reading or building the code can see how changes are made and verified. Everything below is a requirement.
 
 ## Code
 
@@ -33,6 +33,12 @@ The repo has a README (what it is, a screenshot, status, install, build, licence
 
 Write plainly: say what the thing does and why. Avoid "robust", "seamless", "comprehensive", "powerful", lists of three for rhythm, bold used as decoration, and closing lines that sum up what was just said.
 
+## Public repository safety
+
+- Test audio is generated from maths in `crates/fixtures`. Never commit copyrighted audio, embedded album artwork, recorded mixes, or screenshots showing real tracks or cover art; screenshots in `docs/` and pull requests use `just synthetic-library` or generated fixtures only.
+- Never commit SQLite databases (`*.db`, `*.sqlite`), real `rekordbox`, `Engine DJ`, `Serato` or `Traktor` library files, raw HTTP captures containing headers or tokens, or paths naming a local user profile or checkout folder.
+- Never commit third-party encryption keys (such as `rekordbox` `master.db` SQLCipher keys), firmware blobs, or controller mappings copied from copyleft projects. `just repo-safety` (part of `just verify`) checks every tracked path and file in git.
+
 ## Done means
 
 A change is done when it is merged through a PR, CI is green, `just verify` passes on the laptop, the behaviour has a test, the docs that describe it are updated, and nothing in it is a stub.
@@ -55,17 +61,11 @@ A local `commit-msg` hook rejects a message that carries a co-author trailer or 
 
 ## Repository
 
-```
-gh repo create BradHudsonGrant/RESONANCE --private \
-  --description "Music library manager and DJ practice tool: tagging, analysis, mixing and live coaching."
-git branch -M master
-```
+Public repository on GitHub (`BradHudsonGrant/RESONANCE`), default branch `master`, licensed under [MIT](LICENSE) ([ADR 0005](docs/adr/0005-licence-policy.md), [ADR 0014](docs/adr/0014-open-source-under-mit.md)).
 
-Then set, with `gh repo edit` (check `--help`, flags change): squash merge on, merge commits and rebase merges off, delete branch on merge, wiki off, issues on, and topics `dj`, `music-library`, `audio-analysis`, `tauri`, `rust`, `svelte`.
+Repository settings: squash merge on, merge commits and rebase merges off, delete branch on merge, wiki off, issues on, and topics `dj`, `music-library`, `audio-analysis`, `tauri`, `rust`, `svelte`.
 
-The GitHub account is on the Free plan, which has no branch protection or rulesets for private repositories. So add `.git/hooks/pre-push` that refuses a push to `refs/heads/master`. Changes reach `master` only through `gh pr merge --squash`. If the repo goes public later, add a ruleset as well: PR required, status checks required, linear history, no force pushes.
-
-No LICENSE file while the repo is private. The README says the code is not yet licensed for reuse. The licence is chosen when the repo goes public, and the licence policy in [docs/adr/0005-licence-policy.md](docs/adr/0005-licence-policy.md) keeps both options open.
+`master` is protected by a GitHub branch ruleset (pull request required, `verify` status check required, linear history, no force pushes, no deletion) and by a local `.git/hooks/pre-push` hook that refuses direct pushes to `refs/heads/master`. Changes reach `master` only through `gh pr merge --squash`. Repository interaction limits restrict issues and pull requests to collaborators while solo development continues.
 
 ## Branches, commits and PRs
 
@@ -86,8 +86,6 @@ SemVer, 0.x until 1.0. One minor version per milestone, patch versions for fixes
 To release: open `chore/release-vX.Y.Z`, set the version with `just version X.Y.Z`, write `CHANGELOG.md` with `just changelog vX.Y.Z`, merge the PR, tag `vX.Y.Z` on `master`. `just verify` fails if the version files disagree, and the release workflow fails if the tag does not match them. The tag triggers a workflow that builds the Windows installer and drafts a GitHub Release. Edit the notes for a human reader, then publish. Mark 0.x releases as pre-releases.
 
 ## CI
-
-The Free plan includes 2,000 Actions minutes a month for private repositories, and Windows runners use them at double rate.
 
 - On every PR, on `ubuntu-latest` with caching: format, lint, `cargo-deny`, tests for the platform-neutral crates, UI lint, type check and tests.
 - On tags, on `windows-latest`: full build, tests, installer.
