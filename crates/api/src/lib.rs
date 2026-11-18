@@ -5,6 +5,7 @@ pub mod error;
 mod identity;
 mod jobs;
 pub mod mix_frame;
+mod online;
 mod providers;
 mod relink;
 pub mod serve;
@@ -31,6 +32,8 @@ use resonance_core::search::{
 use resonance_db::{Database, TrackRow};
 use resonance_engine::{DeckId, Mix, MixStatus, PreviewStatus};
 use resonance_identify::credentials::CredentialStore;
+use resonance_identify::http::{HttpClient, NetworkClient};
+use resonance_identify::pipeline::Pipeline;
 use resonance_jobs::JobRunner;
 use resonance_library::watch::SourceWatcher;
 use sources::reconcile_watchers_for;
@@ -55,6 +58,8 @@ pub(crate) struct LibraryCore {
     pub(crate) watch_revisions: watch::Sender<u64>,
     pub(crate) scan_outcomes: Mutex<HashMap<i64, Result<ScanReport, ApiError>>>,
     pub(crate) jobs: OnceLock<Weak<JobRunner>>,
+    /// Rebuilt when the credential store or HTTP client changes.
+    pub(crate) pipeline: Mutex<Arc<Pipeline>>,
 }
 
 /// Everything the commands act on. The Tauri shell and the local socket each hold one.
@@ -65,6 +70,7 @@ pub struct Api {
     pub(crate) core: Arc<LibraryCore>,
     preview_meta: Mutex<Option<PreviewTrackMeta>>,
     credentials: Arc<dyn CredentialStore>,
+    http: Arc<dyn HttpClient>,
 }
 
 impl Api {
@@ -84,6 +90,8 @@ impl Api {
     fn build(library: Database, quiet_window: Option<Duration>, silent: bool) -> Self {
         let (watch_revisions, _) = watch::channel(0u64);
         let database = Arc::new(Mutex::new(library));
+        let credentials = providers::default_credential_store();
+        let http: Arc<dyn HttpClient> = Arc::new(NetworkClient::new());
         let core = Arc::new(LibraryCore {
             library: Arc::clone(&database),
             identify_pass: Mutex::new(()),
@@ -91,6 +99,7 @@ impl Api {
             watch_revisions,
             scan_outcomes: Mutex::new(HashMap::new()),
             jobs: OnceLock::new(),
+            pipeline: Mutex::new(online::pipeline(&http, &database, &credentials)),
         });
         let mix = Arc::new(if silent {
             Mix::new_silent()
@@ -151,7 +160,8 @@ impl Api {
             mix,
             core,
             preview_meta: Mutex::new(None),
-            credentials: providers::default_credential_store(),
+            credentials,
+            http,
         };
         {
             let guard = api
@@ -194,7 +204,24 @@ impl Api {
     /// Keeps provider keys somewhere other than the OS credential store, for tests.
     pub fn with_credential_store(mut self, store: Arc<dyn CredentialStore>) -> Self {
         self.credentials = store;
+        self.rebuild_pipeline();
         self
+    }
+
+    /// Answers provider requests from somewhere other than the network, for tests.
+    pub fn with_http_client(mut self, http: Arc<dyn HttpClient>) -> Self {
+        self.http = http;
+        self.rebuild_pipeline();
+        self
+    }
+
+    fn rebuild_pipeline(&self) {
+        let rebuilt = online::pipeline(&self.http, &self.core.library, &self.credentials);
+        *self
+            .core
+            .pipeline
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = rebuilt;
     }
 
     /// Keeps a source scan out of the folder holding the app's data.
@@ -262,6 +289,12 @@ impl Api {
             Request::LibraryFacets => self.library_facets().map(Response::LibraryFacets),
             Request::Scan { folder } => self.scan(Path::new(&folder)).map(Response::Scan),
             Request::Identify => self.identify().map(Response::Identify),
+            Request::IdentifyOnline { track_ids } => self
+                .identify_online(&track_ids)
+                .map(Response::IdentifyOnline),
+            Request::IdentifyWithUrl { track_id, url } => self
+                .identify_with_url(track_id, &url)
+                .map(Response::IdentifyWithUrl),
             Request::JobsSnapshot => self.jobs_snapshot().map(Response::JobsSnapshot),
             Request::CancelJob { job_id } => self.cancel_job(job_id).map(Response::CancelJob),
             Request::RetryJob { job_id } => self.retry_job(job_id).map(Response::RetryJob),

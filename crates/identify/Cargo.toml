@@ -1,6 +1,6 @@
 [package]
 name = "resonance-identify"
-description = "Provider lookups for identification, and the keys they need from the OS credential store."
+description = "Identification: the six-step cascade, metadata providers, and the keys they need from the OS credential store."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,7 +9,11 @@ publish.workspace = true
 
 [dependencies]
 resonance-core.workspace = true
+resonance-db.workspace = true
+blake3.workspace = true
 keyring-core.workspace = true
+serde_json.workspace = true
+ureq.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-native-keyring-store.workspace = true

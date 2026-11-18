@@ -25,7 +25,7 @@ fn to_core(kind: ProviderKeyKind) -> ProviderKey {
     }
 }
 
-fn to_command(key: ProviderKey) -> ProviderKeyKind {
+pub(crate) fn to_command(key: ProviderKey) -> ProviderKeyKind {
     match key {
         ProviderKey::AcoustId => ProviderKeyKind::AcoustId,
         ProviderKey::Discogs => ProviderKeyKind::Discogs,

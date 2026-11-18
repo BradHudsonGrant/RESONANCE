@@ -16,6 +16,7 @@ resonance-api.workspace = true
 resonance-core.workspace = true
 resonance-db.workspace = true
 resonance-engine.workspace = true
+resonance-identify.workspace = true
 resonance-library.workspace = true
 clap.workspace = true
 serde.workspace = true
