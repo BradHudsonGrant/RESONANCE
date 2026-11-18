@@ -248,8 +248,9 @@ test('manual collections create, assign via multi-select, inspect, persist and d
 
   await table.getByRole('checkbox', { name: 'Tick Ada Marsh - First Light' }).click();
   await table.getByRole('checkbox', { name: 'Tick Kofi Bell - Third Rail' }).click();
-  await expect(table.getByText('2 selected')).toBeVisible();
-  await table.getByRole('button', { name: 'Add to collection' }).click();
+  const selection = page.getByRole('region', { name: 'Selected tracks' });
+  await expect(selection.getByText('2 selected')).toBeVisible();
+  await selection.getByRole('button', { name: 'Add to collection' }).click();
   await page.getByRole('menuitemcheckbox', { name: /Warm Up/ }).click();
   await expect(warmRow).toContainText('2');
 
@@ -323,6 +324,61 @@ test('manual collections create, assign via multi-select, inspect, persist and d
   await expect(sidebar.getByRole('button', { name: /^Late Night/ })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible();
   await expect(page.getByText('6 tracks', { exact: true })).toBeVisible();
+});
+
+test('selecting, selecting all and clearing never move the table or the selection buttons', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1586, height: 992 });
+  await page.goto('/');
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible({ timeout: 10_000 });
+
+  const table = page.getByRole('grid', { name: 'Tracks' });
+  const selection = page.getByRole('region', { name: 'Selected tracks' });
+  const header = table.locator('.head [role="row"]');
+  const rows = table.locator('.rows [role="row"]');
+  const clickedTick = rows.nth(2).getByRole('checkbox');
+
+  const tableBoxes = async () => ({
+    header: await header.boundingBox(),
+    first: await rows.first().boundingBox(),
+    clicked: await rows.nth(2).boundingBox(),
+  });
+  const buttonBoxes = async () =>
+    Promise.all(
+      ['Select all', 'Add to collection', 'Clear'].map((name) =>
+        selection.getByRole('button', { name }).boundingBox(),
+      ),
+    );
+
+  const before = await tableBoxes();
+  expect(before.header && before.first && before.clicked).toBeTruthy();
+
+  await clickedTick.click();
+  await expect(selection.getByText('1 selected')).toBeVisible();
+  expect(await tableBoxes()).toEqual(before);
+  const buttonsBefore = await buttonBoxes();
+
+  await selection.getByRole('button', { name: 'Select all' }).click();
+  await expect(selection.getByText('6 selected')).toBeVisible();
+  await expect(selection.getByRole('button', { name: 'Select all' })).toHaveAttribute(
+    'aria-disabled',
+    'true',
+  );
+  expect(await tableBoxes()).toEqual(before);
+  expect(await buttonBoxes()).toEqual(buttonsBefore);
+
+  await selection.getByRole('button', { name: 'Clear' }).click();
+  await expect(selection).toBeHidden();
+  await expect(page.getByRole('toolbar', { name: 'Track filters' })).toBeVisible();
+  expect(await tableBoxes()).toEqual(before);
+  await expect(table).toBeFocused();
+
+  await clickedTick.click();
+  await expect(selection.getByText('1 selected')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(selection).toBeHidden();
+  expect(await tableBoxes()).toEqual(before);
 });
 
 test('preview plays from row, Inspector, double-click and Spacebar with PlayerBar seek, volume and Mix pause', async ({
@@ -502,13 +558,14 @@ test('missing files stay in the library and collections, warn on mismatched audi
       inspector.getByRole('button', { name: 'Play Kofi Bell - Third Rail' }),
     ).toBeEnabled();
 
-    // Clicking the selected row again deselects it, Ctrl+A selects all tracks, and Deselect clears all.
+    // Clicking the selected row again deselects it, Ctrl+A selects all tracks, and Clear clears all.
     await table.getByText('Kofi Bell - Third Rail').click();
     await expect(inspector).toContainText('Select a track in the table');
     await page.keyboard.press('Control+a');
-    await expect(table.getByText('6 selected')).toBeVisible();
-    await table.getByRole('button', { name: 'Deselect' }).click();
-    await expect(table.getByRole('region', { name: 'Selected tracks' })).toHaveCount(0);
+    const selection = page.getByRole('region', { name: 'Selected tracks' });
+    await expect(selection.getByText('6 selected')).toBeVisible();
+    await selection.getByRole('button', { name: 'Clear' }).click();
+    await expect(selection).toBeHidden();
     await expect(table.locator('[role="row"][aria-selected="true"]')).toHaveCount(0);
   } finally {
     if (!existsSync(originalGarage) && existsSync(relocatedGarage)) {

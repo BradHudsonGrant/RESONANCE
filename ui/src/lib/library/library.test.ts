@@ -351,7 +351,7 @@ describe('Library', () => {
     expect(onopen).toHaveBeenCalledOnce();
   });
 
-  it('deselects on repeat row click, tick box click, Escape or empty space, and supports Select all and Deselect', async () => {
+  it('deselects on repeat row click, tick box click, Escape or empty space, and supports Select all and Clear', async () => {
     const { pages } = fakeLibrary(4);
     await pages.load();
     render(Library, { pages, onscan: vi.fn() });
@@ -378,16 +378,22 @@ describe('Library', () => {
     expect(selectedRows()).toHaveLength(0);
 
     // Select a row, then click another row's tick box -> both rows enter multi-selection,
-    // Select all ticks all 4, and Deselect clears both checked rows and active row selection.
+    // Select all ticks all 4, and Clear clears both checked rows and active row selection.
     await fireEvent.click(rows()[1]!);
     await fireEvent.click(within(rows()[3]!).getByRole('checkbox', { name: 'Tick Track 2' }));
     expect(screen.getByText('2 selected')).toBeTruthy();
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Select all' }));
+    const selectAll = screen.getByRole('button', { name: 'Select all' });
+    expect(selectAll.getAttribute('aria-disabled')).toBe('false');
+    await fireEvent.click(selectAll);
     expect(screen.getByText('4 selected')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Select all' })).toBeNull();
+    // It stays in place, disabled, so the buttons beside it do not shift.
+    expect(screen.getByRole('button', { name: 'Select all' })).toBe(selectAll);
+    expect(selectAll.getAttribute('aria-disabled')).toBe('true');
+    await fireEvent.click(selectAll);
+    expect(screen.getByText('4 selected')).toBeTruthy();
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Deselect' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
     expect(screen.queryByRole('region', { name: 'Selected tracks' })).toBeNull();
     expect(selectedRows()).toHaveLength(0);
 
@@ -406,6 +412,38 @@ describe('Library', () => {
     await fireEvent.click(viewport);
     expect(screen.queryByRole('region', { name: 'Selected tracks' })).toBeNull();
     expect(selectedRows()).toHaveLength(0);
+  });
+
+  it('swaps the filter pills for the selection actions and clears them with Escape', async () => {
+    const { pages } = fakeLibrary(4);
+    await pages.load();
+    render(Library, { pages, onscan: vi.fn() });
+    const grid = screen.getByRole('grid', { name: 'Tracks' });
+    const pills = screen.getByRole('toolbar', { name: 'Track filters' });
+
+    expect(screen.queryByRole('region', { name: 'Selected tracks' })).toBeNull();
+    expect(pills.hasAttribute('inert')).toBe(false);
+
+    await fireEvent.keyDown(grid, { key: 'ArrowDown' });
+    await fireEvent.keyDown(grid, { key: 'x' });
+    const region = screen.getByRole('region', { name: 'Selected tracks' });
+    expect(within(region).getByText('1 selected').getAttribute('aria-live')).toBe('polite');
+    expect(pills.hasAttribute('inert')).toBe(true);
+
+    // Escape from a selection action clears it and hands focus back to the table.
+    const clear = within(region).getByRole('button', { name: 'Clear' });
+    clear.focus();
+    await fireEvent.keyDown(clear, { key: 'Escape' });
+    expect(screen.queryByRole('region', { name: 'Selected tracks' })).toBeNull();
+    expect(pills.hasAttribute('inert')).toBe(false);
+    expect(document.activeElement).toBe(grid);
+
+    // Escape on the table clears it too.
+    await fireEvent.keyDown(grid, { key: 'ArrowDown' });
+    await fireEvent.keyDown(grid, { key: 'x' });
+    expect(screen.getByText('1 selected')).toBeTruthy();
+    await fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('region', { name: 'Selected tracks' })).toBeNull();
   });
 });
 

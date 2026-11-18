@@ -32,6 +32,15 @@ The table is a container (`container-type: inline-size`), so it drops columns by
 
 A selected row sits on Raised inside a 1 px control border frame with 6 px corners. Its tick box is filled in Text with a dark tick, its status cell shows the play icon, and the 2 px accent mark sits at its left. The accent goes nowhere else on the row.
 
+## Selection actions
+
+Selection never moves the table. While any track is ticked, the selection actions take the place of the filter pills, in the same slot: the count ("3 selected"), Select all, Add to collection, Remove from the open collection, and Clear. When the selection clears, the pills come back. Nothing is inserted above the table, so the header and every row stay where they were and the pointer stays on the row it clicked. No bar, chip row or banner may appear above the table and push it down.
+
+- The pills stay in the layout, hidden, so the slot keeps their height.
+- Select all stays in place and turns disabled once every track is ticked. The count uses tabular figures and a fixed minimum width, so going from 9 to 10 does not move the buttons.
+- Escape clears the selection unless a menu or sheet is open, and focus goes back to the table. The count is a polite live region.
+- In forced colours the actions carry a 2 px Highlight mark at their left, so they read as different from the pills.
+
 ## Inspector
 
 The column on the right, 420 px at the reference size, on Surface with a 1 px border on its left. It has no title bar: it opens straight into the track. Sections are split by inset 1 px dividers.
