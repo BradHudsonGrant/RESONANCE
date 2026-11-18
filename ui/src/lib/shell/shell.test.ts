@@ -558,9 +558,10 @@ describe('SettingsSheet', () => {
     for (const ignored of ['_replaced', '_wrong_match', '_trash', '_converted_originals']) {
       expect(within(dialog).getByText(ignored)).toBeTruthy();
     }
-    expect(within(dialog).getByText('Provider keys')).toBeTruthy();
+    expect(within(dialog).getByText('Providers')).toBeTruthy();
+    expect(within(dialog).getByRole('group', { name: 'AcoustID application key' })).toBeTruthy();
     expect(
-      within(dialog).getByText('Keys for AcoustID, Discogs and paid recognisers arrive in M3.'),
+      within(dialog).getByRole('group', { name: 'Discogs personal access token' }),
     ).toBeTruthy();
     expect(
       within(dialog).getByText('Audio and MIDI device configuration arrives in M7.'),

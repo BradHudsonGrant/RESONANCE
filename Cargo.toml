@@ -5,6 +5,7 @@ members = [
     "crates/db",
     "crates/library",
     "crates/engine",
+    "crates/identify",
     "crates/jobs",
     "crates/api",
     "crates/cli",
@@ -25,6 +26,7 @@ resonance-core = { path = "crates/core" }
 resonance-db = { path = "crates/db" }
 resonance-engine = { path = "crates/engine" }
 resonance-fixtures = { path = "crates/fixtures" }
+resonance-identify = { path = "crates/identify" }
 resonance-jobs = { path = "crates/jobs" }
 resonance-library = { path = "crates/library" }
 # Dual-licensed CC0-1.0 OR Apache-2.0; used under Apache-2.0 (ADR 0005).
@@ -34,6 +36,7 @@ directories = "6.0.0"
 dunce = "1"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 getrandom = "0.4.3"
+keyring-core = "1.0.1"
 lofty = "0.25.5"
 notify = "8.2.2"
 rubato = "0.16.2"
@@ -57,6 +60,10 @@ symphonia = { version = "0.6.1", default-features = false, features = [
 tokio = { version = "1.54.1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-tungstenite = "0.30.0"
 ts-rs = "12.0.1"
+# One OS credential store per target, used through keyring-core (ADR 0016).
+apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }
+windows-native-keyring-store = "1.1.0"
+zbus-secret-service-keyring-store = { version = "1.0.1", features = ["rt-async-io-crypto-rust"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

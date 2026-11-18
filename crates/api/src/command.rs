@@ -158,6 +158,17 @@ pub enum Request {
         #[serde(default)]
         force: bool,
     },
+    /// Which provider keys are saved. The keys themselves never leave the credential store.
+    ProviderKeys,
+    /// Saves a provider key in the OS credential store, replacing any earlier one.
+    SetProviderKey {
+        provider: ProviderKeyKind,
+        value: ProviderKeyValue,
+    },
+    /// Removes a provider key from the OS credential store. Steps that need it are skipped.
+    ClearProviderKey {
+        provider: ProviderKeyKind,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -199,6 +210,41 @@ pub enum Response {
     RelinkCandidates(Vec<RelinkCandidate>),
     PreviewRelink(Box<RelinkPreview>),
     ApplyRelink(Box<LibraryTrack>),
+    ProviderKeys(Vec<ProviderKeyStatus>),
+    SetProviderKey(ProviderKeyStatus),
+    ClearProviderKey(ProviderKeyStatus),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub enum ProviderKeyKind {
+    #[serde(rename = "acoustid")]
+    AcoustId,
+    #[serde(rename = "discogs")]
+    Discogs,
+    #[serde(rename = "audd")]
+    AudD,
+}
+
+/// A key on its way into the credential store. Write-only: it is never serialised, and its
+/// `Debug` output hides the value.
+#[derive(Clone, PartialEq, Eq, Deserialize, TS)]
+#[ts(export, type = "string")]
+pub struct ProviderKeyValue(pub String);
+
+impl std::fmt::Debug for ProviderKeyValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ProviderKeyValue(..)")
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct ProviderKeyStatus {
+    pub provider: ProviderKeyKind,
+    pub configured: bool,
+    /// Paid recognisers, shown apart from the free providers.
+    pub paid: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]

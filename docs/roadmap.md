@@ -105,7 +105,7 @@ Accept:
 - [ ] Filename templates
 - [ ] Artwork
 - [ ] The Prep space
-- [ ] A place in Settings to enter provider keys (AcoustID, Discogs, any paid provider), kept in the OS credential store
+- [x] A place in Settings to enter provider keys (AcoustID, Discogs, any paid provider), kept in the OS credential store ([#122](https://github.com/BradHudsonGrant/RESONANCE/issues/122)). Evidence: merged in [#123](https://github.com/BradHudsonGrant/RESONANCE/pull/123); the Providers section in Settings saves and clears the AcoustID key, Discogs token and AudD token through `keyring-core` ([ADR 0016](adr/0016-provider-keys-in-the-os-credential-store.md)), replies carry only `configured`, and Rust, Vitest and Playwright tests pass, with a round trip through Windows Credential Manager.
 
 Accept:
 

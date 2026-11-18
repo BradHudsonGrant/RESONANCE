@@ -17,6 +17,7 @@
   import PlayerBar from './lib/shell/PlayerBar.svelte';
   import { PreviewPlayer } from './lib/shell/preview.svelte';
   import SettingsSheet from './lib/shell/SettingsSheet.svelte';
+  import type { ProviderKeysClient } from './lib/shell/ProviderKeysSettings.svelte';
   import Sidebar, { type SpaceName } from './lib/shell/Sidebar.svelte';
   import TopBar from './lib/shell/TopBar.svelte';
   import TransitionDock from './lib/shell/TransitionDock.svelte';
@@ -35,6 +36,11 @@
     updateSource: (params) => core.call('update_source', params),
     removeSource: (source_id) => core.call('remove_source', { source_id }),
     setIgnoredFolders: (folders) => core.call('set_ignored_folders', { folders }),
+  };
+  const providerKeysClient: ProviderKeysClient = {
+    status: () => core.call('provider_keys'),
+    save: (provider, value) => core.call('set_provider_key', { provider, value }),
+    clear: (provider) => core.call('clear_provider_key', { provider }),
   };
   const desktop = isTauri();
   const relinkClient: RelinkClient = {
@@ -609,6 +615,7 @@
   <SettingsSheet
     bind:open={settingsOpen}
     {sourcesClient}
+    {providerKeysClient}
     {sourcesRevision}
     onsourceschanged={() => {
       void pages.refresh();
