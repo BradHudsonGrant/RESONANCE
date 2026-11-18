@@ -2,6 +2,34 @@
 
 Every release, newest first. Made from the commit history with git-cliff.
 
+## 0.3.0, 18 November 2026
+
+### Added
+
+- Add source subfolder toggles and watching ([#81](https://github.com/BradHudsonGrant/RESONANCE/pull/81))
+- Identify tracks by audio hash and fingerprint ([#83](https://github.com/BradHudsonGrant/RESONANCE/pull/83))
+- Add FTS5 search, filter drawer and column sort ([#91](https://github.com/BradHudsonGrant/RESONANCE/pull/91))
+- Add manual collections in sidebar and table ([#94](https://github.com/BradHudsonGrant/RESONANCE/pull/94))
+- Add preview playback in PlayerBar ([#97](https://github.com/BradHudsonGrant/RESONANCE/pull/97))
+- Flag missing files and relink moved copies ([#98](https://github.com/BradHudsonGrant/RESONANCE/pull/98))
+- Add persistent Activity queue and chunked scan ([#101](https://github.com/BradHudsonGrant/RESONANCE/pull/101))
+
+### Fixed
+
+- Coalesce live search and guard asset_fts deletes ([#93](https://github.com/BradHudsonGrant/RESONANCE/pull/93))
+- Move row star off play slot and polish menus ([#96](https://github.com/BradHudsonGrant/RESONANCE/pull/96))
+
+### Faster
+
+- Mount secondary shell regions after the first frame ([#102](https://github.com/BradHudsonGrant/RESONANCE/pull/102))
+- Support 256-sample low-latency audio buffer ([#105](https://github.com/BradHudsonGrant/RESONANCE/pull/105))
+
+### Docs
+
+- Mark M1 v0.2.0 release complete ([#79](https://github.com/BradHudsonGrant/RESONANCE/pull/79))
+- Add grid snapping, DJ cues and crest factor ([#85](https://github.com/BradHudsonGrant/RESONANCE/pull/85))
+- Add MIT licence and prepare public docs ([#100](https://github.com/BradHudsonGrant/RESONANCE/pull/100))
+
 ## 0.2.0, 15 November 2026
 
 ### Added

@@ -4,6 +4,15 @@ Clean and incremental builds of the Rust workspace in the dev profile. `just bui
 
 Machine: Core Ultra 9 285H, 64 GB RAM, Windows 11 Pro, rustc 1.100.0. Real-time antivirus scanning is on and the build folder is inside the repo with no exclusion.
 
+## 18 November 2026, M2 at v0.3.0
+
+| Build | Time |
+| --- | --- |
+| Clean dev build | 131.1 s (138.8, 130.7, 131.1) |
+| After a change in `core` | 4.6 s (4.6, 4.4, 4.6) |
+
+The workspace is now eight crates plus the Tauri shell, with Tauri, `symphonia`, `cpal`, `rusty-chromaprint`, `rubato` and `notify` under it. A change in `core` rebuilds every crate that depends on it and relinks the binaries. The edit-and-reload loop for UI work needs no Rust build, so these figures only bear on core changes.
+
 ## 13 November 2026, M0 with three crates
 
 | Build | Time |
