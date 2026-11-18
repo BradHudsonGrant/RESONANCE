@@ -96,3 +96,11 @@ The change cut the longest startup task by about 10 ms, so it is kept. The budge
 - Launched against a fresh data folder, the window showed the empty library state (`No tracks yet`).
 - Scanning `fixtures-local` through the scan form reported `50 files: 50 added, 0 changed, 0 unchanged.` and filled the track grid with all 50 tracks (`50 tracks`, `aria-rowcount=51`).
 - Closing and reopening the installed app kept all 50 tracks in the grid (`aria-rowcount=51`).
+
+## 18 November 2026, v0.3.0 release installer
+
+`Resonance_0.3.0_x64-setup.exe` (4.55 MiB, `sha256:262f600f8c7048673c43a01699e99ba7ddaf838a522c44edb616d7841754b7fa`) was downloaded from the [`v0.3.0`](https://github.com/BradHudsonGrant/RESONANCE/releases/tag/v0.3.0) release draft and installed silently (`/S`) in current-user mode over `0.2.0`, at `%LOCALAPPDATA%\Resonance\resonance-app.exe` (16.74 MiB, product version `0.3.0`). The release was published as a pre-release after these checks.
+
+- Launched against a fresh data folder, the window showed the empty library state (`No tracks yet`).
+- Scanning `fixtures-local` through the scan form reported `50 files: 50 added, 0 changed, 0 unchanged.` and filled the track grid with all 50 tracks (`50 tracks`, `aria-rowcount=51`).
+- Closing and reopening the installed app kept all 50 tracks in the grid (`aria-rowcount=51`).
