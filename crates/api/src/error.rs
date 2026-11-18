@@ -11,6 +11,7 @@ pub enum ErrorCode {
     LibraryUnreadable,
     ScanFailed,
     AudioFailed,
+    CredentialsUnavailable,
     Internal,
 }
 
@@ -75,6 +76,15 @@ impl ApiError {
             code: ErrorCode::AudioFailed,
             message: format!(
                 "{detail}. Check that an audio output is connected and that the file plays elsewhere, then try again."
+            ),
+        }
+    }
+
+    pub fn credentials_unavailable(detail: impl fmt::Display) -> Self {
+        Self {
+            code: ErrorCode::CredentialsUnavailable,
+            message: format!(
+                "{detail}. Provider keys could not be saved or read, so steps that need them are skipped."
             ),
         }
     }

@@ -203,3 +203,26 @@ test('with forced colours the disabled spaces and scrub tracks stay distinct', a
     );
   expect(track).toBe('solid');
 });
+
+test('a provider key saved in Settings shows as configured, then clears', async ({ page }) => {
+  await open(page, 1586, 992);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  const acoustid = settings.getByRole('group', { name: 'AcoustID application key' });
+  await expect(acoustid.getByText('Not set')).toBeVisible();
+
+  const field = acoustid.getByLabel('AcoustID application key');
+  await expect(field).toHaveAttribute('type', 'password');
+  await field.fill('e2e-test-key');
+  await field.press('Enter');
+  await expect(acoustid.getByText('Configured')).toBeVisible();
+  await expect(field).toHaveValue('');
+
+  await settings.getByRole('button', { name: 'Done' }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(acoustid.getByText('Configured')).toBeVisible();
+
+  await acoustid.getByRole('button', { name: 'Clear AcoustID key' }).click();
+  await expect(acoustid.getByText('Not set')).toBeVisible();
+  await settings.getByRole('button', { name: 'Done' }).click();
+});

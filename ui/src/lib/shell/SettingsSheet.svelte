@@ -6,10 +6,12 @@
   import Sheet from '../design/Sheet.svelte';
   import { getTheme, setTheme, type Theme } from '../design/theme';
   import SourcesSettings, { type SourcesClient } from '../library/SourcesSettings.svelte';
+  import ProviderKeysSettings, { type ProviderKeysClient } from './ProviderKeysSettings.svelte';
 
   interface Props {
     open: boolean;
     sourcesClient?: SourcesClient;
+    providerKeysClient?: ProviderKeysClient;
     sourcesRevision?: number;
     onsourceschanged?: () => void;
   }
@@ -17,6 +19,7 @@
   let {
     open = $bindable(false),
     sourcesClient,
+    providerKeysClient,
     sourcesRevision = 0,
     onsourceschanged,
   }: Props = $props();
@@ -62,9 +65,9 @@
 
     <section class="section">
       <div class="section-head">
-        <MonoLabel text="Provider keys" tone="secondary" />
+        <MonoLabel text="Providers" tone="secondary" />
       </div>
-      <p class="waiting">Keys for AcoustID, Discogs and paid recognisers arrive in M3.</p>
+      <ProviderKeysSettings client={providerKeysClient} active={open} />
     </section>
 
     <ModularDivider />

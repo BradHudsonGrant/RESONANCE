@@ -5,6 +5,7 @@ pub mod error;
 mod identity;
 mod jobs;
 pub mod mix_frame;
+mod providers;
 mod relink;
 pub mod serve;
 mod sources;
@@ -29,6 +30,7 @@ use resonance_core::search::{
 };
 use resonance_db::{Database, TrackRow};
 use resonance_engine::{DeckId, Mix, MixStatus, PreviewStatus};
+use resonance_identify::credentials::CredentialStore;
 use resonance_jobs::JobRunner;
 use resonance_library::watch::SourceWatcher;
 use sources::reconcile_watchers_for;
@@ -62,6 +64,7 @@ pub struct Api {
     mix: Arc<Mix>,
     pub(crate) core: Arc<LibraryCore>,
     preview_meta: Mutex<Option<PreviewTrackMeta>>,
+    credentials: Arc<dyn CredentialStore>,
 }
 
 impl Api {
@@ -148,6 +151,7 @@ impl Api {
             mix,
             core,
             preview_meta: Mutex::new(None),
+            credentials: providers::default_credential_store(),
         };
         {
             let guard = api
@@ -185,6 +189,12 @@ impl Api {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
+    }
+
+    /// Keeps provider keys somewhere other than the OS credential store, for tests.
+    pub fn with_credential_store(mut self, store: Arc<dyn CredentialStore>) -> Self {
+        self.credentials = store;
+        self
     }
 
     /// Keeps a source scan out of the folder holding the app's data.
@@ -340,6 +350,13 @@ impl Api {
                 .apply_relink(track_id, &candidate_path, force)
                 .map(Box::new)
                 .map(Response::ApplyRelink),
+            Request::ProviderKeys => self.provider_keys().map(Response::ProviderKeys),
+            Request::SetProviderKey { provider, value } => self
+                .set_provider_key(provider, &value)
+                .map(Response::SetProviderKey),
+            Request::ClearProviderKey { provider } => self
+                .clear_provider_key(provider)
+                .map(Response::ClearProviderKey),
         }
     }
 

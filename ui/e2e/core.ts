@@ -43,7 +43,7 @@ export default async function startCore(): Promise<() => void> {
     ['--data-folder', join(e2e, 'data'), 'serve', '--connection-file', connectionFile],
     {
       stdio: 'inherit',
-      env: { ...process.env, RESONANCE_SILENT_AUDIO: '1' },
+      env: { ...process.env, RESONANCE_SILENT_AUDIO: '1', RESONANCE_MEMORY_CREDENTIALS: '1' },
     },
   );
   for (let tries = 0; !existsSync(connectionFile); tries++) {
