@@ -594,14 +594,20 @@ describe('App shell', () => {
     vi.restoreAllMocks();
   });
 
+  /** The sidebar, docks and player mount a task after the first frame, as they do at startup. */
+  async function renderApp() {
+    render(App);
+    await screen.findByRole('navigation', { name: 'Spaces' });
+  }
+
   function shell(): HTMLElement {
     const element = document.querySelector<HTMLElement>('.app-shell');
     if (!element) throw new Error('the shell did not render');
     return element;
   }
 
-  it('renders the sidebar, command bar, dock and player', () => {
-    render(App);
+  it('renders the sidebar, command bar, dock and player', async () => {
+    await renderApp();
 
     expect(screen.getByRole('navigation', { name: 'Spaces' })).toBeTruthy();
     expect(screen.getByRole('combobox', { name: 'Commands' })).toBeTruthy();
@@ -610,7 +616,7 @@ describe('App shell', () => {
   });
 
   it('flips the sidebar with [ and the dock with D', async () => {
-    render(App);
+    await renderApp();
 
     await fireEvent.keyDown(window, { key: '[' });
     expect(shell().dataset.sidebar).toBe('collapsed');
@@ -624,7 +630,7 @@ describe('App shell', () => {
   });
 
   it('hides and shows the inspector with I', async () => {
-    render(App);
+    await renderApp();
 
     expect(screen.getByRole('complementary', { name: 'Inspector' })).toBeTruthy();
     await fireEvent.keyDown(window, { key: 'i' });
@@ -634,7 +640,7 @@ describe('App shell', () => {
   });
 
   it('switches between Library and Mix with 1 and 4, and leaves the dock out of Mix', async () => {
-    render(App);
+    await renderApp();
 
     await fireEvent.keyDown(window, { key: '4' });
     expect(screen.getByRole('button', { name: 'Mix' }).getAttribute('aria-current')).toBe('page');
@@ -648,7 +654,7 @@ describe('App shell', () => {
   });
 
   it('ignores shortcuts while a sheet is open', async () => {
-    render(App);
+    await renderApp();
 
     await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     for (const key of ['i', 'd', '[', '4']) await fireEvent.keyDown(window, { key });
@@ -662,7 +668,7 @@ describe('App shell', () => {
   });
 
   it('ignores single-key shell shortcuts while a menu is open', async () => {
-    render(App);
+    await renderApp();
     const menu = document.createElement('div');
     menu.setAttribute('role', 'menu');
     document.body.appendChild(menu);
@@ -754,7 +760,7 @@ describe('App shell', () => {
         return undefined as never;
       });
 
-    render(App);
+    await renderApp();
     const grid = await screen.findByRole('grid', { name: 'Tracks' });
     grid.focus();
     await fireEvent.keyDown(grid, { key: 'ArrowDown' });

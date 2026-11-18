@@ -299,6 +299,21 @@
 
   $effect(() => () => preview.destroy());
 
+  // The library frame mounts and lays out first. The sidebar with its wave, the docks and the
+  // player mount in a task after that frame presents, which keeps the first mount and first
+  // layout smaller and opens the wave's WebGL2 context once the GPU process is less busy.
+  let regionsMounted = $state(false);
+  $effect(() => {
+    let timer = 0;
+    const frame = requestAnimationFrame(() => {
+      timer = window.setTimeout(() => (regionsMounted = true));
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+    };
+  });
+
   let previousSpace: SpaceName = 'Library';
   $effect(() => {
     const next = space;
@@ -437,21 +452,23 @@
   </div>
 
   <div class="sidebar">
-    <Sidebar
-      activeSpace={space}
-      trackCount={pages.state.kind === 'ready' ? pages.libraryTotal : null}
-      wavePaused={space === 'Mix' && mixPlaying}
-      {collections}
-      {activeCollectionId}
-      onSelectSpace={(nextSpace) => (space = nextSpace)}
-      onSelectCollection={selectCollection}
-      onCreateCollection={async (name) => {
-        await createCollection(name);
-      }}
-      onRenameCollection={renameCollection}
-      onDeleteCollection={deleteCollection}
-      onCollapse={(collapsed) => (sidebarChoice = collapsed ? 'collapsed' : 'expanded')}
-    />
+    {#if regionsMounted}
+      <Sidebar
+        activeSpace={space}
+        trackCount={pages.state.kind === 'ready' ? pages.libraryTotal : null}
+        wavePaused={space === 'Mix' && mixPlaying}
+        {collections}
+        {activeCollectionId}
+        onSelectSpace={(nextSpace) => (space = nextSpace)}
+        onSelectCollection={selectCollection}
+        onCreateCollection={async (name) => {
+          await createCollection(name);
+        }}
+        onRenameCollection={renameCollection}
+        onDeleteCollection={deleteCollection}
+        onCollapse={(collapsed) => (sidebarChoice = collapsed ? 'collapsed' : 'expanded')}
+      />
+    {/if}
   </div>
 
   <div class="workspace">
@@ -492,7 +509,7 @@
     </main>
   </div>
 
-  {#if inspectorDocked}
+  {#if inspectorDocked && regionsMounted}
     <div class="inspector-dock">
       <Inspector
         {track}
@@ -512,7 +529,7 @@
   {/if}
 
   <!-- The Mix spike has its own decks and transport until the real decks arrive in M7. -->
-  {#if space !== 'Mix'}
+  {#if space !== 'Mix' && regionsMounted}
     <div class="dock">
       <TransitionDock
         onCollapse={(collapsed) => (dockChoice = collapsed ? 'collapsed' : 'expanded')}
