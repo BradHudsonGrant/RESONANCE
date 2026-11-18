@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use resonance_engine::{DeckId, Device, EngineError, EngineTelemetry, Mix};
+use resonance_engine::{DeckId, Device, EngineError, EngineTelemetry, Mix, OutputMode};
 
 /// Both decks playing through the default output device, counted by the audio callback.
 #[derive(Debug, Clone, PartialEq)]
@@ -29,16 +29,28 @@ impl AudioRun {
     }
 }
 
-pub fn play(tracks: &[PathBuf; 2], seconds: u32) -> Result<AudioRun, EngineError> {
-    let mix = Mix::new();
+/// The decode workers fill a deck's buffer before it plays, as they do when a DJ loads a track
+/// and starts it a moment later.
+const FILL: Duration = Duration::from_secs(1);
+
+/// How often a run prints what the callback counted since the last line, so trouble shows while
+/// it happens rather than at the end.
+const PROGRESS: Duration = Duration::from_secs(10);
+
+/// Plays `tracks` on the two decks for `seconds`. A deck whose track ends loads it again and
+/// plays on, so a run can be longer than its tracks.
+pub fn play(
+    tracks: &[PathBuf; 2],
+    seconds: u32,
+    mode: OutputMode,
+) -> Result<AudioRun, EngineError> {
+    let mix = Mix::with_output_mode(mode);
     let mut device = None;
     for (deck, track) in DeckId::ALL.into_iter().zip(tracks) {
         device = mix.load(deck, track)?.device;
     }
     let device = device.ok_or(EngineError::OutputGone)?;
-    // The decode workers fill each deck's buffer before it plays, as they do when a DJ loads a
-    // track and starts it a moment later.
-    thread::sleep(Duration::from_secs(1));
+    thread::sleep(FILL);
     let before = reading(&mix)?;
     for deck in DeckId::ALL {
         mix.play(deck, true)?;
@@ -50,21 +62,38 @@ pub fn play(tracks: &[PathBuf; 2], seconds: u32) -> Result<AudioRun, EngineError
     let mut fewest = u32::MAX;
     let mut most = 0;
     let mut longest_ns = 0;
+    let mut reported = (Instant::now(), before);
     while started.elapsed() < length {
         thread::sleep(Duration::from_millis(100));
         let Some(telemetry) = mix.telemetry() else {
             return Err(EngineError::OutputGone);
         };
         last = telemetry.engine;
+        if reported.0.elapsed() >= PROGRESS {
+            let since = reported.1;
+            println!(
+                "{:>5.0} s: {} callbacks, {} underruns, {} late, {} starved, {} stream errors",
+                started.elapsed().as_secs_f64(),
+                last.callbacks - since.callbacks,
+                last.underruns - since.underruns,
+                last.late_callbacks - since.late_callbacks,
+                last.starved_callbacks - since.starved_callbacks,
+                last.stream_errors - since.stream_errors
+            );
+            reported = (Instant::now(), last);
+        }
         if last.window_min_frames > 0 {
             fewest = fewest.min(last.window_min_frames);
         }
         most = most.max(last.window_max_frames);
         longest_ns = longest_ns.max(last.window_max_callback_ns);
-        // A track that ends stops its deck, and the run with it.
-        let settled = started.elapsed() > Duration::from_secs(1);
-        if settled && telemetry.decks.iter().any(|deck| !deck.playing) {
-            break;
+        let settled = started.elapsed() > FILL;
+        for ((deck, track), status) in DeckId::ALL.into_iter().zip(tracks).zip(&telemetry.decks) {
+            if settled && !status.playing {
+                mix.load(deck, track)?;
+                thread::sleep(FILL);
+                mix.play(deck, true)?;
+            }
         }
     }
     let seconds = started.elapsed().as_secs_f64();

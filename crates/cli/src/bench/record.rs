@@ -3,6 +3,8 @@
 
 use std::fmt;
 
+use resonance_engine::OutputMode;
+
 use super::audio::AudioRun;
 use super::machine::{Machine, Versions};
 use super::page::{FrameTimes, Memory, PageResults};
@@ -415,6 +417,11 @@ impl fmt::Display for Record<'_> {
         )?;
         writeln!(f, "| | |")?;
         writeln!(f, "| --- | --- |")?;
+        let mode = match audio.device.mode {
+            OutputMode::Exclusive => "Exclusive",
+            OutputMode::Shared => "Shared",
+        };
+        writeln!(f, "| Mode | {mode} |")?;
         writeln!(
             f,
             "| Period | {} frames, {} asked for |",
@@ -595,6 +602,7 @@ mod tests {
                 name: "Speakers".to_owned(),
                 sample_rate: 48_000,
                 channels: 2,
+                mode: OutputMode::Shared,
                 requested_buffer_frames: 256,
                 period_frames,
             },

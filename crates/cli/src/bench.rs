@@ -11,7 +11,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use resonance_engine::EngineError;
+use resonance_engine::{EngineError, OutputMode};
 
 use crate::bench::page::PageResults;
 use crate::bench::record::Record;
@@ -73,7 +73,9 @@ pub fn run(page: &Path, audio_seconds: u32) -> Result<(), BenchError> {
     let versions = machine::versions();
 
     println!("Playing both decks through the audio device for {audio_seconds} s.");
-    let audio = audio::play(&page.mix.tracks, audio_seconds).map_err(BenchError::Audio)?;
+    // The budget is set for exclusive use of the device; the record says which mode it got.
+    let audio = audio::play(&page.mix.tracks, audio_seconds, OutputMode::Exclusive)
+        .map_err(BenchError::Audio)?;
 
     let record = Record {
         machine: &machine,
@@ -93,6 +95,40 @@ pub fn run(page: &Path, audio_seconds: u32) -> Result<(), BenchError> {
         source,
     })?;
     println!("Wrote {}", path.display());
+    Ok(())
+}
+
+/// Plays two tracks for `seconds` and prints what the audio callback counted, without touching
+/// the records. This is how a long stability run is taken.
+pub fn play_audio(tracks: &[PathBuf; 2], seconds: u32, mode: OutputMode) -> Result<(), BenchError> {
+    println!("Playing both decks through the audio device for {seconds} s.");
+    let run = audio::play(tracks, seconds, mode).map_err(BenchError::Audio)?;
+    let device = &run.device;
+    println!(
+        "{}: {:?} mode, {} Hz, {}-frame period ({} asked for), {}-frame buffer",
+        device.name,
+        device.mode,
+        device.sample_rate,
+        device.period_frames,
+        device.requested_buffer_frames,
+        run.buffer_frames
+    );
+    println!(
+        "{:.0} s, {} callbacks of {} to {} frames, longest {:.2} ms",
+        run.seconds,
+        run.callbacks,
+        run.fewest_callback_frames,
+        run.most_callback_frames,
+        run.longest_callback_ms
+    );
+    println!(
+        "Underruns {} ({} frames), late callbacks {}, starved callbacks {}, stream errors {}",
+        run.underruns,
+        run.missing_frames,
+        run.late_callbacks,
+        run.starved_callbacks,
+        run.stream_errors
+    );
     Ok(())
 }
 

@@ -12,7 +12,7 @@ In the stack table, a row marked Fixed is settled. A row marked Default is a rec
 | UI | Svelte 5, TypeScript in strict mode, Vite | Fixed |
 | Core | Rust stable, one Cargo workspace | Fixed |
 | Storage | SQLite in WAL mode (`rusqlite` `0.42`), FTS5 for text; embeddings stored as BLOBs and searched in memory | Settled ([ADR 0003](adr/0003-storage.md), [ADR 0007](adr/0007-scan-and-first-schema.md)) |
-| Audio output | `cpal` `0.18` on WASAPI, ASIO optional | Settled ([ADR 0010](adr/0010-audio-engine-spike.md)) |
+| Audio output | `cpal` `0.18`; on Windows, `wasapi` `0.27` for exclusive and low-latency shared streams | Settled ([ADR 0010](adr/0010-audio-engine-spike.md), [ADR 0015](adr/0015-wasapi-exclusive-output.md)) |
 | Decoding | `symphonia` `0.6.1` (`gapless` and `verify` enabled, with `"alac"` and `"id3v2"`), with an FFmpeg binary for conversion and repair | Settled ([ADR 0004](adr/0004-identity-model.md)) |
 | Time-stretch | Signalsmith Stretch when keylock is on, plain resampling when it is off | Default |
 | Tags | `lofty` `0.25.5` | Settled ([ADR 0007](adr/0007-scan-and-first-schema.md)) |

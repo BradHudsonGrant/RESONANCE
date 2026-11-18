@@ -27,7 +27,7 @@ use crate::preview::{PreviewFeed, PreviewWorker, WorkerRequest};
 use crate::published::{ClockReading, Published};
 
 pub use error::EngineError;
-pub use output::{Device, REQUESTED_BUFFER_FRAMES};
+pub use output::{Device, OutputMode, REQUESTED_BUFFER_FRAMES};
 
 pub(crate) const DECKS: usize = 2;
 
@@ -131,6 +131,7 @@ pub struct Mix {
     running: Mutex<Option<Running>>,
     preview_volume_bits: AtomicU32,
     silent: bool,
+    mode: OutputMode,
 }
 
 impl Default for Mix {
@@ -193,6 +194,15 @@ impl Mix {
             running: Mutex::new(None),
             preview_volume_bits: AtomicU32::new(1.0f32.to_bits()),
             silent: false,
+            mode: OutputMode::Shared,
+        }
+    }
+
+    /// Creates an engine that opens the device in `mode` when the first track is loaded.
+    pub fn with_output_mode(mode: OutputMode) -> Self {
+        Self {
+            mode,
+            ..Self::new()
         }
     }
 
@@ -211,7 +221,7 @@ impl Mix {
         running: &'a mut Option<Running>,
     ) -> Result<&'a mut Running, EngineError> {
         if running.is_none() {
-            let opened = output::open(&self.published, self.epoch, self.silent)?;
+            let opened = output::open(&self.published, self.epoch, self.silent, self.mode)?;
             let mut state = Running {
                 output: opened.output,
                 controls: opened.controls,
