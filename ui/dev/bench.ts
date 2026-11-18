@@ -308,6 +308,9 @@ async function durationSeconds(page: Page, name: string): Promise<number> {
 /** Loads the first MP3 not already used that is long enough for every run, and returns it. */
 async function loadLongTrack(page: Page, name: string, skip: string[]): Promise<string> {
   const choice = page.getByRole('combobox', { name: `Track on ${name}` });
+  // Mix loads after the click and fills its track list from the core, and reading the options
+  // does not wait for either.
+  await choice.locator('option').nth(1).waitFor({ state: 'attached' });
   const tracks = await choice
     .locator('option')
     .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value));
