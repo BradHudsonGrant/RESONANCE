@@ -84,6 +84,11 @@
     oncreatecollectionandadd,
   }: Props = $props();
 
+  let table: TrackTable | undefined = $state();
+  let checkedCount = $state(0);
+  let allChecked = $state(false);
+  const selecting = $derived(checkedCount > 0);
+
   let m5Gate = $state<'analysed' | 'unanalysed' | null>(null);
   let drawerOpen = $state(false);
   let facets = $state<LibraryFacets | null>(null);
@@ -202,15 +207,61 @@
     </div>
 
     {#if pages.state.kind !== 'ready' || pages.libraryTotal > 0}
-      <div class="pills" role="toolbar" aria-label="Track filters">
-        {#each pills as pill (pill.id)}
-          <FilterPill
-            label={pill.label}
-            icon={pill.icon}
-            active={activeFilter === pill.id}
-            onclick={() => selectPill(pill)}
-          />
-        {/each}
+      <!-- The pills and the selection actions share one cell, and the hidden pills keep its
+           height, so swapping them never moves the table. -->
+      <div class="toolbar-slot">
+        <div
+          class={['pills', { covered: selecting }]}
+          role="toolbar"
+          aria-label="Track filters"
+          inert={selecting}
+        >
+          {#each pills as pill (pill.id)}
+            <FilterPill
+              label={pill.label}
+              icon={pill.icon}
+              active={activeFilter === pill.id}
+              onclick={() => selectPill(pill)}
+            />
+          {/each}
+        </div>
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <div
+          class="selection"
+          role="region"
+          aria-label="Selected tracks"
+          hidden={!selecting}
+          onkeydown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              table?.clearSelection();
+            }
+          }}
+        >
+          <span class="selection-count numeric" aria-live="polite">{checkedCount} selected</span>
+          <Button
+            variant="quiet"
+            size="sm"
+            aria-disabled={allChecked}
+            onclick={() => {
+              if (!allChecked) table?.selectAllLoaded();
+            }}
+          >
+            Select all
+          </Button>
+          <Button
+            size="sm"
+            onclick={(event) => table?.addSelectionToCollection(event.currentTarget)}
+          >
+            Add to collection
+          </Button>
+          {#if activeCollection}
+            <Button size="sm" onclick={() => table?.removeSelectionFromCollection()}>
+              <span class="collection-name">Remove from {activeCollection.name}</span>
+            </Button>
+          {/if}
+          <Button variant="quiet" size="sm" onclick={() => table?.clearSelection()}>Clear</Button>
+        </div>
       </div>
     {/if}
   </div>
@@ -261,6 +312,9 @@
       {/if}
     {:else}
       <TrackTable
+        bind:this={table}
+        bind:checkedCount
+        bind:allChecked
         {pages}
         bind:selected
         {previewTrackId}
@@ -402,11 +456,62 @@
     }
   }
 
+  .toolbar-slot {
+    display: grid;
+    min-width: 0;
+  }
+
+  .pills,
+  .selection {
+    grid-area: 1 / 1;
+    min-width: 0;
+  }
+
   .pills {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: var(--space-2) var(--space-6);
+  }
+
+  .pills.covered {
+    visibility: hidden;
+  }
+
+  .selection {
+    display: flex;
+    align-items: center;
+    align-self: start;
+    gap: var(--space-2);
+    height: var(--control-height-sm);
+  }
+
+  .selection[hidden] {
+    display: none;
+  }
+
+  .selection-count {
+    min-width: 11ch;
+    margin-right: var(--space-2);
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    white-space: nowrap;
+  }
+
+  .collection-name {
+    display: inline-block;
+    max-width: 16rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  @media (forced-colors: active) {
+    .selection {
+      padding-left: var(--space-2);
+      border-left: var(--selection-bar-width) solid Highlight;
+    }
   }
 
   .stage {

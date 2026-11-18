@@ -2,7 +2,6 @@
   import { untrack } from 'svelte';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
-  import Button from '../design/Button.svelte';
   import Icon from '../design/Icon.svelte';
   import TableCell from '../design/TableCell.svelte';
   import TableRow from '../design/TableRow.svelte';
@@ -31,6 +30,9 @@
     onaddtocollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
     onremovefromcollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
     oncreatecollectionandadd?: (name: string, trackIds: number[]) => Promise<void> | void;
+    /** How many tracks are ticked, for the selection actions that Library shows above. */
+    checkedCount?: number;
+    allChecked?: boolean;
   }
 
   const columnSortField: Record<string, TrackSortField> = {
@@ -56,6 +58,8 @@
     onaddtocollection,
     onremovefromcollection,
     oncreatecollectionandadd,
+    checkedCount = $bindable(0),
+    allChecked = $bindable(false),
   }: Props = $props();
 
   // Rows drawn beyond the edges of the view, so a fast scroll does not open a gap.
@@ -86,6 +90,11 @@
   const resolvedMenuTracks = $derived(
     menuTracks.map((track) => pages.trackById(track.id) ?? track),
   );
+
+  $effect(() => {
+    checkedCount = checkedIds.size;
+    allChecked = allLoadedChecked;
+  });
 
   // The header sticks to the top of the scrolling area, so the rows show below it.
   const rowsHeight = $derived(Math.max(0, viewportHeight - headHeight));
@@ -234,9 +243,28 @@
     selected = null;
   }
 
-  function selectAllLoaded() {
+  // Library shows the selection actions in place of its filter pills, so the table never moves.
+  export function selectAllLoaded() {
     for (const track of pages.loadedTracks()) {
       addChecked(track);
+    }
+  }
+
+  export function clearSelection() {
+    deselectAll();
+    gridEl?.focus();
+  }
+
+  export function addSelectionToCollection(anchor: HTMLElement) {
+    openMenuForTracks(resolveCheckedTracks(), anchor, {
+      showFavourite: false,
+      label: 'Add selected tracks to collection',
+    });
+  }
+
+  export function removeSelectionFromCollection() {
+    if (activeCollection) {
+      void removeTracksFromCollection(activeCollection.id, Array.from(checkedIds));
     }
   }
 
@@ -335,7 +363,7 @@
   function onViewportClick(event: MouseEvent) {
     const target = event.target as HTMLElement | null;
     if (!target) return;
-    if (target.closest('.head, [role="row"], .selection-bar')) return;
+    if (target.closest('.head, [role="row"]')) return;
     if (someChecked || selected !== null) {
       deselectAll();
     }
@@ -508,7 +536,7 @@
 
 <div
   bind:this={gridEl}
-  class={['table', { 'has-selection': someChecked }]}
+  class="table"
   role="grid"
   tabindex="0"
   aria-label="Tracks"
@@ -521,36 +549,6 @@
   style:--table-width={tableMinWidth}
   {onkeydown}
 >
-  {#if someChecked}
-    <div class="selection-bar" role="region" aria-label="Selected tracks">
-      <span class="selection-count numeric">{checkedIds.size} selected</span>
-      <div class="selection-actions">
-        {#if !allLoadedChecked}
-          <Button variant="quiet" size="sm" onclick={selectAllLoaded}>Select all</Button>
-        {/if}
-        <Button
-          size="sm"
-          onclick={(event) =>
-            openMenuForTracks(resolveCheckedTracks(), event.currentTarget, {
-              showFavourite: false,
-              label: 'Add selected tracks to collection',
-            })}
-        >
-          Add to collection
-        </Button>
-        {#if activeCollection}
-          <Button
-            size="sm"
-            onclick={() =>
-              void removeTracksFromCollection(activeCollection.id, Array.from(checkedIds))}
-          >
-            Remove from {activeCollection.name}
-          </Button>
-        {/if}
-        <Button variant="quiet" size="sm" onclick={deselectAll}>Deselect</Button>
-      </div>
-    </div>
-  {/if}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
@@ -781,34 +779,6 @@
     height: 100%;
     min-height: 0;
     padding: 0 var(--space-5);
-  }
-
-  .table.has-selection {
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-
-  .selection-bar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-2) var(--space-4);
-    padding: var(--space-1-5) var(--space-3);
-    border-bottom: var(--border-width) solid var(--color-border);
-    background: var(--color-surface);
-  }
-
-  .selection-count {
-    color: var(--color-text);
-    font-size: var(--text-sm);
-    font-weight: var(--weight-medium);
-  }
-
-  .selection-actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-2);
   }
 
   .table:focus-visible {
