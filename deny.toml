@@ -1,5 +1,15 @@
 [graph]
 all-features = true
+# The desktop targets Resonance ships for. Crates only another target pulls in, such as the
+# root certificates rustls-platform-verifier bundles for wasm32, never reach a build.
+targets = [
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+]
 
 [licenses]
 allow = [

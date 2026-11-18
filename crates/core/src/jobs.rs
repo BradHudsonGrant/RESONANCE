@@ -82,6 +82,7 @@ impl JobStatus {
 
 pub const JOB_KIND_SCAN_SOURCE: &str = "scan_source";
 pub const JOB_KIND_IDENTIFY_LIBRARY: &str = "identify_library";
+pub const JOB_KIND_IDENTIFY_ONLINE: &str = "identify_online";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewJob {

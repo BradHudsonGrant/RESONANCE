@@ -35,7 +35,12 @@ enum Command {
         folder: PathBuf,
     },
     /// Hash and fingerprint any files in the library whose identity is still pending
-    Identify,
+    Identify {
+        /// Then look every track without an online result up on AcoustID, MusicBrainz and
+        /// Discogs, using the keys saved in Settings
+        #[arg(long)]
+        online: bool,
+    },
     /// Play both decks through the audio device and write every performance budget to
     /// docs/benchmarks. `just bench` takes the page measurements first and then runs this
     Bench {
@@ -84,7 +89,7 @@ fn main() -> ExitCode {
     match cli.command {
         Command::Key { tags } => show_keys(&tags),
         Command::Scan { folder } => finished(scan::run(&folder, cli.data_folder.as_deref())),
-        Command::Identify => finished(identify::run(cli.data_folder.as_deref())),
+        Command::Identify { online } => finished(identify::run(cli.data_folder.as_deref(), online)),
         Command::Bench {
             page,
             audio_seconds,

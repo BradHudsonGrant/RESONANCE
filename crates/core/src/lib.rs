@@ -1,4 +1,5 @@
 pub mod collections;
+pub mod identify;
 pub mod identity;
 pub mod jobs;
 pub mod key;

@@ -1,4 +1,5 @@
 mod collections;
+mod identification;
 mod identity;
 mod jobs;
 mod search;
@@ -11,6 +12,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 pub use collections::{CollectionSummary, TrackCollection};
+pub use identification::{
+    CachedResponse, IdentificationInput, IdentificationPass, StoredIdentification,
+};
 pub use identity::{
     IdentityMatch, PendingAsset, StoredAssetIdentity, StoredRelinkCandidate,
     StoredTrackRelinkTarget,
@@ -25,7 +29,7 @@ pub use sources::{SourceAssetPresence, SourceConfig};
 
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
-const MIGRATIONS: [&str; 8] = [
+const MIGRATIONS: [&str; 9] = [
     include_str!("../migrations/0001_library.sql"),
     include_str!("../migrations/0002_sources.sql"),
     include_str!("../migrations/0003_identity.sql"),
@@ -34,6 +38,7 @@ const MIGRATIONS: [&str; 8] = [
     include_str!("../migrations/0006_collections.sql"),
     include_str!("../migrations/0007_missing_files.sql"),
     include_str!("../migrations/0008_jobs.sql"),
+    include_str!("../migrations/0009_identification.sql"),
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -863,9 +868,9 @@ mod tests {
         )
         .expect("asset inserts");
 
-        migrate(&mut v7).expect("v7 migrates to v8");
+        migrate(&mut v7).expect("v7 migrates");
         let mut db = Database { connection: v7 };
-        assert_eq!(db.schema_version().expect("schema version"), 8);
+        assert_eq!(db.schema_version().expect("schema version"), SCHEMA_VERSION);
         assert_eq!(db.track_count().expect("tracks preserved"), 1);
 
         let queued = db

@@ -17,6 +17,7 @@ In the stack table, a row marked Fixed is settled. A row marked Default is a rec
 | Time-stretch | Signalsmith Stretch when keylock is on, plain resampling when it is off | Default |
 | Tags | `lofty` `0.25.5` | Settled ([ADR 0007](adr/0007-scan-and-first-schema.md)) |
 | Identity & fingerprint | `blake3` `1.8.7` (`Apache-2.0`), `rusty-chromaprint` `0.3.0` (`MIT`) and AcoustID | Settled ([ADR 0004](adr/0004-identity-model.md)) |
+| Metadata lookups | `ureq` `3.5.2` with `rustls` and the OS certificate store; AcoustID, MusicBrainz, Discogs and pasted Bandcamp pages | Settled ([ADR 0017](adr/0017-identification-providers-over-ureq.md)) |
 | Filesystem watching | `notify` `8.2.2` with quiet-window coalescing | Settled ([ADR 0013](adr/0013-filesystem-watching-with-notify.md)) |
 | Model runtime | ONNX Runtime in-process through the `ort` crate | Default, with the fallback under Model runtime |
 | Trash | the `trash` crate | Default |

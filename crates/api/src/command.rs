@@ -59,6 +59,18 @@ pub enum Request {
     },
     /// Computes pending byte hashes, decoded-audio hashes and Chromaprint fingerprints.
     Identify,
+    /// Looks tracks up online as an Activity job: the given tracks first, then every other track
+    /// without an online result.
+    IdentifyOnline {
+        #[ts(type = "Array<number>")]
+        track_ids: Vec<i64>,
+    },
+    /// Reads a Discogs release or Bandcamp page the user pasted for one track.
+    IdentifyWithUrl {
+        #[ts(type = "number")]
+        track_id: i64,
+        url: String,
+    },
     /// Active and recent background jobs for the Activity drawer.
     JobsSnapshot,
     /// Cancels a queued or running job.
@@ -187,6 +199,8 @@ pub enum Response {
     LibraryFacets(LibraryFacets),
     Scan(ScanReport),
     Identify(IdentifyReport),
+    IdentifyOnline(ActivitySnapshot),
+    IdentifyWithUrl(TrackIdentification),
     JobsSnapshot(ActivitySnapshot),
     CancelJob(ActivitySnapshot),
     RetryJob(ActivitySnapshot),
@@ -356,6 +370,56 @@ pub struct IdentifyReport {
     pub decoded: usize,
     pub reconciled_moves: usize,
     pub skipped_unreadable: usize,
+}
+
+/// What identification concluded for a track, and what each step did.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct TrackIdentification {
+    #[ts(type = "number")]
+    pub track_id: i64,
+    pub best: Option<IdentifiedRelease>,
+    pub needs_url: bool,
+    pub steps: Vec<IdentifyStepReport>,
+}
+
+/// The best candidate. udio_matched is true only when Chromaprint compared the audio.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct IdentifiedRelease {
+    pub provider: String,
+    pub confidence: f64,
+    pub audio_matched: bool,
+    pub artist: Option<String>,
+    pub title: Option<String>,
+    pub mix: Option<String>,
+    pub album: Option<String>,
+    pub label: Option<String>,
+    pub catno: Option<String>,
+    pub year: Option<u16>,
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct IdentifyStepReport {
+    /// 1 to 6, in the order the steps run.
+    pub step: u8,
+    pub provider: Option<String>,
+    pub outcome: IdentifyStepOutcome,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum IdentifyStepOutcome {
+    Read { fields: u32 },
+    Ran { candidates: u32, best: Option<f64> },
+    SkippedMissingKey { key: ProviderKeyKind },
+    SkippedNoInput,
+    SkippedConfident,
+    Failed { reason: String },
+    NeedsUrl,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
