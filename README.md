@@ -22,20 +22,21 @@ Most DJs will keep playing on their own hardware. Resonance is where they prepar
 
 - Watched music folders with per-subfolder toggles and an editable ignore list (`SourcesSettings.svelte` and `notify` filesystem watching), scanning read-only into SQLite (`WAL` mode) across MP3, FLAC, WAV, AIFF and M4A (`AAC` and `ALAC`, including files carrying stray leading ID3v2 headers).
 - Track and asset identity by BLAKE3 byte hash, full-scale `i32` decoded-audio hash (`symphonia` gapless + stream checksum verification) and 120-second Chromaprint (`rusty-chromaprint`), keeping track identity intact when files are renamed, moved or retagged outside the app, with missing-file flagging and one-click or manual relinking across moved or re-encoded copies.
+- A persistent Activity queue for scans and identity work that survives restarts, with progress, cancel and retry, and chunked scanning that keeps a 3,000-file scan responsive.
 - Instant SQLite `FTS5` text search, filter drawer (`BPM`, key, year, label, format and missing files), quick pills (`All tracks`, `Favourites`, `Recent`), sortable columns and manual `track_id`-keyed collections across a virtualised 100,000-track table (`4.2 ms` median frame at 240 Hz, `<= 25.4 ms` p95 search and filter queries, `0.42 s` warm cold start).
 - Track preview playback in `PlayerBar` (`rubato` sinc resampler feeding a lock-free ring buffer with a 5 ms ramp, interactive `ScrubBar` seeking and automatic Mix handoff), alongside a track inspector showing seeded dot-wave artwork, tags, Camelot key, format specs and file location.
-- Two-deck Mix view playing audio through WASAPI with scrolling WebGL2 peak and RMS waveforms, binary playhead and meter telemetry, and 0 audio underruns across three-minute full-window runs.
+- Two-deck Mix view playing audio through WASAPI with scrolling WebGL2 peak and RMS waveforms, binary playhead and meter telemetry, and 0 audio underruns across three-minute full-window runs. Exclusive mode runs at a 256-frame buffer (5.3 ms at 48 kHz) with 0 dropouts in the `v0.3.0` bench.
 - Full M1 design system in dark, light and Windows high-contrast themes (`tokens.css` and 25 Svelte 5 primitives, shown side by side at `/design.html`), keyboard navigation (`Ctrl+K`, `1`–`5`, `[`, `I`, `D`, `Space`, `C`, arrow and selection keys), and browser hot reload against a local Rust core without rebuilding Rust for UI changes.
 
 ## Status
 
-`M0 Foundations` (`v0.1.0`) and `M1 Design` (`v0.2.0`) are complete, and `M2 Library` (`v0.3.0`) is nearly done: watched source folders with subfolder toggles (`#81`), decoded-audio hash and Chromaprint identity (`#83`), `FTS5` search, filters and column sort (`#91`), manual collections (`#94`), preview playback (`#97`), and missing-file relinking (`#98`) have all landed on `master`, leaving the persistent Activity job queue (`#90`) and the remaining M2 budgets (`#55`, `#47`) before `v0.3.0`.
+`M0 Foundations` (`v0.1.0`), `M1 Design` (`v0.2.0`) and `M2 Library` (`v0.3.0`) are complete. M2 added watched source folders with subfolder toggles (`#81`), decoded-audio hash and Chromaprint identity (`#83`), `FTS5` search, filters and column sort (`#91`), manual collections (`#94`), preview playback (`#97`), missing-file relinking (`#98`) and a persistent Activity job queue with chunked scanning (`#101`). Two budgets carry over to `v0.4.0`: the startup UI-thread task (`#55`) and an hour-long clean run at a 256-sample audio buffer (`#47`).
 
 After `M2`, the roadmap builds identification and tag writing (`M3`), quality checks and journaled file replacement (`M4`), beat/key/energy/phrase analysis (`M5`), similarity and natural-language discovery (`M6`), full deck controls and hardware mappings (`M7`), live mix coaching (`M8`), session replay (`M9`), set building (`M10`), rekordbox and Engine DJ library sync (`M11`), and stems (`M12`). Every checklist item and its evidence live in [docs/roadmap.md](docs/roadmap.md).
 
 ## Install
 
-Windows x64 installers (`Resonance_0.2.0_x64-setup.exe`, and [`v0.1.0`](https://github.com/BradHudsonGrant/RESONANCE/releases/tag/v0.1.0)) are attached as pre-releases on the [GitHub releases page](https://github.com/BradHudsonGrant/RESONANCE/releases). Running the setup installs Resonance for the current user at `%LOCALAPPDATA%\Resonance\resonance-app.exe`.
+Windows x64 installers (`Resonance_0.3.0_x64-setup.exe`, and [`v0.2.0`](https://github.com/BradHudsonGrant/RESONANCE/releases/tag/v0.2.0) and [`v0.1.0`](https://github.com/BradHudsonGrant/RESONANCE/releases/tag/v0.1.0) before it) are attached as pre-releases on the [GitHub releases page](https://github.com/BradHudsonGrant/RESONANCE/releases). Running the setup installs Resonance for the current user at `%LOCALAPPDATA%\Resonance\resonance-app.exe`.
 
 To build the installer from source instead, install the prerequisites under [Build](#build), run `npm ci --prefix ui`, and run:
 
@@ -120,7 +121,7 @@ That writes `target/release/bundle/nsis/Resonance_<version>_x64-setup.exe` with 
 
 ## Stack
 
-Rust workspace (`core`, `db`, `library`, `engine`, `api`, `cli`, `fixtures`), Tauri 2 on WebView2, Svelte 5 in strict TypeScript, SQLite (`WAL` + `FTS5`), `cpal` on WASAPI, `symphonia`, `lofty`, and custom WebGL2 waveform and dot-wave renderers. Windows first, with macOS and Linux planned on a bundled Chromium runtime (`M12`).
+Rust workspace (`core`, `db`, `library`, `engine`, `jobs`, `api`, `cli`, `fixtures`), Tauri 2 on WebView2, Svelte 5 in strict TypeScript, SQLite (`WAL` + `FTS5`), `cpal` on WASAPI, `symphonia`, `lofty`, and custom WebGL2 waveform and dot-wave renderers. Windows first, with macOS and Linux planned on a bundled Chromium runtime (`M12`).
 
 ## Licence
 
