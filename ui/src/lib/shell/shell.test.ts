@@ -757,6 +757,7 @@ describe('App shell', () => {
             generation: 1,
           } as never;
         }
+        if (command === 'mix_status') throw new Error('No Mix core in this test.');
         return undefined as never;
       });
 
