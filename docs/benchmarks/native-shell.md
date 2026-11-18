@@ -63,6 +63,32 @@ Cold-start launches to the first filled rows of 100,000 tracks, plus idle memory
 
 Cold start (**0.42 s** at the longest of five launches, under `1.5 s`), idle memory (**130 MB**, under `400 MB`), the wave (**0.2 ms**, under `1 ms`) and post-startup UI-thread tasks (**11.1 ms**, under `16 ms`) all meet their budgets, and splitting startup cut the M1 main-thread stall from **126.2–151.9 ms** to **27.3–29.5 ms**, so the change is kept. A detailed trace on the updated build (`29.2 ms` longest task) shows three startup tasks still over `16 ms`: Blink's first `BeginMainFrame` pass (**29.2 ms**, with `5.2 ms` initial style and `17.7 ms` initial layout across 323 layout objects), WebView2's warm `canvas.getContext('webgl2')` setup (**26.5 ms**), and `mount(App)` (**18.2 ms**). The startup UI-thread budget remains open in [#55](https://github.com/BradHudsonGrant/RESONANCE/issues/55) for M2, pointing at moving `WaveRenderer` to an `OffscreenCanvas` worker and mounting secondary shell regions after the first paint.
 
+## 18 November 2026, M2 startup UI-thread trace
+
+Machine and method as on 15 November: the release `resonance-app.exe` in benchmark mode against the 100,000-track synthetic library, `--trace-startup=toplevel` launches, longest `RunTask` on the page's main thread. One launch before the change created the webview profile and is left out (135.7 ms).
+
+By M2 the shell had grown search, filters, collections, preview and the Activity queue, and the longest startup task was back to 24.7–36.5 ms. A detailed trace showed three tasks over 16 ms:
+
+- **38.6 ms**: `mount(App)` creating the whole shell, including a 15.8 ms minor garbage collection.
+- **30.8 ms**: Blink's first frame, with 4.8 ms style and 17.2 ms layout.
+- **29.0 ms**: the sidebar wave's `canvas.getContext('webgl2')`, 21.0 ms of it waiting on the GPU process.
+
+One change: `App.svelte` mounts the library frame first, and the sidebar with its wave, the inspector dock, the transition dock and the player in a task after that frame presents.
+
+| Startup `toplevel` trace | Before  | After   |
+| ------------------------ | ------- | ------- |
+| 1                        | 36.1 ms | 20.4 ms |
+| 2                        | 31.5 ms | 20.4 ms |
+| 3                        | 36.5 ms | 26.7 ms |
+| 4                        | 24.7 ms | 20.2 ms |
+| 5                        |         | 26.9 ms |
+
+The detailed trace after the change has no long `mount(App)` task, and opening the WebGL2 context fell to 15.1 ms. Two tasks are still over 16 ms: Blink's first frame (**27.4 ms**: 4.0 ms style, 10.9 ms layout and 7.0 ms of `ResizeObserver` callbacks) and a forced layout (**16.6 ms**, 14.4 ms of it layout).
+
+### Conclusion
+
+The change cut the longest startup task by about 10 ms, so it is kept. The budget is still missed, and [#55](https://github.com/BradHudsonGrant/RESONANCE/issues/55) moves to M3 for the first frame's layout and the `ResizeObserver` work inside it. Cold start was not measured again on this build.
+
 ## 15 November 2026, v0.2.0 release installer
 
 `Resonance_0.2.0_x64-setup.exe` (3.78 MiB, `sha256:f67e9bfd2e9bb2baf6c84d16a4f2f7efe2ecf167bbd31afc2b77ff0520cb33d9`) was downloaded from the published [`v0.2.0` pre-release](https://github.com/BradHudsonGrant/RESONANCE/releases/tag/v0.2.0) and installed in current-user mode at `%LOCALAPPDATA%\Resonance\resonance-app.exe` (13.46 MiB).
