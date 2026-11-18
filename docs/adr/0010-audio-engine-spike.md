@@ -1,6 +1,6 @@
 # 0010: Audio engine and the Mix view's real-time channel
 
-Date: 13 November 2026. Status: accepted for the spike; the audio buffer size is open in [#47](https://github.com/BradHudsonGrant/RESONANCE/issues/47).
+Date: 13 November 2026. Status: accepted for the spike. The audio buffer size is settled by [0015](0015-wasapi-exclusive-output.md).
 
 ## Context
 

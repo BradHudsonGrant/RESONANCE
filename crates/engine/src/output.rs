@@ -4,8 +4,11 @@
 //! arrive and leave through ring buffers, samples come from each deck's ring buffer, and what it
 //! reports goes out through atomics in [`Published`].
 
+#[cfg(windows)]
+mod wasapi_stream;
+
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -73,12 +76,26 @@ pub(crate) enum Control {
     },
 }
 
+/// How the stream asks for the output device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OutputMode {
+    /// Shared with other programs, at the shortest period the system's mixer allows.
+    #[default]
+    Shared,
+    /// The device for this program alone, at [`REQUESTED_BUFFER_FRAMES`] where it allows that.
+    /// Other programs cannot play sound meanwhile. Only Windows has it; elsewhere, or when the
+    /// device refuses, the stream is shared.
+    Exclusive,
+}
+
 /// The device as the stream opened it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Device {
     pub name: String,
     pub sample_rate: u32,
     pub channels: u16,
+    /// The mode the device accepted, which is shared when exclusive use was refused.
+    pub mode: OutputMode,
     pub requested_buffer_frames: u32,
     /// The period the device runs its callback at, whatever was asked for.
     pub period_frames: u32,
@@ -87,12 +104,15 @@ pub struct Device {
 /// The open stream. It lives on its own thread, which drops it when this is dropped.
 pub(crate) struct Output {
     stop: Option<mpsc::Sender<()>>,
+    /// Read by a render loop that runs on the output thread itself, which cannot wait on `stop`.
+    stopping: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
     pub device: Device,
 }
 
 impl Drop for Output {
     fn drop(&mut self) {
+        self.stopping.store(true, Ordering::Release);
         self.stop.take();
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
@@ -110,6 +130,7 @@ pub(crate) fn open(
     published: &Arc<Published>,
     epoch: Instant,
     force_silent: bool,
+    mode: OutputMode,
 ) -> Result<Opened, EngineError> {
     if force_silent || use_silent_output() {
         return open_silent(published, epoch);
@@ -117,17 +138,33 @@ pub(crate) fn open(
     let (renderer, controls, retired) = Renderer::new(published, epoch);
     let (ready, opened) = mpsc::sync_channel(1);
     let (stop, stopped) = mpsc::channel::<()>();
+    let stopping = Arc::new(AtomicBool::new(false));
     let for_thread = Arc::clone(published);
+    let stopping_for_thread = Arc::clone(&stopping);
     let thread = thread::Builder::new()
         .name("audio output".to_owned())
-        .spawn(move || match start(renderer, &for_thread) {
-            Ok((stream, device)) => {
-                let _ = ready.send(Ok(device));
-                let _ = stopped.recv();
-                drop(stream);
-            }
-            Err(error) => {
-                let _ = ready.send(Err(error));
+        .spawn(move || {
+            #[cfg(windows)]
+            let renderer = match wasapi_stream::Stream::open(mode, &for_thread) {
+                Ok(stream) => {
+                    let _ = ready.send(Ok(stream.device.clone()));
+                    stream.run(renderer, &stopping_for_thread);
+                    return;
+                }
+                // The device refused both modes through WASAPI directly, so cpal gets a go.
+                Err(_) => renderer,
+            };
+            #[cfg(not(windows))]
+            let _ = (mode, &stopping_for_thread);
+            match start(renderer, &for_thread) {
+                Ok((stream, device)) => {
+                    let _ = ready.send(Ok(device));
+                    let _ = stopped.recv();
+                    drop(stream);
+                }
+                Err(error) => {
+                    let _ = ready.send(Err(error));
+                }
             }
         })
         .map_err(EngineError::Thread)?;
@@ -135,6 +172,7 @@ pub(crate) fn open(
     Ok(Opened {
         output: Output {
             stop: Some(stop),
+            stopping,
             thread: Some(thread),
             device,
         },
@@ -175,11 +213,13 @@ fn open_silent(published: &Arc<Published>, epoch: Instant) -> Result<Opened, Eng
     Ok(Opened {
         output: Output {
             stop: Some(stop),
+            stopping: Arc::new(AtomicBool::new(false)),
             thread: Some(thread),
             device: Device {
                 name: "Silent output".to_owned(),
                 sample_rate: SILENT_RATE,
                 channels: SILENT_CHANNELS,
+                mode: OutputMode::Shared,
                 requested_buffer_frames: REQUESTED_BUFFER_FRAMES,
                 period_frames: SILENT_PERIOD_FRAMES,
             },
@@ -233,6 +273,7 @@ fn start(
             name,
             sample_rate,
             channels,
+            mode: OutputMode::Shared,
             requested_buffer_frames: REQUESTED_BUFFER_FRAMES,
             period_frames,
         },
@@ -272,6 +313,10 @@ struct Renderer {
     gain_alpha: f32,
     epoch: Instant,
     first_callback: bool,
+    /// Set for an exclusive stream, which is always asked for exactly one period. Lateness then
+    /// shows in the time between callbacks rather than in how much each is asked for.
+    event_period: Option<Duration>,
+    last_entered: Option<Instant>,
 }
 
 impl Renderer {
@@ -294,6 +339,8 @@ impl Renderer {
             gain_alpha: 0.0,
             epoch,
             first_callback: true,
+            event_period: None,
+            last_entered: None,
         };
         renderer.set_format(48_000, 2);
         (renderer, controls, retired)
@@ -409,6 +456,15 @@ impl Renderer {
             // The device's buffer starts empty, so the first callback is asked to fill all of it.
             counters.buffer_frames.store(frames, Ordering::Relaxed);
             self.first_callback = false;
+        } else if let (Some(period), Some(last)) = (self.event_period, self.last_entered) {
+            // An exclusive device plays one period while the next is written, so a callback
+            // more than a period late has let it run dry.
+            let gap = entered.saturating_duration_since(last);
+            if gap > period * 2 {
+                counters.starved_callbacks.fetch_add(1, Ordering::Relaxed);
+            } else if gap * 2 > period * 3 {
+                counters.late_callbacks.fetch_add(1, Ordering::Relaxed);
+            }
         } else {
             let buffer = counters.buffer_frames.load(Ordering::Relaxed);
             let period = counters.period_frames.load(Ordering::Relaxed);
@@ -418,6 +474,7 @@ impl Renderer {
                 counters.late_callbacks.fetch_add(1, Ordering::Relaxed);
             }
         }
+        self.last_entered = Some(entered);
         counters
             .window_min_frames
             .fetch_min(frames, Ordering::Relaxed);
@@ -793,6 +850,26 @@ mod tests {
 
         let counters = &harness.published.counters;
         assert_eq!(counters.buffer_frames.load(Ordering::Relaxed), 1056);
+        assert_eq!(harness.count(&counters.late_callbacks), 1);
+        assert_eq!(harness.count(&counters.starved_callbacks), 1);
+        assert_eq!(harness.count(&counters.callbacks), 4);
+    }
+
+    #[test]
+    fn an_exclusive_stream_judges_late_and_starved_callbacks_by_the_time_between_them() {
+        let mut harness = Harness::new();
+        let period = Duration::from_micros(5_333);
+        harness.renderer.event_period = Some(period);
+        let start = Instant::now();
+
+        harness.renderer.count(256, start);
+        harness.renderer.count(256, start + period);
+        harness
+            .renderer
+            .count(256, start + period * 2 + period * 3 / 4);
+        harness.renderer.count(256, start + period * 5);
+
+        let counters = &harness.published.counters;
         assert_eq!(harness.count(&counters.late_callbacks), 1);
         assert_eq!(harness.count(&counters.starved_callbacks), 1);
         assert_eq!(harness.count(&counters.callbacks), 4);

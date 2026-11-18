@@ -9,6 +9,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use resonance_core::key::Key;
+use resonance_engine::OutputMode;
 
 #[derive(Parser)]
 #[command(name = "resonance", version, about = "Resonance from the command line")]
@@ -45,6 +46,21 @@ enum Command {
         #[arg(long, value_name = "SECONDS", default_value_t = 180)]
         audio_seconds: u32,
     },
+    /// Play two tracks on both decks through the audio device and print what the audio thread
+    /// counted: period, underruns, late and starved callbacks. A deck whose track ends starts it
+    /// again, so a run can last as long as needed
+    Audio {
+        /// The tracks for deck A and deck B
+        #[arg(num_args = 2, required = true)]
+        tracks: Vec<PathBuf>,
+        /// How long to play
+        #[arg(long, value_name = "SECONDS", default_value_t = 180)]
+        seconds: u32,
+        /// Take the device for this program alone, at a 256-frame period where it allows that.
+        /// Other programs go silent meanwhile. Windows only
+        #[arg(long)]
+        exclusive: bool,
+    },
     /// Run the core as a local process for the browser UI to talk to
     Serve {
         /// Write the port and token to this file as JSON, for the dev server to read
@@ -73,6 +89,21 @@ fn main() -> ExitCode {
             page,
             audio_seconds,
         } => finished(bench::run(&page, audio_seconds)),
+        Command::Audio {
+            tracks,
+            seconds,
+            exclusive,
+        } => {
+            let mode = if exclusive {
+                OutputMode::Exclusive
+            } else {
+                OutputMode::Shared
+            };
+            match <[PathBuf; 2]>::try_from(tracks) {
+                Ok(tracks) => finished(bench::play_audio(&tracks, seconds, mode)),
+                Err(_) => ExitCode::FAILURE,
+            }
+        }
         Command::Serve { connection_file } => finished(serve::run(
             connection_file.as_deref(),
             cli.data_folder.as_deref(),
