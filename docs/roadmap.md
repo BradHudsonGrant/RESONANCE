@@ -99,7 +99,7 @@ Accept:
 
 ## M3 Identify and tag, v0.4.0
 
-- [ ] The identification pipeline with free providers
+- [x] The identification pipeline with free providers ([#108](https://github.com/BradHudsonGrant/RESONANCE/issues/108)). Evidence: merged in [#124](https://github.com/BradHudsonGrant/RESONANCE/pull/124); `crates/identify` runs the six steps over AcoustID, MusicBrainz, Discogs and pasted Bandcamp pages through `ureq` ([ADR 0017](adr/0017-identification-providers-over-ureq.md)), with a limiter per provider and a 30-day `provider_cache`; fixture tests cover every step, early stop, missing-key skips, pacing, cache hits and radio edit against extended mix, and live checks against MusicBrainz and Discogs pass.
 - [ ] Staging with per-field diff
 - [ ] Writing tags
 - [ ] Filename templates
