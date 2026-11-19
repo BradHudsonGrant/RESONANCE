@@ -17,7 +17,7 @@ A virtualised table: a 31 px header and 33 px rows, with 1 px lines between rows
 | Column   | Width                     | Drawn as                                                            | Drops                                    | Built in                  |
 | -------- | ------------------------- | ------------------------------------------------------------------- | ---------------------------------------- | ------------------------- |
 | Tick box | 30 px                     | 16 px box, 3 px corners, control border                             | never                                    | #52                       |
-| Status   | 22 px                     | 14 px icon: play on the playing or selected row, tick when analysed | never                                    | #52 for play, M5 for tick |
+| Status   | 22 px                     | 14 px icon: sound lines on the row being heard, play on the loaded or selected row, tick when analysed | never                                    | #52 for play, M5 for tick |
 | #        | 36 px                     | 12 px mono, right aligned, Muted                                    | never                                    | #52                       |
 | Title    | `minmax(150px, 1.8fr)`    | 13 px sans 500, Text, cut with an ellipsis                          | never                                    | #52                       |
 | Waveform | 140 px, 88 px when narrow | `Waveform mode="inline"`                                            | narrows below 740 px, hides below 640 px | #52, peaks from M5        |
@@ -31,6 +31,18 @@ A virtualised table: a 31 px header and 33 px rows, with 1 px lines between rows
 The table is a container (`container-type: inline-size`), so it drops columns by its own width, whatever narrowed it: the window, the sidebar or the inspector. Below 820 px Energy goes first, and energy stays in the inspector. Below 740 px the waveform narrows to 88 px. Below 640 px it goes, and the track's waveform stays in the dock. Every other column stays at every size.
 
 A selected row sits on Raised inside a 1 px control border frame with 6 px corners. Its tick box is filled in Text with a dark tick, its status cell shows the play icon, and the 2 px accent mark sits at its left. The accent goes nowhere else on the row.
+
+The selected row is the one with focus, where the arrow keys move from. When several rows are ticked, the others sit on Surface 2 with a 2 px mark in the control border colour, so the focused row still reads apart from the ticked ones. The row being heard shows sound lines in its status cell in place of the play icon. In forced colours the focused row's frame and mark are Highlight and a ticked row's mark is CanvasText.
+
+## Auto-preview
+
+Auto-preview plays each track as the user moves through the table, so a crate can be heard by holding the down arrow. It is off by default. The Auto-preview button in the player bar or `P` turns it on and off, and the choice is kept in the library database, so it is the same after a restart. Turning it on plays the row the user is on.
+
+With it on, a plain click on a row or a move with the arrow keys, Page Up, Page Down, Home or End swaps the preview to that row through the same 5 ms fade a seek uses. A row that is already playing carries on, and a paused one resumes. A row whose file is missing keeps the last track playing, so arrowing past one does not cut the sound. `Shift` and `Ctrl` clicks build a selection and do not change what plays. A double click plays the row and never pauses it. `Space` still pauses and plays.
+
+Holding a key never queues loads: one is in flight at a time, and only the latest row waits behind it. There is no timer, so the first press is heard at once.
+
+Settings has Previews, for where an auto-preview starts: the beginning, 30 % in, or a fixed time in seconds. 30 % in is the default, past most intros. A fixed time longer than the track plays it from the beginning. The rules live in `crates/core/src/preview.rs`.
 
 ## Columns
 

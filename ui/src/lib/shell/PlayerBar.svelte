@@ -21,8 +21,11 @@
     volume?: number;
     muted?: boolean;
     canPlay?: boolean;
+    /** Moving through the table plays each track. */
+    autoPreview?: boolean;
     error?: string | null;
     ontoggleplay?: () => void;
+    ontoggleautopreview?: () => void;
     onseek?: (positionMs: number) => void;
     onvolume?: (volume: number) => void;
     ontogglemute?: () => void;
@@ -39,8 +42,10 @@
     volume = 1,
     muted = false,
     canPlay = false,
+    autoPreview = false,
     error = null,
     ontoggleplay,
+    ontoggleautopreview,
     onseek,
     onvolume,
     ontogglemute,
@@ -121,6 +126,22 @@
 
       <div class="mixer">
         <div class="preview-volume">
+          <Tooltip
+            text={autoPreview
+              ? 'Auto-preview is on: moving through the table plays each track'
+              : 'Auto-preview: play each track as you move through the table'}
+            shortcut="P"
+          >
+            <Button
+              variant="icon"
+              active={autoPreview}
+              aria-label="Auto-preview"
+              aria-pressed={autoPreview}
+              onclick={() => ontoggleautopreview?.()}
+            >
+              <Icon name="auto-preview" size="sm" />
+            </Button>
+          </Tooltip>
           <Tooltip text={isMuted ? 'Unmute preview' : 'Mute preview'}>
             <Button
               variant="icon"

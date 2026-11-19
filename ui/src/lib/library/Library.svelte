@@ -30,6 +30,8 @@
     tableLayout?: TableLayoutState;
     onopen?: () => void;
     onpreview?: (track: LibraryTrack) => void;
+    onplay?: (track: LibraryTrack) => void;
+    onfocustrack?: (track: LibraryTrack) => void;
     onrelink?: (track: LibraryTrack) => void;
     /** Opens the Rename sheet for `scope`, named `label`. */
     onrename?: (scope: RenameScope, label: string) => void;
@@ -83,6 +85,8 @@
     tableLayout = new TableLayoutState(),
     onopen,
     onpreview,
+    onplay,
+    onfocustrack,
     onrelink,
     onrename,
     onscan,
@@ -374,6 +378,8 @@
         {activeCollection}
         {onopen}
         {onpreview}
+        {onplay}
+        {onfocustrack}
         {onrelink}
         {ontogglefavourite}
         {onaddtocollection}

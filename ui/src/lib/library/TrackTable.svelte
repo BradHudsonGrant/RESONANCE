@@ -28,6 +28,10 @@
     /** Enter or a double click on a row. */
     onopen?: () => void;
     onpreview?: (track: LibraryTrack) => void;
+    /** A double click: play the row, never pause it. Falls back to `onpreview`. */
+    onplay?: (track: LibraryTrack) => void;
+    /** The user moved to a row with a plain click or a key, for auto-preview. */
+    onfocustrack?: (track: LibraryTrack) => void;
     onrelink?: (track: LibraryTrack) => void;
     ontogglefavourite?: (track: LibraryTrack) => void;
     /** The columns, widths, wrap and sort, kept by the core. */
@@ -49,6 +53,8 @@
     activeCollection = null,
     onopen,
     onpreview,
+    onplay,
+    onfocustrack,
     onrelink,
     ontogglefavourite,
     layout = new TableLayoutState(),
@@ -459,6 +465,15 @@
     if (pages.total > 0) selected = Math.min(Math.max(index, 0), pages.total - 1);
   }
 
+  const playRow = $derived(onplay ?? onpreview);
+
+  /** A move the user made to a row, which auto-preview follows. */
+  function moveTo(index: number) {
+    select(index);
+    const track = selected === null ? undefined : pages.track(selected);
+    if (track) onfocustrack?.(track);
+  }
+
   function addChecked(track: LibraryTrack) {
     checkedIds.add(track.id);
     checkedFallback.set(track.id, track);
@@ -582,7 +597,8 @@
       selected = null;
       return;
     }
-    select(index);
+    if (event.detail > 1) select(index);
+    else moveTo(index);
   }
 
   function onTickClick(event: MouseEvent, index: number, track: LibraryTrack | undefined) {
@@ -684,7 +700,7 @@
       if (event.shiftKey && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
         selectRange(selected ?? 0, to);
       }
-      select(to);
+      moveTo(to);
     } else if (event.key === 'Enter' && selected !== null) {
       event.preventDefault();
       onopen?.();
@@ -937,12 +953,13 @@
             id="{id}-row-{index}"
             aria-rowindex={index + 2}
             selected={isSelected}
+            checked={isChecked && !isSelected}
             style="grid-template-columns: var(--active-columns)"
             onclick={(event) => onRowClick(event, index, track)}
             ondblclick={() => {
               select(index);
               if (track && isMissing && onrelink) onrelink(track);
-              else if (track && onpreview) onpreview(track);
+              else if (track && playRow) playRow(track);
               else onopen?.();
             }}
           >
@@ -1007,9 +1024,9 @@
               >
                 <span class="status-icon" aria-hidden="true">
                   <Icon
-                    name={isMissing ? 'missing' : isPreviewPlaying ? 'pause' : 'play'}
+                    name={isMissing ? 'missing' : isPreviewPlaying ? 'audio' : 'play'}
                     size={13}
-                    filled={!isMissing}
+                    filled={!isMissing && !isPreviewPlaying}
                   />
                 </span>
               </button>

@@ -737,6 +737,13 @@ describe('App shell', () => {
             year_max: null,
           } as never;
         }
+        if (command === 'preview_settings') {
+          return {
+            auto_preview: false,
+            start: { kind: 'thirty_percent' },
+            max_start_seconds: 600,
+          } as never;
+        }
         if (command === 'preview_status') {
           return {
             track_id: loaded ? track.id : null,

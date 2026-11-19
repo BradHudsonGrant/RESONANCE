@@ -31,7 +31,8 @@
     | 'volume'
     | 'volume-mute'
     | 'missing'
-    | 'relink';
+    | 'relink'
+    | 'auto-preview';
 </script>
 
 <script lang="ts">
@@ -57,6 +58,7 @@
   import Library from '@lucide/svelte/icons/library';
   import Link2 from '@lucide/svelte/icons/link-2';
   import ListMusic from '@lucide/svelte/icons/list-music';
+  import ListVideo from '@lucide/svelte/icons/list-video';
   import PanelLeftClose from '@lucide/svelte/icons/panel-left-close';
   import Pause from '@lucide/svelte/icons/pause';
   import Play from '@lucide/svelte/icons/play';
@@ -111,6 +113,7 @@
     'volume-mute': VolumeX,
     missing: CircleAlert,
     relink: Link2,
+    'auto-preview': ListVideo,
   };
 
   const pixelSize = $derived.by(() => {

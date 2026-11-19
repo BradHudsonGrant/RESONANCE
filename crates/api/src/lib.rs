@@ -1,4 +1,5 @@
 pub mod artwork;
+mod auto_preview;
 mod collections;
 pub mod command;
 pub mod data_folder;
@@ -375,6 +376,13 @@ impl Api {
             Request::PreviewStatus => Ok(Response::PreviewStatus(
                 self.preview_state(self.mix.preview_status()),
             )),
+            Request::PreviewFocus { track_id } => {
+                self.preview_focus(track_id).map(Response::PreviewFocus)
+            }
+            Request::PreviewSettings => self.preview_settings().map(Response::PreviewSettings),
+            Request::SetPreviewSettings { settings } => self
+                .set_preview_settings(settings)
+                .map(Response::SetPreviewSettings),
             Request::RelinkCandidates {
                 track_id,
                 search_folder,
@@ -573,15 +581,24 @@ impl Api {
                 "Track {track_id} is no longer in the library."
             )));
         };
+        self.preview_play_row(track_id, &row, start_ms.unwrap_or(0))
+    }
+
+    fn preview_play_row(
+        &self,
+        track_id: i64,
+        row: &TrackRow,
+        start_ms: u64,
+    ) -> Result<PreviewState, ApiError> {
         let path = resonance_library::identity::full_asset_path(&row.source_folder, &row.file.path);
-        let shown = shown_file(&row);
+        let shown = shown_file(row);
         let title = shown.title().to_owned();
         let artist = shown.tag(TagField::Artist).map(str::to_owned);
         let artwork = row.artwork.clone();
         let db_duration_ms = row.file.audio.map(|audio| audio.duration_ms);
         let status = self
             .mix
-            .preview_load_and_play(&path, start_ms.unwrap_or(0), db_duration_ms)
+            .preview_load_and_play(&path, start_ms, db_duration_ms)
             .map_err(ApiError::audio_failed)?;
         let mut meta = self
             .preview_meta
