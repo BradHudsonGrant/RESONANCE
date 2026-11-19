@@ -251,3 +251,168 @@ fn mix_live_pauses_running_tier1_work_and_resumes_when_mix_stops_while_tier0_run
     assert_eq!(bg_done.status, JobStatus::Completed);
     assert_eq!(tier1_batches.load(Ordering::SeqCst), 2);
 }
+
+fn wait_for(runner: &JobRunner, what: &str, mut done: impl FnMut(&JobRunner) -> bool) {
+    for _ in 0..400 {
+        if done(runner) {
+            return;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    panic!("{what} did not happen in time");
+}
+
+fn job_status(runner: &JobRunner, job_id: i64) -> Option<JobStatus> {
+    let snap = runner.snapshot().expect("snapshot reads");
+    snap.active
+        .iter()
+        .chain(snap.recent.iter())
+        .find(|job| job.id == job_id)
+        .map(|job| job.status)
+}
+
+fn steps_job(label: &str, tier: JobTier) -> NewJob {
+    NewJob {
+        kind: "steps".to_owned(),
+        tier,
+        label: label.to_owned(),
+        payload_json: format!(r#"{{"label":"{label}"}}"#),
+        total_items: Some(50),
+    }
+}
+
+/// Fifty steps, each waiting at `wait_if_paused` first, the way real jobs pause between files.
+fn steps_runner(db: &Arc<Mutex<Database>>, steps: &Arc<AtomicUsize>) -> JobRunner {
+    let steps = Arc::clone(steps);
+    JobRunner::start(Arc::clone(db), move |exec| {
+        for step in 0..50u64 {
+            match exec.wait_if_paused() {
+                Ok(()) => {}
+                Err(JobInterrupt::Cancelled) => return JobOutcome::Cancelled,
+                Err(JobInterrupt::Shutdown) => return JobOutcome::Interrupted,
+            }
+            steps.fetch_add(1, Ordering::SeqCst);
+            let _ = exec.report_progress(step + 1, Some(50));
+            thread::sleep(Duration::from_millis(5));
+        }
+        JobOutcome::Completed {
+            done_items: 50,
+            total_items: Some(50),
+        }
+    })
+    .expect("runner starts")
+}
+
+#[test]
+fn a_paused_running_job_waits_with_its_progress_and_resumes() {
+    let db = Arc::new(Mutex::new(Database::open_in_memory().expect("db opens")));
+    let steps = Arc::new(AtomicUsize::new(0));
+    let runner = steps_runner(&db, &steps);
+    let job = runner
+        .enqueue(&steps_job("Rename", JobTier::OnDemand))
+        .expect("enqueues");
+
+    wait_for(&runner, "the first steps", |_| {
+        steps.load(Ordering::SeqCst) >= 3
+    });
+    let paused = runner.pause(job.id).expect("pauses");
+    assert!(paused.paused);
+    thread::sleep(Duration::from_millis(40));
+    let held = steps.load(Ordering::SeqCst);
+    thread::sleep(Duration::from_millis(120));
+    assert_eq!(
+        steps.load(Ordering::SeqCst),
+        held,
+        "a paused job takes no steps"
+    );
+    assert!(held < 50);
+    assert_eq!(job_status(&runner, job.id), Some(JobStatus::Running));
+
+    let resumed = runner.resume(job.id).expect("resumes");
+    assert!(!resumed.paused);
+    wait_for(&runner, "completion", |runner| {
+        job_status(runner, job.id) == Some(JobStatus::Completed)
+    });
+    assert_eq!(
+        steps.load(Ordering::SeqCst),
+        50,
+        "it carried on where it stopped"
+    );
+}
+
+#[test]
+fn a_paused_queued_job_is_skipped_and_cancel_still_works_while_paused() {
+    let db = Arc::new(Mutex::new(Database::open_in_memory().expect("db opens")));
+    let steps = Arc::new(AtomicUsize::new(0));
+    let held = {
+        let mut raw = db.lock().expect("lock");
+        let held = raw
+            .enqueue_job(&steps_job("Held", JobTier::OnDemand))
+            .expect("enqueues");
+        raw.set_job_paused(held.id, true).expect("pauses");
+        held
+    };
+    let runner = steps_runner(&db, &steps);
+    let next = runner
+        .enqueue(&steps_job("Next", JobTier::OnDemand))
+        .expect("enqueues");
+    let background = runner
+        .enqueue(&steps_job("Background", JobTier::BackgroundCpu))
+        .expect("enqueues");
+
+    wait_for(&runner, "the later jobs", |runner| {
+        job_status(runner, next.id) == Some(JobStatus::Completed)
+            && job_status(runner, background.id) == Some(JobStatus::Completed)
+    });
+    assert_eq!(job_status(&runner, held.id), Some(JobStatus::Queued));
+
+    runner.cancel(held.id).expect("cancels");
+    assert_eq!(job_status(&runner, held.id), Some(JobStatus::Cancelled));
+
+    let running = runner
+        .enqueue(&steps_job("Running", JobTier::OnDemand))
+        .expect("enqueues");
+    wait_for(&runner, "the job to start", |runner| {
+        job_status(runner, running.id) == Some(JobStatus::Running)
+    });
+    runner.pause(running.id).expect("pauses");
+    runner.cancel(running.id).expect("cancels");
+    wait_for(&runner, "the paused job to cancel", |runner| {
+        job_status(runner, running.id) == Some(JobStatus::Cancelled)
+    });
+    assert!(matches!(
+        runner.pause(running.id),
+        Err(JobError::NotPausable { .. })
+    ));
+}
+
+#[test]
+fn a_paused_job_stays_paused_after_a_restart() {
+    let db = Arc::new(Mutex::new(Database::open_in_memory().expect("db opens")));
+    let job = {
+        let mut raw = db.lock().expect("lock");
+        let job = raw
+            .enqueue_job(&steps_job("Left paused", JobTier::OnDemand))
+            .expect("enqueues");
+        raw.claim_next_job(true).expect("claims");
+        raw.set_job_paused(job.id, true).expect("pauses");
+        job
+    };
+    let steps = Arc::new(AtomicUsize::new(0));
+    let runner = steps_runner(&db, &steps);
+    thread::sleep(Duration::from_millis(100));
+    let snap = runner.snapshot().expect("snapshot reads");
+    let restored = snap
+        .active
+        .iter()
+        .find(|active| active.id == job.id)
+        .expect("still active");
+    assert_eq!(restored.status, JobStatus::Queued);
+    assert!(restored.paused);
+    assert_eq!(steps.load(Ordering::SeqCst), 0);
+
+    runner.resume(job.id).expect("resumes");
+    wait_for(&runner, "completion", |runner| {
+        job_status(runner, job.id) == Some(JobStatus::Completed)
+    });
+}

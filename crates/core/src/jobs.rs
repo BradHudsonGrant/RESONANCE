@@ -75,6 +75,11 @@ impl JobStatus {
         matches!(self, Self::Queued | Self::Running)
     }
 
+    /// Only a job that has not finished can be paused or resumed.
+    pub const fn can_pause(self) -> bool {
+        self.is_active()
+    }
+
     pub const fn can_retry(self) -> bool {
         matches!(self, Self::Failed | Self::Cancelled)
     }
@@ -108,6 +113,8 @@ pub struct Job {
     pub created_ns: i64,
     pub started_ns: Option<i64>,
     pub finished_ns: Option<i64>,
+    /// The user paused it. A paused job is not started, and a running one waits.
+    pub paused: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

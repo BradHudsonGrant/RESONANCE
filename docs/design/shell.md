@@ -9,7 +9,7 @@ The shell is the frame around every space: the top bar, the sidebar, the command
 - Left, 20 px from the edge: the mark (19 by 21) and the RESONANCE wordmark (16 px), 18 px apart.
 - Right, 20 px from the edge: three 28 px icon buttons with 18 px icons in Text 2, 30 px apart centre to centre.
   - Audio status. Opens the audio device and latency popover. Live in M7.
-  - Activity. Opens the job queue and undo history as a sheet. Live in M2.
+  - Activity. Opens the job queue and undo history as a sheet. Live in M2. Each active job has Pause (Resume once paused) and Cancel. A paused job stops at its next file or batch, keeps its progress and stays paused after a restart.
   - Settings. Opens settings as a sheet. #51 gives it the theme switch (Dark, Light, System). Sources arrive in M2, provider keys and the key notation (Camelot, Open Key, Musical; #126) in M3, and audio and MIDI devices in M7.
 
 Activity and Settings sit here, as `concept-dark.png` shows, and not at the foot of the sidebar ([ADR 0012](../adr/0012-concept-boards-as-design-target.md)).

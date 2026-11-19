@@ -78,6 +78,16 @@ pub enum Request {
         #[ts(type = "number")]
         job_id: i64,
     },
+    /// Pauses a queued or running job. A running one stops at its next safe point.
+    PauseJob {
+        #[ts(type = "number")]
+        job_id: i64,
+    },
+    /// Lets a paused job carry on from where it stopped.
+    ResumeJob {
+        #[ts(type = "number")]
+        job_id: i64,
+    },
     /// Re-queues a failed or cancelled job.
     RetryJob {
         #[ts(type = "number")]
@@ -287,6 +297,8 @@ pub enum Response {
     IdentifyWithUrl(TrackIdentification),
     JobsSnapshot(ActivitySnapshot),
     CancelJob(ActivitySnapshot),
+    PauseJob(ActivitySnapshot),
+    ResumeJob(ActivitySnapshot),
     RetryJob(ActivitySnapshot),
     ClearFinishedJobs(ActivitySnapshot),
     ActivityChanged(ActivityChanged),
@@ -686,6 +698,8 @@ pub struct ActivityJob {
     pub error_message: Option<String>,
     /// True when this job is waiting or paused because a Mix deck is playing.
     pub paused_for_mix: bool,
+    /// True when the user paused this job.
+    pub paused: bool,
     #[ts(type = "number")]
     pub created_ms: i64,
     #[ts(type = "number | null")]

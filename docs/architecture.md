@@ -70,7 +70,7 @@ The CLI matters. It runs the same crates as the app, so scanning, analysis, benc
 - Commands live in `api` as plain typed functions. Two transports call them: Tauri IPC in the packaged app and a localhost WebSocket in development. The handlers and types are the same in both, and the Tauri shell holds no logic.
 - The audio callback never allocates, locks, does I/O or logs. Data goes in and out through lock-free queues. Decoding and stretching run on worker threads that feed ring buffers. The audio clock is the only clock. The UI extrapolates between updates.
 - Meter and playhead data reach the UI over a binary channel at 60 Hz or less. Waveform data is binary too. Neither goes through JSON events.
-- Analysers share one trait. The job queue schedules them by tier and resource. One heavy GPU job runs at a time, it yields to anything the user is waiting on, and it backs off while Mix is live.
+- Analysers share one trait. The job queue schedules them by tier and resource. One heavy GPU job runs at a time, it yields to anything the user is waiting on, and it backs off while Mix is live. The user can pause any job; a paused job is not started, a running one waits at its next safe point, and the flag is stored on the `job` row so it survives a restart.
 - The model registry records, for each model: id, version, source URL, checksum, licence, whether commercial use is allowed, and the input spec. Models download on first use into the app data folder. They are never in git.
 - Each crate has typed errors. No `unwrap` outside tests. No catch-all that hides a failure. User-facing messages are produced once, at the IPC boundary.
 - No hard-coded paths. Platform folders come from a library. Windows-specific code sits behind `cfg` in one module per crate.

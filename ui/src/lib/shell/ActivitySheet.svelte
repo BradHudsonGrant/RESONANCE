@@ -9,6 +9,8 @@
   export interface ActivityClient {
     snapshot: () => Promise<ActivitySnapshot>;
     cancel: (job_id: number) => Promise<ActivitySnapshot>;
+    pause: (job_id: number) => Promise<ActivitySnapshot>;
+    resume: (job_id: number) => Promise<ActivitySnapshot>;
     retry: (job_id: number) => Promise<ActivitySnapshot>;
     clearFinished: () => Promise<ActivitySnapshot>;
   }
@@ -43,6 +45,7 @@
   });
 
   function activeStatusLabel(job: ActivityJob): string {
+    if (job.paused) return 'Paused';
     if (job.paused_for_mix) return 'Paused · Mix live';
     if (job.status === 'running') return 'Running';
     return 'Queued';
@@ -85,6 +88,20 @@
           if (next) onsnapshot?.(next);
         })
         .catch(() => {});
+    } finally {
+      busyJobId = null;
+    }
+  }
+
+  async function togglePause(job: ActivityJob) {
+    if (!client || busyJobId !== null) return;
+    busyJobId = job.id;
+    actionError = '';
+    try {
+      const next = job.paused ? await client.resume(job.id) : await client.pause(job.id);
+      if (next) onsnapshot?.(next);
+    } catch (failure) {
+      actionError = failure instanceof Error ? failure.message : String(failure);
     } finally {
       busyJobId = null;
     }
@@ -155,13 +172,23 @@
             <li class="job-card" aria-label={job.label}>
               <div class="job-header">
                 <span class="job-label">{job.label}</span>
-                <Button
-                  size="xs"
-                  disabled={busyJobId === job.id || !client}
-                  onclick={() => cancelJob(job.id)}
-                >
-                  Cancel
-                </Button>
+                <div class="job-actions">
+                  <Button
+                    size="xs"
+                    disabled={busyJobId === job.id || !client}
+                    aria-label={`${job.paused ? 'Resume' : 'Pause'} ${job.label}`}
+                    onclick={() => togglePause(job)}
+                  >
+                    {job.paused ? 'Resume' : 'Pause'}
+                  </Button>
+                  <Button
+                    size="xs"
+                    disabled={busyJobId === job.id || !client}
+                    onclick={() => cancelJob(job.id)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
               </div>
               <div class="job-meta">
                 <span class="status">{activeStatusLabel(job)}</span>
@@ -303,6 +330,12 @@
     justify-content: space-between;
     gap: var(--space-2);
     min-width: 0;
+  }
+
+  .job-actions {
+    display: flex;
+    flex: none;
+    gap: var(--space-1-5);
   }
 
   .job-label {
