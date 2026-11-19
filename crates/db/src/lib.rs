@@ -2,6 +2,7 @@ mod collections;
 mod identification;
 mod identity;
 mod jobs;
+mod operations;
 mod search;
 mod sources;
 mod tags;
@@ -20,6 +21,7 @@ pub use identity::{
     IdentityMatch, PendingAsset, StoredAssetIdentity, StoredRelinkCandidate,
     StoredTrackRelinkTarget,
 };
+pub use operations::StoredOperation;
 use resonance_core::collections::CollectionNameError;
 use resonance_core::library::{
     AudioFacts, AudioFormat, ScannedFile, TagField, is_asset_path_included,
@@ -28,11 +30,11 @@ use resonance_core::staging::effective_tags;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 pub use search::{LibraryFacets, now_unix_ms};
 pub use sources::{SourceAssetPresence, SourceConfig};
-pub use tags::{AcceptReport, StagingQueueEntry, TagLayers};
+pub use tags::{AcceptReport, StagingQueueEntry, TagLayers, TagWriteTarget};
 
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
-const MIGRATIONS: [&str; 10] = [
+const MIGRATIONS: [&str; 11] = [
     include_str!("../migrations/0001_library.sql"),
     include_str!("../migrations/0002_sources.sql"),
     include_str!("../migrations/0003_identity.sql"),
@@ -43,6 +45,7 @@ const MIGRATIONS: [&str; 10] = [
     include_str!("../migrations/0008_jobs.sql"),
     include_str!("../migrations/0009_identification.sql"),
     include_str!("../migrations/0010_tag_layers.sql"),
+    include_str!("../migrations/0011_operations.sql"),
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

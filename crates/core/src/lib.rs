@@ -2,6 +2,7 @@ pub mod collections;
 pub mod identify;
 pub mod identity;
 pub mod jobs;
+pub mod journal;
 pub mod key;
 pub mod library;
 pub mod meter;

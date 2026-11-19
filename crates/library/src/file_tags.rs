@@ -32,7 +32,7 @@ pub struct FileContents {
 }
 
 /// The keys a field can sit under, most specific first.
-fn keys(field: TagField) -> &'static [ItemKey] {
+pub(crate) fn keys(field: TagField) -> &'static [ItemKey] {
     match field {
         TagField::Title => &[ItemKey::TrackTitle],
         TagField::Artist => &[ItemKey::TrackArtist],
@@ -127,6 +127,11 @@ fn start_of_audio_file(file: &mut File) -> io::Result<u64> {
         }
     }
     Ok(0)
+}
+
+/// Whether an ID3v2 block sits in front of an MP4 container.
+pub(crate) fn has_leading_id3v2(path: &Path) -> io::Result<bool> {
+    Ok(start_of_audio_file(&mut File::open(path)?)? > 0)
 }
 
 pub(crate) fn open_audio_reader(path: &Path) -> io::Result<OffsetFile> {
