@@ -14,6 +14,7 @@
     | 'pause'
     | 'star'
     | 'check'
+    | 'columns'
     | 'unanalysed'
     | 'recent'
     | 'sliders'
@@ -46,6 +47,7 @@
   import Circle from '@lucide/svelte/icons/circle';
   import CircleAlert from '@lucide/svelte/icons/circle-alert';
   import Clock from '@lucide/svelte/icons/clock';
+  import Columns3 from '@lucide/svelte/icons/columns-3';
   import Disc3 from '@lucide/svelte/icons/disc-3';
   import Ellipsis from '@lucide/svelte/icons/ellipsis';
   import FolderOpen from '@lucide/svelte/icons/folder-open';
@@ -91,6 +93,7 @@
     pause: Pause,
     star: Star,
     check: Check,
+    columns: Columns3,
     unanalysed: Circle,
     recent: Clock,
     sliders: SlidersHorizontal,

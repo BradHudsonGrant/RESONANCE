@@ -3,4 +3,4 @@
 /**
  * A tag field, as staging and tag edits name it.
  */
-export type TagName = "title" | "artist" | "mix" | "album" | "album_artist" | "genre" | "subgenre" | "label" | "catno" | "year" | "bpm" | "key" | "track_number" | "comment";
+export type TagName = "title" | "artist" | "mix" | "album" | "album_artist" | "genre" | "subgenre" | "label" | "catno" | "year" | "bpm" | "key" | "track_number" | "comment" | "composer" | "remixer";

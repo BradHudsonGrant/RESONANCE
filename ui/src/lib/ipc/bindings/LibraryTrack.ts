@@ -6,7 +6,7 @@ import type { TrackKey } from "./TrackKey";
 /**
  * One track as the library table and the inspector show it.
  */
-export type LibraryTrack = { id: number, favourite: boolean, title: string, artist: string | null, album: string | null, album_artist: string | null, genre: string | null, year: string | null, track_number: string | null, label: string | null, comment: string | null, bpm: number | null, key: TrackKey | null, 
+export type LibraryTrack = { id: number, favourite: boolean, title: string, artist: string | null, album: string | null, album_artist: string | null, genre: string | null, year: string | null, track_number: string | null, label: string | null, comment: string | null, mix: string | null, subgenre: string | null, catno: string | null, composer: string | null, remixer: string | null, bpm: number | null, key: TrackKey | null, 
 /**
  * The key tag as the file has it, which may not be a key at all.
  */
@@ -22,4 +22,12 @@ missing_since: number | null,
 /**
  * The hash of the picture the track shows, loaded from `/artwork/<hash>`.
  */
-artwork: string | null, };
+artwork: string | null, 
+/**
+ * Unix epoch milliseconds when the track came into the library.
+ */
+added_ms: number, 
+/**
+ * Unix epoch milliseconds when the file was last changed on disk.
+ */
+modified_ms: number, };

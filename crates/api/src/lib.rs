@@ -13,6 +13,9 @@ mod renames;
 pub mod serve;
 mod sources;
 mod staging;
+mod table_layout;
+
+pub use table_layout::default_table_layout;
 mod tag_writes;
 
 use std::collections::HashMap;
@@ -22,18 +25,15 @@ use std::time::Duration;
 
 use command::{
     AppInfo, FavouriteState, IdentifyReport, LibraryFacets, LibraryTrack, MixDeck, MixDeckState,
-    MixDevice, MixState, PreviewState, Request, Response, ScanReport, SortDirection, TrackAudio,
-    TrackCollection, TrackFilterPill, TrackFormat, TrackKey, TrackPage, TrackQuery, TrackSortField,
+    MixDevice, MixState, PreviewState, Request, Response, ScanReport, TrackAudio, TrackCollection,
+    TrackFilterPill, TrackFormat, TrackKey, TrackPage, TrackQuery,
 };
 use error::ApiError;
 use identity::{run_identify_pass, to_command_report};
 use jobs::{enqueue_identify_if_needed, execute_job, scan_source_job};
 use resonance_core::key::Key;
 use resonance_core::library::{AudioFormat, ScannedFile, TagField};
-use resonance_core::search::{
-    FilterPill as CoreFilterPill, SortDirection as CoreSortDirection, TrackQuery as CoreTrackQuery,
-    TrackSortField as CoreTrackSortField,
-};
+use resonance_core::search::{FilterPill as CoreFilterPill, TrackQuery as CoreTrackQuery};
 use resonance_core::staging::effective_tags;
 use resonance_db::{Database, TrackRow};
 use resonance_engine::{DeckId, Mix, MixStatus, PreviewStatus};
@@ -294,6 +294,10 @@ impl Api {
                 .remove_tracks_from_collection(collection_id, &track_ids)
                 .map(Response::RemoveTracksFromCollection),
             Request::LibraryFacets => self.library_facets().map(Response::LibraryFacets),
+            Request::TableLayout => self.table_layout().map(Response::TableLayout),
+            Request::ChangeTableLayout { change } => self
+                .change_table_layout(change)
+                .map(Response::ChangeTableLayout),
             Request::Scan { folder } => self.scan(Path::new(&folder)).map(Response::Scan),
             Request::Identify => self.identify().map(Response::Identify),
             Request::IdentifyOnline { track_ids } => self
@@ -696,19 +700,14 @@ pub(crate) fn core_track_query(query: Option<TrackQuery>) -> CoreTrackQuery {
             .collect(),
         collection_id: query.collection_id,
         missing_only: query.missing_only.unwrap_or(false),
-        sort: match query.sort.unwrap_or_default() {
-            TrackSortField::Index => CoreTrackSortField::Index,
-            TrackSortField::Title => CoreTrackSortField::Title,
-            TrackSortField::Artist => CoreTrackSortField::Artist,
-            TrackSortField::Bpm => CoreTrackSortField::Bpm,
-            TrackSortField::Key => CoreTrackSortField::Key,
-            TrackSortField::Duration => CoreTrackSortField::Duration,
-            TrackSortField::Added => CoreTrackSortField::Added,
-        },
-        direction: match query.direction.unwrap_or_default() {
-            SortDirection::Asc => CoreSortDirection::Asc,
-            SortDirection::Desc => CoreSortDirection::Desc,
-        },
+        sort: table_layout::core_sort_field(query.sort.unwrap_or_default()),
+        direction: table_layout::core_direction(query.direction.unwrap_or_default()),
+        then_sort: query.then_sort.map(|field| {
+            (
+                table_layout::core_sort_field(field),
+                table_layout::core_direction(query.then_direction.unwrap_or_default()),
+            )
+        }),
     }
 }
 
@@ -745,6 +744,11 @@ pub(crate) fn library_track(row: &TrackRow) -> LibraryTrack {
         track_number: tag(TagField::TrackNumber),
         label: tag(TagField::Label),
         comment: tag(TagField::Comment),
+        mix: tag(TagField::Mix),
+        subgenre: tag(TagField::Subgenre),
+        catno: tag(TagField::CatNo),
+        composer: tag(TagField::Composer),
+        remixer: tag(TagField::Remixer),
         bpm: file.bpm(),
         key: file.key().map(track_key),
 
@@ -772,12 +776,16 @@ pub(crate) fn library_track(row: &TrackRow) -> LibraryTrack {
             .collect(),
         missing_since: row.missing_since,
         artwork: row.artwork.clone(),
+        added_ms: row.added_ns / 1_000_000,
+        modified_ms: file.modified_ns / 1_000_000,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use resonance_core::library::{AudioFacts, AudioFormat, ScannedFile};
+
+    use crate::command::{SortDirection, TrackSortField};
 
     use super::*;
 

@@ -62,10 +62,12 @@ pub enum TagField {
     Mix,
     Subgenre,
     CatNo,
+    Composer,
+    Remixer,
 }
 
 impl TagField {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 16] = [
         Self::Title,
         Self::Artist,
         Self::Album,
@@ -80,6 +82,8 @@ impl TagField {
         Self::Mix,
         Self::Subgenre,
         Self::CatNo,
+        Self::Composer,
+        Self::Remixer,
     ];
 
     pub fn name(self) -> &'static str {
@@ -98,6 +102,8 @@ impl TagField {
             Self::Mix => "mix",
             Self::Subgenre => "subgenre",
             Self::CatNo => "catno",
+            Self::Composer => "composer",
+            Self::Remixer => "remixer",
         }
     }
 

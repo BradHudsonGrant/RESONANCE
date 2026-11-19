@@ -33,6 +33,8 @@
     key: 'key',
     track_number: 'track number',
     comment: 'comment',
+    composer: 'composer',
+    remixer: 'remixer',
   };
 
   function statusText(file: RenameFile): string {

@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use crate::key::Key;
-use crate::library::AudioFormat;
+use crate::library::{AudioFormat, TagField};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum FilterPill {
@@ -21,6 +21,26 @@ pub enum TrackSortField {
     Key,
     Duration,
     Added,
+    Album,
+    Genre,
+    Label,
+    CatNo,
+    Year,
+    Comment,
+    Composer,
+    Remixer,
+    Mix,
+    Format,
+    Bitrate,
+    SampleRate,
+    BitDepth,
+    Channels,
+    FileSize,
+    Modified,
+    /// By source folder, then by the file's path inside it.
+    Path,
+    /// A tag with no column of its own, read from the tag value index.
+    Tag(TagField),
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -45,6 +65,8 @@ pub struct TrackQuery {
     pub formats: Vec<AudioFormat>,
     pub sort: TrackSortField,
     pub direction: SortDirection,
+    /// Orders tracks that tie on `sort`.
+    pub then_sort: Option<(TrackSortField, SortDirection)>,
 }
 
 impl TrackQuery {

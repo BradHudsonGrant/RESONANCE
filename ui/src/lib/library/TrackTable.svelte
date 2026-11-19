@@ -5,12 +5,16 @@
   import Icon from '../design/Icon.svelte';
   import TableCell from '../design/TableCell.svelte';
   import TableRow from '../design/TableRow.svelte';
+  import { artworkUrl } from '../ipc/artwork';
   import type { LibraryCollection } from '../ipc/bindings/LibraryCollection';
   import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
-  import type { SortDirection } from '../ipc/bindings/SortDirection';
-  import type { TrackSortField } from '../ipc/bindings/TrackSortField';
+  import type { TableColumn } from '../ipc/bindings/TableColumn';
+  import type { TableLayoutChange } from '../ipc/bindings/TableLayoutChange';
   import CollectionMenu from './CollectionMenu.svelte';
-  import { columnWidths, compactColumnWidths, dataColumns, tableMinWidth } from './columns';
+  import ColumnMenu, { type MenuAnchor } from './ColumnMenu.svelte';
+  import { cellLook, cellText, columnWidth, fitColumns, gridTemplate, tableWidth } from './columns';
+  import { RowHeights } from './row-heights';
+  import { TableLayoutState } from './table-layout.svelte';
   import type { TrackPages } from './track-pages.svelte';
 
   interface Props {
@@ -26,7 +30,8 @@
     onpreview?: (track: LibraryTrack) => void;
     onrelink?: (track: LibraryTrack) => void;
     ontogglefavourite?: (track: LibraryTrack) => void;
-    onsort?: (sort: TrackSortField, direction: SortDirection) => void;
+    /** The columns, widths, wrap and sort, kept by the core. */
+    layout?: TableLayoutState;
     onaddtocollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
     onremovefromcollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
     oncreatecollectionandadd?: (name: string, trackIds: number[]) => Promise<void> | void;
@@ -34,14 +39,6 @@
     checkedCount?: number;
     allChecked?: boolean;
   }
-
-  const columnSortField: Record<string, TrackSortField> = {
-    title: 'title',
-    artist: 'artist',
-    bpm: 'bpm',
-    key: 'key',
-    time: 'duration',
-  };
 
   let {
     pages,
@@ -54,7 +51,7 @@
     onpreview,
     onrelink,
     ontogglefavourite,
-    onsort,
+    layout = new TableLayoutState(),
     onaddtocollection,
     onremovefromcollection,
     oncreatecollectionandadd,
@@ -96,9 +93,52 @@
     allChecked = allLoadedChecked;
   });
 
+  let viewportWidth = $state(0);
+  let rowsEl: HTMLDivElement | undefined = $state();
+
+  // A column being dragged wider or narrower, drawn at once and saved when the pointer lifts.
+  let liveWidths = $state<Record<string, number>>({});
+  const fit = $derived(fitColumns(layout.current, viewportWidth, liveWidths));
+  const shownColumns = $derived(fit.shown);
+  const wrap = $derived(layout.current.wrap);
+  const columnsTemplate = $derived(gridTemplate(shownColumns, false, liveWidths));
+  const compactTemplate = $derived(gridTemplate(shownColumns, true, liveWidths));
+  const minWidth = $derived(`${tableWidth(shownColumns, liveWidths, true)}px`);
+
+  // Wrapped rows are as tall as their text, so their tops come from measured heights. Unwrapped
+  // rows are all one height and need none of this.
+  const heights = new RowHeights();
+  let heightsVersion = $state(0);
+  $effect(() => {
+    const count = wrap ? pages.total : 0;
+    void pages.scrollResetCount;
+    void columnsTemplate;
+    const base = rowHeight;
+    untrack(() => {
+      heights.reset(count, base);
+      heightsVersion += 1;
+    });
+  });
+
+  function rowTop(index: number): number {
+    return wrap ? heights.offsetOf(index) : index * rowHeight;
+  }
+
   // The header sticks to the top of the scrolling area, so the rows show below it.
   const rowsHeight = $derived(Math.max(0, viewportHeight - headHeight));
-  const first = $derived(Math.max(0, Math.floor(scrollTop / rowHeight) - overscan));
+  const first = $derived.by(() => {
+    void heightsVersion;
+    const top = wrap ? heights.indexAt(scrollTop) : Math.floor(scrollTop / rowHeight);
+    return Math.max(0, top - overscan);
+  });
+  const rowsTop = $derived.by(() => {
+    void heightsVersion;
+    return rowTop(first);
+  });
+  const bodyHeight = $derived.by(() => {
+    void heightsVersion;
+    return wrap ? heights.total : pages.total * rowHeight;
+  });
   const shown = $derived(
     Math.max(
       0,
@@ -117,8 +157,10 @@
     let rowHeightRead = false;
     const sized = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        if (entry.target === viewport) viewportHeight = entry.contentRect.height;
-        else if (entry.target === head) {
+        if (entry.target === viewport) {
+          viewportHeight = entry.contentRect.height;
+          viewportWidth = entry.contentRect.width;
+        } else if (entry.target === head) {
           headHeight = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
         }
       }
@@ -173,42 +215,244 @@
     }
   });
 
-  const activeSort = $derived<TrackSortField>(pages.query.sort ?? 'index');
-  const activeDirection = $derived<SortDirection>(pages.query.direction ?? 'asc');
+  // Rows drawn with text are measured after each draw. A row above the view that grows pushes
+  // the scroll position down by as much, so the rows in view stay where they are.
+  $effect(() => {
+    if (!wrap || !rowsEl) return;
+    const start = first;
+    const loaded: boolean[] = [];
+    for (let offset = 0; offset < shown; offset += 1)
+      loaded.push(Boolean(pages.track(start + offset)));
+    void columnsTemplate;
+    untrack(() => {
+      if (!rowsEl) return;
+      const inView = heights.indexAt(viewport?.scrollTop ?? 0);
+      let above = 0;
+      let changed = false;
+      loaded.forEach((isLoaded, offset) => {
+        const row = rowsEl?.children[offset];
+        if (!isLoaded || !(row instanceof HTMLElement)) return;
+        const change = heights.set(start + offset, row.offsetHeight);
+        if (change === 0) return;
+        changed = true;
+        if (start + offset < inView) above += change;
+      });
+      if (!changed) return;
+      heightsVersion += 1;
+      if (above !== 0 && viewport) {
+        viewport.scrollTop += above;
+        scrollTop = viewport.scrollTop;
+      }
+    });
+  });
 
-  function headerSort(field: TrackSortField): 'ascending' | 'descending' | 'none' {
-    if (field === 'index') {
-      return activeSort === 'index' && activeDirection === 'desc' ? 'descending' : 'none';
-    }
-    if (activeSort !== field) return 'none';
-    return activeDirection === 'desc' ? 'descending' : 'ascending';
+  function sortOf(id: string): { order: number; direction: 'asc' | 'desc' } | null {
+    const at = layout.current.sort.findIndex((key) => key.column === id);
+    return at < 0 ? null : { order: at, direction: layout.current.sort[at]!.direction };
   }
 
-  function cycleSort(field: TrackSortField) {
-    if (field === 'index') {
-      if (activeSort === 'index' && activeDirection === 'asc') {
-        onsort?.('index', 'desc');
-      } else {
-        onsort?.('index', 'asc');
-      }
+  function headerSort(id: string): 'ascending' | 'descending' | 'none' {
+    const sort = sortOf(id);
+    if (!sort || sort.order > 0) return 'none';
+    return sort.direction === 'desc' ? 'descending' : 'ascending';
+  }
+
+  async function changeLayout(change: TableLayoutChange) {
+    try {
+      await layout.change(change);
+    } catch {
+      // The core keeps the layout it had, and so does the table.
+    }
+  }
+
+  // A drag that moved a header ends in a click, which must not also sort it.
+  let suppressClick = false;
+
+  function sortBy(event: MouseEvent, id: string) {
+    if (suppressClick) {
+      suppressClick = false;
       return;
     }
-    if (activeSort !== field) {
-      onsort?.(field, 'asc');
-    } else if (activeDirection === 'asc') {
-      onsort?.(field, 'desc');
-    } else {
-      onsort?.('index', 'asc');
+    void changeLayout({ kind: 'sort', column: id, add: event.shiftKey });
+  }
+
+  function moveBy(id: string, delta: number) {
+    const order = layout.current.columns.map((column) => column.id);
+    const from = order.indexOf(id);
+    const to = Math.max(0, Math.min(order.length - 1, from + delta));
+    if (from >= 0 && to !== from) void changeLayout({ kind: 'move', column: id, to });
+  }
+
+  function onHeaderKey(event: KeyboardEvent, column: TableColumn) {
+    if (event.altKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+      event.preventDefault();
+      event.stopPropagation();
+      moveBy(column.id, event.key === 'ArrowLeft' ? -1 : 1);
     }
+  }
+
+  let drag = $state<{ id: string; line: number } | null>(null);
+
+  function headerCells(): HTMLElement[] {
+    return Array.from(head?.querySelectorAll<HTMLElement>('[data-column]') ?? []);
+  }
+
+  function startDrag(event: PointerEvent, column: TableColumn) {
+    if (event.button !== 0 || !head) return;
+    if (event.target instanceof HTMLElement && event.target.closest('.resize')) return;
+    const startX = event.clientX;
+    let target = -1;
+    let moving = false;
+    const onMove = (move: PointerEvent) => {
+      if (!moving && Math.abs(move.clientX - startX) < 4) return;
+      moving = true;
+      const cells = headerCells();
+      const headLeft = head?.getBoundingClientRect().left ?? 0;
+      target = cells.findIndex((cell) => {
+        const rect = cell.getBoundingClientRect();
+        return move.clientX < rect.left + rect.width / 2;
+      });
+      if (target < 0) target = cells.length;
+      const edge =
+        target < cells.length
+          ? cells[target]!.parentElement!.getBoundingClientRect().left
+          : (cells.at(-1)?.parentElement?.getBoundingClientRect().right ?? 0);
+      drag = { id: column.id, line: edge - headLeft };
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      drag = null;
+      if (!moving) return;
+      suppressClick = true;
+      setTimeout(() => (suppressClick = false));
+      const shownIds = shownColumns.map((shownColumn) => shownColumn.id);
+      const rest = layout.current.columns
+        .map((shownColumn) => shownColumn.id)
+        .filter((id) => id !== column.id);
+      const before = shownIds[target];
+      const lastOther = shownIds.filter((id) => id !== column.id).at(-1);
+      const to =
+        before !== undefined && before !== column.id
+          ? rest.indexOf(before)
+          : before === column.id
+            ? -1
+            : lastOther === undefined
+              ? -1
+              : rest.indexOf(lastOther) + 1;
+      if (to >= 0) void changeLayout({ kind: 'move', column: column.id, to });
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
+  function renderedWidth(column: TableColumn): number {
+    const cell = head?.querySelector<HTMLElement>(`[data-column="${CSS.escape(column.id)}"]`);
+    return cell?.parentElement?.getBoundingClientRect().width ?? columnWidth(column);
+  }
+
+  function clampWidth(width: number): number {
+    const { min_width_px: min, max_width_px: max } = layout.current;
+    return Math.round(Math.max(min, Math.min(max, width)));
+  }
+
+  async function saveWidth(column: TableColumn, width: number) {
+    await changeLayout({ kind: 'resize', column: column.id, width_px: clampWidth(width) });
+    delete liveWidths[column.id];
+  }
+
+  function startResize(event: PointerEvent, column: TableColumn) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startWidth = renderedWidth(column);
+    const onMove = (move: PointerEvent) => {
+      liveWidths[column.id] = clampWidth(startWidth + move.clientX - startX);
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      const width = liveWidths[column.id];
+      if (width !== undefined) void saveWidth(column, width);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
+  /** The width of the widest value in view, header included. */
+  function fitWidth(column: TableColumn) {
+    const at = shownColumns.findIndex((shownColumn) => shownColumn.id === column.id);
+    if (at < 0 || !rowsEl) return;
+    const cells = rowsEl.querySelectorAll<HTMLElement>(
+      `:scope > [role='row'] > :nth-child(${at + 4})`,
+    );
+    const headerCell = head?.querySelector<HTMLElement>(`[data-column="${CSS.escape(column.id)}"]`);
+    let widest = headerCell?.parentElement?.scrollWidth ?? 0;
+    for (const cell of cells) widest = Math.max(widest, cell.scrollWidth);
+    void saveWidth(column, widest + 2);
+  }
+
+  function onResizeKey(event: KeyboardEvent, column: TableColumn) {
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      event.preventDefault();
+      event.stopPropagation();
+      const step = (event.shiftKey ? 1 : 8) * (event.key === 'ArrowLeft' ? -1 : 1);
+      void saveWidth(column, renderedWidth(column) + step);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      event.stopPropagation();
+      fitWidth(column);
+    }
+  }
+
+  let columnMenuOpen = $state(false);
+  let columnMenuAnchor = $state<MenuAnchor | null>(null);
+  let columnMenuReturn: HTMLElement | null = null;
+
+  function openColumnMenu(event: MouseEvent) {
+    const button = event.currentTarget as HTMLElement;
+    if (columnMenuOpen) {
+      closeColumnMenu();
+      return;
+    }
+    columnMenuReturn = button;
+    columnMenuAnchor = button.getBoundingClientRect();
+    columnMenuOpen = true;
+  }
+
+  function openColumnMenuAt(event: MouseEvent) {
+    event.preventDefault();
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    columnMenuReturn =
+      target
+        ?.closest<HTMLElement>('[role="columnheader"]')
+        ?.querySelector<HTMLElement>('button, [tabindex="0"]') ??
+      gridEl ??
+      null;
+    columnMenuAnchor = {
+      left: event.clientX,
+      right: event.clientX,
+      top: event.clientY,
+      bottom: event.clientY,
+    };
+    columnMenuOpen = true;
+  }
+
+  function closeColumnMenu() {
+    columnMenuOpen = false;
+    if (columnMenuReturn?.isConnected) columnMenuReturn.focus();
+    else gridEl?.focus();
   }
 
   function reveal(index: number) {
     if (!viewport) return;
-    const top = index * rowHeight;
+    const top = rowTop(index);
+    const height = wrap ? heights.heightOf(index) : rowHeight;
     const visible = viewport.clientHeight - headHeight;
     if (top < viewport.scrollTop) viewport.scrollTop = top;
-    else if (top + rowHeight > viewport.scrollTop + visible)
-      viewport.scrollTop = top + rowHeight - visible;
+    else if (top + height > viewport.scrollTop + visible)
+      viewport.scrollTop = top + height - visible;
   }
 
   function select(index: number) {
@@ -423,7 +667,8 @@
 
   function onkeydown(event: KeyboardEvent) {
     if (event.altKey || event.ctrlKey || event.metaKey) return;
-    if (menuOpen) return;
+    if (menuOpen || columnMenuOpen) return;
+    if (event.target instanceof HTMLElement && event.target.closest('.head')) return;
     const at = selected ?? -1;
     const moves: Record<string, number> = {
       ArrowDown: at + 1,
@@ -522,19 +767,35 @@
 
 <svelte:window onkeydown={onWindowKeyDown} />
 
-{#snippet headerButton(label: string, field: TrackSortField, numeric = false)}
-  {@const sortState = headerSort(field)}
+{#snippet sortButton(id: string, label: string, numeric: boolean, column?: TableColumn)}
+  {@const sort = sortOf(id)}
   <button
     type="button"
-    class={['sort-btn', { numeric, sorted: sortState !== 'none' }]}
-    onclick={() => cycleSort(field)}
+    class={['sort-btn', { numeric, sorted: sort !== null }]}
+    onclick={(event) => sortBy(event, id)}
+    onkeydown={(event) => {
+      // Enter sorts here, because the click it would make does not carry Shift.
+      if (event.key === 'Enter' && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        void changeLayout({ kind: 'sort', column: id, add: event.shiftKey });
+      } else if (column) {
+        onHeaderKey(event, column);
+      }
+    }}
   >
-    {#if sortState !== 'none'}
-      <span class="sort-arrow">
-        <Icon name={sortState === 'ascending' ? 'chevron-up' : 'chevron-down'} size={11} />
+    {#if sort}
+      <span class={['sort-arrow', { secondary: sort.order > 0 }]}>
+        <Icon
+          name={sort.direction === 'desc' ? 'chevron-down' : 'chevron-up'}
+          size={sort.order > 0 ? 9 : 11}
+        />
+        {#if sort.order > 0}
+          <span class="sort-order" aria-hidden="true">2</span>
+        {/if}
       </span>
     {/if}
-    <span>{label}</span>
+    <span class="sort-label">{label}</span>
+    {#if sort && sort.order > 0}<span class="visually-hidden">, second sort</span>{/if}
   </button>
 {/snippet}
 
@@ -548,9 +809,10 @@
   aria-activedescendant={selected !== null && selected >= first && selected < first + shown
     ? `${id}-row-${selected}`
     : undefined}
-  style:--columns={columnWidths}
-  style:--columns-compact={compactColumnWidths}
-  style:--table-width={tableMinWidth}
+  class:wrap
+  style:--columns={columnsTemplate}
+  style:--columns-compact={compactTemplate}
+  style:--table-width={minWidth}
   {onkeydown}
 >
   <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -561,7 +823,8 @@
     onclick={onViewportClick}
     onscroll={() => (scrollTop = viewport?.scrollTop ?? 0)}
   >
-    <div class="head" role="rowgroup" bind:this={head}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="head" role="rowgroup" bind:this={head} oncontextmenu={openColumnMenuAt}>
       <TableRow header aria-rowindex={1} style="grid-template-columns: var(--active-columns)">
         <TableCell header compact>
           <button
@@ -582,29 +845,85 @@
         </TableCell>
         <TableCell header compact><span class="visually-hidden">Status</span></TableCell>
         <TableCell header numeric ariaSort={headerSort('index')}>
-          {@render headerButton('#', 'index', true)}
+          {@render sortButton('index', '#', true)}
         </TableCell>
-        {#each dataColumns as column (column.key)}
-          {@const field = columnSortField[column.key]}
+        {#each shownColumns as column (column.id)}
           <TableCell
             header
             numeric={column.numeric}
-            ariaSort={field ? headerSort(field) : undefined}
+            compact={column.id === 'artwork'}
+            ariaSort={column.sortable ? headerSort(column.id) : undefined}
           >
-            {#if field}
-              {@render headerButton(column.label, field, column.numeric)}
-            {:else}
-              {column.label}
-            {/if}
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div
+              class={['head-cell', { dragging: drag?.id === column.id }]}
+              data-column={column.id}
+              onpointerdown={(event) => startDrag(event, column)}
+            >
+              {#if column.sortable}
+                {@render sortButton(column.id, column.label, column.numeric, column)}
+              {:else}
+                <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+                <span
+                  class="head-label"
+                  tabindex="0"
+                  onkeydown={(event) => onHeaderKey(event, column)}
+                >
+                  {#if column.id === 'artwork'}
+                    <span class="visually-hidden">{column.label}</span>
+                  {:else}
+                    {column.label}
+                  {/if}
+                </span>
+              {/if}
+              <!-- A focused separator is the resize handle, which ARIA counts as a widget. -->
+              <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+              <span
+                class="resize"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Width of {column.label}"
+                aria-valuemin={layout.current.min_width_px}
+                aria-valuemax={layout.current.max_width_px}
+                aria-valuenow={Math.round(columnWidth(column, liveWidths[column.id]))}
+                tabindex="0"
+                onpointerdown={(event) => startResize(event, column)}
+                ondblclick={() => fitWidth(column)}
+                onkeydown={(event) => onResizeKey(event, column)}
+              ></span>
+            </div>
           </TableCell>
         {/each}
         <TableCell header compact>
-          <span class="visually-hidden">Actions</span>
+          <div class="head-actions">
+            {#if fit.hidden.length > 0}
+              <button
+                type="button"
+                class="head-button hidden-count"
+                aria-label="{fit.hidden.length} columns hidden, too narrow"
+                aria-haspopup="menu"
+                onclick={openColumnMenu}>+{fit.hidden.length}</button
+              >
+            {/if}
+            <button
+              type="button"
+              class="head-button"
+              aria-label="Choose columns"
+              aria-haspopup="menu"
+              aria-expanded={columnMenuOpen}
+              onclick={openColumnMenu}
+            >
+              <Icon name="columns" size="xs" />
+            </button>
+          </div>
         </TableCell>
       </TableRow>
+      {#if drag}
+        <span class="drop-line" style:left="{drag.line}px" aria-hidden="true"></span>
+      {/if}
     </div>
-    <div class="body" role="rowgroup" style:height="{pages.total * rowHeight}px">
-      <div class="rows" style:transform="translateY({first * rowHeight}px)">
+    <div class="body" role="rowgroup" style:height="{bodyHeight}px">
+      <div class="rows" bind:this={rowsEl} style:transform="translateY({rowsTop}px)">
         {#each { length: shown }, offset}
           {@const index = first + offset}
           {@const track = pages.track(index)}
@@ -698,16 +1017,30 @@
             <TableCell numeric size="sm" tone="muted">
               {track ? index + 1 : ''}
             </TableCell>
-            {#each dataColumns as column (column.key)}
-              <TableCell
-                numeric={column.numeric}
-                mono={column.mono}
-                tone={column.tone}
-                weight={column.weight}
-              >
-                {track ? column.text(track) : ''}
-              </TableCell>
+            {#each shownColumns as column (column.id)}
+              {#if column.id === 'artwork'}
+                <TableCell compact>
+                  <span
+                    class="thumb"
+                    style:background-image={track?.artwork
+                      ? `url("${artworkUrl(track.artwork)}")`
+                      : 'none'}
+                  ></span>
+                </TableCell>
+              {:else}
+                {@const look = cellLook(column)}
+                {@const value = track ? cellText(column, track) : ''}
+                <TableCell
+                  numeric={look.numeric}
+                  mono={look.mono}
+                  tone={look.tone}
+                  weight={look.weight}
+                >
+                  <span class="value" title={!wrap && value ? value : undefined}>{value}</span>
+                </TableCell>
+              {/if}
             {/each}
+
             <TableCell compact>
               <div class="row-actions">
                 <button
@@ -757,6 +1090,15 @@
     </div>
   </div>
 </div>
+
+<ColumnMenu
+  open={columnMenuOpen}
+  anchor={columnMenuAnchor}
+  layout={layout.current}
+  hidden={fit.hidden.map((column) => column.id)}
+  onchange={(change) => void changeLayout(change)}
+  onclose={closeColumnMenu}
+/>
 
 <CollectionMenu
   open={menuOpen && resolvedMenuTracks.length > 0}
@@ -950,6 +1292,141 @@
   .sort-arrow {
     display: inline-flex;
     flex: 0 0 auto;
+    align-items: center;
+  }
+
+  .sort-arrow.secondary {
+    color: var(--color-text-2);
+  }
+
+  .sort-order {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+  }
+
+  .sort-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .head-cell {
+    position: relative;
+    display: flex;
+    align-items: center;
+    height: var(--table-header-height);
+    touch-action: none;
+  }
+
+  .head-cell.dragging {
+    margin: 0 calc(var(--space-2) * -1);
+    padding: 0 var(--space-2);
+    border-radius: var(--radius-xs);
+    background: var(--color-raised);
+    outline: var(--border-width) solid var(--color-border-control);
+    outline-offset: calc(-1 * var(--border-width));
+  }
+
+  .head-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .head-label:focus-visible {
+    border-radius: var(--radius-xs);
+    outline: var(--focus-ring-width) solid var(--color-border-control);
+  }
+
+  .resize {
+    position: absolute;
+    top: var(--space-1-5);
+    right: calc(var(--space-2) * -1);
+    bottom: var(--space-1-5);
+    width: var(--space-1-5);
+    cursor: col-resize;
+  }
+
+  .resize::after {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: var(--border-width);
+    background: transparent;
+    content: '';
+  }
+
+  .resize:hover::after,
+  .resize:focus-visible::after,
+  .resize:active::after {
+    background: var(--color-border-control);
+  }
+
+  .resize:focus-visible {
+    outline: none;
+  }
+
+  .drop-line {
+    position: absolute;
+    top: var(--space-1);
+    bottom: var(--space-1);
+    width: var(--selection-bar-width);
+    margin-left: calc(var(--selection-bar-width) / -2);
+    background: var(--color-text);
+    pointer-events: none;
+  }
+
+  .head-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-0-5);
+  }
+
+  .head-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--control-height-keybadge);
+    height: var(--control-height-keybadge);
+    padding: 0 var(--space-0-5);
+    border: 0;
+    border-radius: var(--radius-xs);
+    background: transparent;
+    color: var(--color-text-2);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    cursor: pointer;
+  }
+
+  .head-button:hover,
+  .head-button:focus-visible,
+  .head-button[aria-expanded='true'] {
+    background: var(--color-surface-2);
+    color: var(--color-text);
+  }
+
+  .thumb {
+    width: var(--control-height-keybadge);
+    height: var(--control-height-keybadge);
+    border-radius: var(--radius-xs);
+    background-color: var(--color-surface-2);
+    background-position: center;
+    background-size: cover;
+  }
+
+  /* Rows grow to their longest value, up to three lines, and anything longer is cut there. */
+  .wrap .rows > :global([role='row']) {
+    height: auto;
+    min-height: var(--row-height);
+    padding-block: var(--space-1-5);
+  }
+
+  .wrap .rows :global([role='cell']:not(.compact)) {
+    display: -webkit-box;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
   }
 
   .row-actions {
@@ -1016,6 +1493,25 @@
   }
 
   @media (forced-colors: active) {
+    .drop-line {
+      background: CanvasText;
+    }
+
+    .resize:hover::after,
+    .resize:focus-visible::after,
+    .resize:active::after {
+      background: Highlight;
+    }
+
+    .head-button[aria-expanded='true'],
+    .head-cell.dragging {
+      outline: var(--border-width) solid Highlight;
+    }
+
+    .thumb {
+      border: var(--border-width) solid CanvasText;
+    }
+
     .tick.filled {
       border-color: Highlight;
       background: Highlight;

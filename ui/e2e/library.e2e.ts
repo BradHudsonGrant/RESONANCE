@@ -298,6 +298,95 @@ test('instant search, filter drawer, favourites and column sorting filter the re
   await expect(titleHeader).toHaveAttribute('aria-sort', 'none');
 });
 
+test('columns are chosen, moved, sized, wrapped and sorted from the keyboard, and kept', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1586, height: 992 });
+  await page.goto('/');
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible({ timeout: 10_000 });
+
+  const table = page.getByRole('grid', { name: 'Tracks' });
+  const header = table.locator('.head [role="row"]');
+  const firstRow = table.locator('.rows [role="row"]').first();
+  const order = () =>
+    table
+      .locator('.head [data-column]')
+      .evaluateAll((cells) => cells.map((cell) => (cell as HTMLElement).dataset.column));
+  const headerBox = await header.boundingBox();
+  const rowBox = await firstRow.boundingBox();
+
+  const chooser = table.getByRole('button', { name: 'Choose columns' });
+  await chooser.click();
+  const menu = page.getByRole('menu', { name: 'Columns' });
+  await expect(menu.getByRole('menuitemcheckbox', { name: 'Artist' })).toBeFocused();
+  await page.keyboard.type('genre');
+  await expect(menu.getByRole('menuitemcheckbox', { name: 'Artist' })).toBeHidden();
+  await menu.getByRole('menuitemcheckbox', { name: 'Genre' }).click();
+  await expect(table.getByRole('columnheader', { name: 'Genre' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await expect(chooser).toBeFocused();
+  expect(await header.boundingBox()).toEqual(headerBox);
+  expect(await firstRow.boundingBox()).toEqual(rowBox);
+  await expect.poll(order).toEqual(['title', 'artist', 'bpm', 'key', 'time', 'genre']);
+
+  const genre = table.getByRole('columnheader', { name: 'Genre' });
+  await genre.getByRole('button', { name: 'Genre' }).focus();
+  await page.keyboard.press('Alt+ArrowLeft');
+  await expect.poll(order).toEqual(['title', 'artist', 'bpm', 'key', 'genre', 'time']);
+  await expect(genre.getByRole('button', { name: 'Genre' })).toBeFocused();
+
+  const width = table.getByRole('separator', { name: 'Width of Genre' });
+  await expect(width).toHaveAttribute('aria-valuenow', '140');
+  await width.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(width).toHaveAttribute('aria-valuenow', '148');
+  await expect.poll(async () => Math.round((await genre.boundingBox())?.width ?? 0)).toBe(148);
+
+  const bpm = table.getByRole('columnheader', { name: 'BPM' });
+  await bpm.getByRole('button', { name: 'BPM' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(bpm).toHaveAttribute('aria-sort', 'ascending');
+  const keyButton = table.locator('[data-column="key"] .sort-btn');
+  await keyButton.focus();
+  await page.keyboard.press('Shift+Enter');
+  await expect(keyButton).toHaveAccessibleName(/second sort/);
+  await expect(bpm).toHaveAttribute('aria-sort', 'ascending');
+
+  const titleCell = firstRow.getByRole('cell').nth(3);
+  await expect
+    .poll(() => titleCell.evaluate((cell) => getComputedStyle(cell).whiteSpace))
+    .toBe('nowrap');
+  await chooser.click();
+  await menu.getByRole('menuitemcheckbox', { name: 'Wrap long text' }).click();
+  await expect(menu.getByRole('menuitemcheckbox', { name: 'Wrap long text' })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
+  await page.keyboard.press('Escape');
+  await expect
+    .poll(() => titleCell.evaluate((cell) => getComputedStyle(cell).whiteSpace))
+    .toBe('normal');
+
+  await page.reload();
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect.poll(order).toEqual(['title', 'artist', 'bpm', 'key', 'genre', 'time']);
+  await expect(bpm).toHaveAttribute('aria-sort', 'ascending');
+  await expect(width).toHaveAttribute('aria-valuenow', '148');
+  await expect
+    .poll(() => titleCell.evaluate((cell) => getComputedStyle(cell).whiteSpace))
+    .toBe('normal');
+
+  await chooser.click();
+  await menu.getByRole('menuitem', { name: 'Reset to default' }).click();
+  await page.keyboard.press('Escape');
+  await expect.poll(order).toEqual(['title', 'artist', 'bpm', 'key', 'time']);
+  await expect(bpm).toHaveAttribute('aria-sort', 'none');
+  await expect
+    .poll(() => titleCell.evaluate((cell) => getComputedStyle(cell).whiteSpace))
+    .toBe('nowrap');
+});
+
 test('manual collections create, assign via multi-select, inspect, persist and delete safely', async ({
   page,
 }) => {

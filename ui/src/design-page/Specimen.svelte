@@ -55,6 +55,7 @@
     'activity',
     'settings',
     'audio',
+    'columns',
     'play',
     'pause',
     'star',

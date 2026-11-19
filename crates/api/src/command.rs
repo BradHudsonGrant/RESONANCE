@@ -53,6 +53,12 @@ pub enum Request {
     },
     /// Distinct labels and BPM/year bounds across the library, for filter controls.
     LibraryFacets,
+    /// The library table's columns, wrap setting and sort, and every column it can show.
+    TableLayout,
+    /// Changes the library table and keeps the change for next time.
+    ChangeTableLayout {
+        change: TableLayoutChange,
+    },
     /// Reads a folder into the library without changing the files in it.
     Scan {
         folder: String,
@@ -312,6 +318,8 @@ pub enum Response {
     AddTracksToCollection(LibraryCollection),
     RemoveTracksFromCollection(LibraryCollection),
     LibraryFacets(LibraryFacets),
+    TableLayout(LibraryTableLayout),
+    ChangeTableLayout(LibraryTableLayout),
     Scan(ScanReport),
     Identify(IdentifyReport),
     IdentifyOnline(ActivitySnapshot),
@@ -525,6 +533,8 @@ pub enum TagName {
     Key,
     TrackNumber,
     Comment,
+    Composer,
+    Remixer,
 }
 
 /// Which layer a value shows from.
@@ -872,6 +882,26 @@ pub enum TrackSortField {
     Key,
     Duration,
     Added,
+    Album,
+    Genre,
+    Label,
+    #[serde(rename = "catno")]
+    CatNo,
+    Year,
+    Comment,
+    Composer,
+    Remixer,
+    Mix,
+    Format,
+    Bitrate,
+    SampleRate,
+    BitDepth,
+    Channels,
+    FileSize,
+    Modified,
+    Path,
+    /// A tag with no column of its own.
+    Tag(TagName),
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -936,6 +966,13 @@ pub struct TrackQuery {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub direction: Option<SortDirection>,
+    /// Orders tracks that tie on `sort`.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub then_sort: Option<TrackSortField>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub then_direction: Option<SortDirection>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
@@ -984,6 +1021,11 @@ pub struct LibraryTrack {
     pub track_number: Option<String>,
     pub label: Option<String>,
     pub comment: Option<String>,
+    pub mix: Option<String>,
+    pub subgenre: Option<String>,
+    pub catno: Option<String>,
+    pub composer: Option<String>,
+    pub remixer: Option<String>,
     pub bpm: Option<f64>,
     pub key: Option<TrackKey>,
     /// The key tag as the file has it, which may not be a key at all.
@@ -1000,6 +1042,102 @@ pub struct LibraryTrack {
     pub missing_since: Option<i64>,
     /// The hash of the picture the track shows, loaded from `/artwork/<hash>`.
     pub artwork: Option<String>,
+    /// Unix epoch milliseconds when the track came into the library.
+    #[ts(type = "number")]
+    pub added_ms: i64,
+    /// Unix epoch milliseconds when the file was last changed on disk.
+    #[ts(type = "number")]
+    pub modified_ms: i64,
+}
+
+/// Where the column chooser lists a column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum TableColumnGroup {
+    Track,
+    Release,
+    Audio,
+    File,
+    Tags,
+}
+
+/// A column the library table can show.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct TableColumn {
+    /// Stable name, such as `genre` or `tag:album_artist`.
+    pub id: String,
+    pub label: String,
+    pub group: TableColumnGroup,
+    pub shown: bool,
+    /// The width the user set. Absent for a column at its default.
+    pub width_px: Option<u16>,
+    /// Absent for a column that shares the room the others leave.
+    pub default_width_px: Option<u16>,
+    /// The least room the column needs.
+    pub floor_width_px: u16,
+    pub numeric: bool,
+    pub sortable: bool,
+    /// Whether the user can hide it. The title stays.
+    pub removable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct TableSortKey {
+    /// `index` for library order, else a column id.
+    pub column: String,
+    pub field: TrackSortField,
+    pub direction: SortDirection,
+}
+
+/// The library table as the user left it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct LibraryTableLayout {
+    /// The shown columns, in order.
+    pub columns: Vec<TableColumn>,
+    /// Every column the chooser offers, shown or not, in chooser order.
+    pub available: Vec<TableColumn>,
+    pub wrap: bool,
+    /// Primary sort first. Empty means library order.
+    pub sort: Vec<TableSortKey>,
+    /// Column ids in the order they give way on a narrow table.
+    pub drop_order: Vec<String>,
+    pub min_width_px: u16,
+    pub max_width_px: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum TableLayoutChange {
+    /// Shows a hidden column at the end, or hides a shown one.
+    Toggle {
+        column: String,
+    },
+    /// Puts a shown column at a place among the shown columns.
+    Move {
+        column: String,
+        to: u32,
+    },
+    /// Sets a column's width, or puts back its default when absent.
+    Resize {
+        column: String,
+        #[serde(default)]
+        #[ts(optional = nullable)]
+        width_px: Option<u16>,
+    },
+    SetWrap {
+        wrap: bool,
+    },
+    /// A header click. `add` is a Shift click, for the secondary sort.
+    Sort {
+        column: String,
+        add: bool,
+    },
+    Reset,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]

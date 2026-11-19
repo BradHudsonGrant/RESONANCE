@@ -49,6 +49,8 @@ pub(crate) fn keys(field: TagField) -> &'static [ItemKey] {
         TagField::Label => &[ItemKey::Label, ItemKey::Publisher],
         TagField::Comment => &[ItemKey::Comment],
         TagField::CatNo => &[ItemKey::CatalogNumber],
+        TagField::Composer => &[ItemKey::Composer],
+        TagField::Remixer => &[ItemKey::Remixer],
         // No tag format has a common frame for these, so they live only in the library.
         TagField::Mix | TagField::Subgenre => &[],
     }
