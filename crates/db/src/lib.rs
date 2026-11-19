@@ -4,6 +4,7 @@ mod identity;
 mod jobs;
 mod search;
 mod sources;
+mod tags;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -23,13 +24,15 @@ use resonance_core::collections::CollectionNameError;
 use resonance_core::library::{
     AudioFacts, AudioFormat, ScannedFile, TagField, is_asset_path_included,
 };
+use resonance_core::staging::effective_tags;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 pub use search::{LibraryFacets, now_unix_ms};
 pub use sources::{SourceAssetPresence, SourceConfig};
+pub use tags::{AcceptReport, StagingQueueEntry, TagLayers};
 
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
-const MIGRATIONS: [&str; 9] = [
+const MIGRATIONS: [&str; 10] = [
     include_str!("../migrations/0001_library.sql"),
     include_str!("../migrations/0002_sources.sql"),
     include_str!("../migrations/0003_identity.sql"),
@@ -39,6 +42,7 @@ const MIGRATIONS: [&str; 9] = [
     include_str!("../migrations/0007_missing_files.sql"),
     include_str!("../migrations/0008_jobs.sql"),
     include_str!("../migrations/0009_identification.sql"),
+    include_str!("../migrations/0010_tag_layers.sql"),
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -127,6 +131,8 @@ pub struct TrackRow {
     pub favourite: bool,
     pub collections: Vec<TrackCollection>,
     pub missing_since: Option<i64>,
+    /// Values the user typed or accepted, which the track shows in place of the file's.
+    pub user_tags: Vec<(TagField, String)>,
 }
 
 /// The connection that writes. Readers open their own.
@@ -278,11 +284,18 @@ impl Database {
                     &excluded_subfolders,
                     &ignored_folders,
                 ));
-                let meta = search::AssetSearchMeta::from_path_and_tags(&file.path, &file.tags);
-
                 let known: Option<i64> = find
                     .query_row(params![source.0, file.path], |row| row.get(0))
                     .optional()?;
+                let user = match known {
+                    Some(asset) => tags::user_tags_of_asset(&transaction, asset)?,
+                    None => Vec::new(),
+                };
+                let shown = (!user.is_empty()).then(|| effective_tags(&file.tags, &user));
+                let meta = search::AssetSearchMeta::from_path_and_tags(
+                    &file.path,
+                    shown.as_deref().unwrap_or(&file.tags),
+                );
                 let asset = match known {
                     Some(asset) => {
                         update_asset.execute(params![
@@ -382,6 +395,7 @@ impl Database {
             tracks.push(track);
         }
         collections::populate_track_collections(&self.connection, &mut tracks)?;
+        tags::populate_user_tags(&self.connection, &mut tracks)?;
         Ok(tracks)
     }
 
@@ -406,6 +420,7 @@ impl Database {
             tracks.push(track);
         }
         collections::populate_track_collections(&self.connection, &mut tracks)?;
+        tags::populate_user_tags(&self.connection, &mut tracks)?;
         Ok(tracks)
     }
 
@@ -494,6 +509,7 @@ pub(crate) fn track_row(row: &Row<'_>) -> Result<(i64, TrackRow), DbError> {
         favourite: favourite_raw != 0,
         collections: Vec::new(),
         missing_since,
+        user_tags: Vec::new(),
     };
     Ok((row.get(0)?, track))
 }

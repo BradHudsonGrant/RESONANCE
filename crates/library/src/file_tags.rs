@@ -45,6 +45,9 @@ fn keys(field: TagField) -> &'static [ItemKey] {
         TagField::Key => &[ItemKey::InitialKey],
         TagField::Label => &[ItemKey::Label, ItemKey::Publisher],
         TagField::Comment => &[ItemKey::Comment],
+        TagField::CatNo => &[ItemKey::CatalogNumber],
+        // No tag format has a common frame for these, so they live only in the library.
+        TagField::Mix | TagField::Subgenre => &[],
     }
 }
 

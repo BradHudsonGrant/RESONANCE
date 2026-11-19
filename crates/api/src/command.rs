@@ -181,6 +181,40 @@ pub enum Request {
     ClearProviderKey {
         provider: ProviderKeyKind,
     },
+    /// A page of tracks with proposals still to decide, in track order.
+    StagingQueue {
+        offset: u32,
+        limit: u32,
+    },
+    /// Every staged field of one track: its value now, where that came from, and the proposal.
+    StagingDiff {
+        #[ts(type = "number")]
+        track_id: i64,
+    },
+    /// Takes the proposals for `fields` into the user's values, even for fields the user holds.
+    AcceptProposedFields {
+        #[ts(type = "number")]
+        track_id: i64,
+        fields: Vec<TagName>,
+    },
+    /// Takes every proposal at or above `min_confidence` (0 to 1) that changes a field the user
+    /// does not hold, on every track.
+    AcceptAllAboveThreshold {
+        min_confidence: f64,
+    },
+    /// Skips the track's pending proposals for `fields`, or all of them when it is empty.
+    SkipProposal {
+        #[ts(type = "number")]
+        track_id: i64,
+        #[serde(default)]
+        fields: Vec<TagName>,
+    },
+    /// Sets the user's values on one or many tracks. Nothing is written to the files.
+    SetUserTag {
+        #[ts(type = "Array<number>")]
+        track_ids: Vec<i64>,
+        edits: Vec<UserTagEdit>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -227,6 +261,120 @@ pub enum Response {
     ProviderKeys(Vec<ProviderKeyStatus>),
     SetProviderKey(ProviderKeyStatus),
     ClearProviderKey(ProviderKeyStatus),
+    StagingQueue(StagingQueuePage),
+    StagingDiff(TrackStagingDiff),
+    AcceptProposedFields(TrackStagingDiff),
+    AcceptAllAboveThreshold(AcceptedProposals),
+    SkipProposal(TrackStagingDiff),
+    SetUserTag(UserTagReport),
+}
+
+/// A tag field, as staging and tag edits name it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum TagName {
+    Title,
+    Artist,
+    Mix,
+    Album,
+    AlbumArtist,
+    Genre,
+    Subgenre,
+    Label,
+    #[serde(rename = "catno")]
+    CatNo,
+    Year,
+    Bpm,
+    Key,
+    TrackNumber,
+    Comment,
+}
+
+/// Which layer a value shows from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum TagProvenance {
+    File,
+    User,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ProposalState {
+    Pending,
+    Accepted,
+    Skipped,
+}
+
+/// One field of a track's staging diff.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct StagedField {
+    pub field: TagName,
+    pub current_value: Option<String>,
+    pub current_provenance: Option<TagProvenance>,
+    pub proposed_value: Option<String>,
+    pub provider: Option<String>,
+    pub confidence: Option<f64>,
+    /// True only when Chromaprint compared the audio and it matched.
+    pub audio_matched: bool,
+    pub status: Option<ProposalState>,
+    /// The user typed or accepted this field, so identification never changes it.
+    pub locked_by_user: bool,
+    /// A pending proposal that would change what the track shows.
+    pub changes: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct TrackStagingDiff {
+    #[ts(type = "number")]
+    pub track_id: i64,
+    pub fields: Vec<StagedField>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct StagingQueueItem {
+    #[ts(type = "number")]
+    pub track_id: i64,
+    pub pending_fields: u32,
+    /// The highest confidence among the pending proposals.
+    pub confidence: f64,
+    pub audio_matched: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct StagingQueuePage {
+    pub total: u32,
+    pub offset: u32,
+    pub items: Vec<StagingQueueItem>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct AcceptedProposals {
+    pub tracks: u32,
+    pub fields: u32,
+}
+
+/// `value` sets the user's value, an empty one blanking the file's. `null` hands the field back
+/// to the file.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
+#[ts(export)]
+pub struct UserTagEdit {
+    pub field: TagName,
+    pub value: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct UserTagReport {
+    pub tracks: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

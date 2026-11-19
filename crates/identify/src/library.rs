@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use resonance_core::identify::{Candidate, KnownTags, ReleaseUrl, StepOutcome};
+use resonance_core::staging::proposals_from;
 use resonance_db::{Database, IdentificationPass, StoredIdentification};
 use serde_json::{Value, json};
 
@@ -124,8 +125,7 @@ pub fn run_online_pass(
         }
         let mut database = database.lock().unwrap_or_else(PoisonError::into_inner);
         for identification in &identified {
-            database
-                .record_identification(&stored(identification, identification.is_complete()))?;
+            record(&mut database, identification)?;
             report.looked_up += 1;
             report.confident += u64::from(identification.is_confident());
             report.needs_url += u64::from(identification.needs_url());
@@ -156,11 +156,21 @@ pub fn identify_track_with_url(
         return Ok(None);
     };
     let identification = pipeline.identify_with_url(&input, url);
-    database
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .record_identification(&stored(&identification, identification.is_complete()))?;
+    record(
+        &mut database.lock().unwrap_or_else(PoisonError::into_inner),
+        &identification,
+    )?;
     Ok(Some(identification))
+}
+
+/// Stores an online result and stages the best candidate's fields. A run without a best
+/// candidate leaves earlier proposals as they are.
+fn record(database: &mut Database, identification: &Identification) -> Result<(), IdentifyError> {
+    database.record_identification(&stored(identification, identification.is_complete()))?;
+    if let Some(best) = &identification.best {
+        database.store_proposals(identification.track_id, &proposals_from(best))?;
+    }
+    Ok(())
 }
 
 fn stored(identification: &Identification, online: bool) -> StoredIdentification {

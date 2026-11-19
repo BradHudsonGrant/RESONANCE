@@ -81,7 +81,7 @@ The tables that matter:
 
 - `track` and `asset`. An asset belongs to a track and holds path, volume, size, mtime, audio hash, fingerprint, format facts, whether it is the primary file, and `offset_samples` and `tempo_ratio` relative to track time.
 - `source` for library folders and their options.
-- Tags in three layers: what is in the file, what providers proposed (with provider and confidence), and what the user set. A view gives the effective value.
+- Tags in three layers: `file_tag` (what is in the file), `proposed_tag` (what providers proposed, with provider and confidence) and `user_tag` (what the user set). The user's value wins, then analysis, then the file ([ADR 0018](adr/0018-tag-layers-and-precedence.md)). The asset's sort and search columns hold the effective value.
 - `analysis_run` (audio hash, analyser, version, parameter hash, status) and one result table per kind: beat grid, key, loudness, energy curve, phrases, embedding. Each has a confidence. Parallel tables hold user corrections.
 - `cue` and `loop`, stored in track time.
 - `collection`, `collection_item`, `smart_collection`, `set`, `set_item` (with play window and transition).
@@ -153,6 +153,7 @@ These are requirements. Measure them on the development laptop in M0, record the
 | Library table, 100,000 rows, fast scroll | Median frame at the display's refresh rate, no frame over 16 ms |
 | Mix view: two scrolling waveforms, meters, coach strip | Median frame at the display's refresh rate, 99th percentile within two display intervals, no frame over 16 ms |
 | Text search | Under 50 ms |
+| Staging diff for one track | Under 50 ms |
 | UI thread | Never blocked for more than 16 ms |
 | Audio | Stable at a 256-sample buffer or smaller on WASAPI exclusive or ASIO, with no dropouts in an hour |
 | Idle memory with the library open | Under 400 MB |

@@ -7,6 +7,7 @@ use resonance_core::search::{
     FilterPill, SortDirection, TrackQuery, TrackSortField, build_fts_match_query,
     key_filter_values, parse_year_tag,
 };
+use resonance_core::staging::effective_tags;
 use rusqlite::types::Value;
 use rusqlite::{Connection, Transaction, params, params_from_iter};
 
@@ -84,7 +85,24 @@ pub fn now_unix_ms() -> i64 {
         })
 }
 
+/// Refreshes the asset's sort, filter and search columns from its file `tags` with the user's
+/// values for its track laid over them.
 pub(crate) fn sync_asset_metadata_in_tx(
+    tx: &Transaction<'_>,
+    asset_id: i64,
+    path: &str,
+    tags: &[(TagField, String)],
+    delete_existing_fts: bool,
+) -> Result<(), DbError> {
+    let user = crate::tags::user_tags_of_asset(tx, asset_id)?;
+    if user.is_empty() {
+        return write_asset_metadata(tx, asset_id, path, tags, delete_existing_fts);
+    }
+    let shown = effective_tags(tags, &user);
+    write_asset_metadata(tx, asset_id, path, &shown, delete_existing_fts)
+}
+
+fn write_asset_metadata(
     tx: &Transaction<'_>,
     asset_id: i64,
     path: &str,
@@ -163,7 +181,8 @@ pub(crate) fn backfill_v4_metadata(tx: &Transaction<'_>) -> Result<(), DbError> 
 
     for (asset_id, path) in assets {
         let tags = tags_by_asset.remove(&asset_id).unwrap_or_default();
-        sync_asset_metadata_in_tx(tx, asset_id, &path, &tags, true)?;
+        // The user layer does not exist yet at this version.
+        write_asset_metadata(tx, asset_id, &path, &tags, true)?;
     }
     Ok(())
 }
@@ -534,5 +553,6 @@ pub(crate) fn load_tracks_by_ids(
         }
     }
     crate::collections::populate_track_collections(connection, &mut ordered)?;
+    crate::tags::populate_user_tags(connection, &mut ordered)?;
     Ok(ordered)
 }

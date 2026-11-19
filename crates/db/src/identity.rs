@@ -975,6 +975,13 @@ impl Database {
                      WHERE track_id = ?2",
                     params![track_id, dup_track_id],
                 )?;
+                tx.execute(
+                    "INSERT OR IGNORE INTO user_tag (track_id, field, value, dirty_on_disk, updated_ns)
+                     SELECT ?1, field, value, dirty_on_disk, updated_ns
+                     FROM user_tag
+                     WHERE track_id = ?2",
+                    params![track_id, dup_track_id],
+                )?;
             }
             tx.execute("DELETE FROM asset_fts WHERE rowid = ?1", [dup_asset_id])?;
             tx.execute("DELETE FROM asset WHERE id = ?1", [dup_asset_id])?;
