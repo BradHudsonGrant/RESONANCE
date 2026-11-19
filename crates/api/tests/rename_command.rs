@@ -102,7 +102,11 @@ fn previews_renames_the_selection_and_undoes() {
         preview.files[0].new_name.as_deref(),
         Some("Artist - Title 000.mp3")
     );
-    assert_eq!(names(&folder), ["000.mp3", "001.mp3"], "a preview renames nothing");
+    assert_eq!(
+        names(&folder),
+        ["000.mp3", "001.mp3"],
+        "a preview renames nothing"
+    );
 
     let Response::ApplyRename(report) = api
         .handle(request(json!({
@@ -193,13 +197,20 @@ fn the_whole_library_renames_as_one_activity_job() {
         {
             break job;
         }
-        assert!(started.elapsed() < Duration::from_secs(30), "the job finishes");
+        assert!(
+            started.elapsed() < Duration::from_secs(30),
+            "the job finishes"
+        );
         thread::sleep(Duration::from_millis(20));
     };
     assert_eq!(job.status, ActivityJobStatus::Completed);
     assert_eq!(job.done_items, 201);
     assert_eq!(job.label, "Rename 201 files");
-    assert!(names(&folder).iter().all(|name| name.starts_with("Artist - Title ")));
+    assert!(
+        names(&folder)
+            .iter()
+            .all(|name| name.starts_with("Artist - Title "))
+    );
 
     let Response::RecentOperations(recent) = api
         .handle(request(

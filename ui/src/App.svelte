@@ -5,10 +5,12 @@
   import type { ActivitySnapshot } from './lib/ipc/bindings/ActivitySnapshot';
   import type { LibraryCollection } from './lib/ipc/bindings/LibraryCollection';
   import type { LibraryTrack } from './lib/ipc/bindings/LibraryTrack';
+  import type { RenameScope } from './lib/ipc/bindings/RenameScope';
   import { core } from './lib/ipc/core';
   import Inspector from './lib/library/Inspector.svelte';
   import Library from './lib/library/Library.svelte';
   import RelinkSheet, { type RelinkClient } from './lib/library/RelinkSheet.svelte';
+  import RenameSheet, { type RenameClient } from './lib/library/RenameSheet.svelte';
   import ScanFolder from './lib/library/ScanFolder.svelte';
   import type { SourcesClient } from './lib/library/SourcesSettings.svelte';
   import { TrackPages } from './lib/library/track-pages.svelte';
@@ -53,6 +55,12 @@
     pickAudioFile: desktop ? () => invoke<string | null>('pick_audio_file') : undefined,
     pickFolder: desktop ? () => invoke<string | null>('pick_folder') : undefined,
   };
+  const renameClient: RenameClient = {
+    preview: (scope, template, limit) => core.call('preview_rename', { scope, template, limit }),
+    apply: (scope, template) => core.call('apply_rename', { scope, template }),
+    recentOperations: () => core.call('recent_operations', { limit: 20 }),
+    undo: (operation_id) => core.call('undo_operation', { operation_id }),
+  };
   const activityClient: ActivityClient = {
     snapshot: () => core.call('jobs_snapshot'),
     cancel: (job_id) => core.call('cancel_job', { job_id }),
@@ -80,6 +88,10 @@
   let scanMounted = $state(false);
   let relinkOpen = $state(false);
   let relinkMounted = $state(false);
+  let renameOpen = $state(false);
+  let renameMounted = $state(false);
+  let renameScope = $state<RenameScope>({ kind: 'tracks', track_ids: [] });
+  let renameLabel = $state('');
   let relinkTarget = $state<LibraryTrack | null>(null);
   let sourcesRevision = $state(0);
   let mixPlaying = $state(false);
@@ -257,6 +269,13 @@
     relinkTarget = item;
     relinkMounted = true;
     relinkOpen = true;
+  }
+
+  function openRename(scope: RenameScope, label: string) {
+    renameScope = scope;
+    renameLabel = label;
+    renameMounted = true;
+    renameOpen = true;
   }
 
   function previewTrack(item: LibraryTrack) {
@@ -503,6 +522,7 @@
           onopen={showInspector}
           onpreview={previewTrack}
           onrelink={openRelink}
+          onrename={openRename}
           onscan={openScan}
           ontogglefavourite={toggleFavourite}
           onclearsearch={clearSearch}
@@ -600,6 +620,16 @@
   />
 {/if}
 
+{#if renameMounted}
+  <RenameSheet
+    bind:open={renameOpen}
+    scope={renameScope}
+    scopeLabel={renameLabel}
+    client={renameClient}
+    onrenamed={() => void pages.refresh()}
+  />
+{/if}
+
 {#if activityMounted}
   <ActivitySheet
     bind:open={activityOpen}
@@ -616,6 +646,7 @@
     bind:open={settingsOpen}
     {sourcesClient}
     {providerKeysClient}
+    {renameClient}
     {sourcesRevision}
     onsourceschanged={() => {
       void pages.refresh();

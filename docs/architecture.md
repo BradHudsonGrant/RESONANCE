@@ -85,7 +85,7 @@ The tables that matter:
 - `analysis_run` (audio hash, analyser, version, parameter hash, status) and one result table per kind: beat grid, key, loudness, energy curve, phrases, embedding. Each has a confidence. Parallel tables hold user corrections.
 - `cue` and `loop`, stored in track time.
 - `collection`, `collection_item`, `smart_collection`, `set`, `set_item` (with play window and transition).
-- `job` for the queue. `operation` for the journal: steps, inverse steps, state ([ADR 0019](adr/0019-writing-tags-into-files.md)).
+- `job` for the queue. `operation` for the journal: steps, inverse steps, state ([ADR 0019](adr/0019-writing-tags-into-files.md)). `operation_rename` holds each file a rename moved ([ADR 0020](adr/0020-renaming-files-from-templates.md)).
 - `external_library` and `pending_external_change`.
 - `session`, `session_event` (the control log) and `transition_score`.
 

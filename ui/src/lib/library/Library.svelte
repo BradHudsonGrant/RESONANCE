@@ -7,6 +7,7 @@
   import type { LibraryCollection } from '../ipc/bindings/LibraryCollection';
   import type { LibraryFacets } from '../ipc/bindings/LibraryFacets';
   import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
+  import type { RenameScope } from '../ipc/bindings/RenameScope';
   import type { TrackFilterPill } from '../ipc/bindings/TrackFilterPill';
   import type { TrackQuery } from '../ipc/bindings/TrackQuery';
   import FilterDrawer from './FilterDrawer.svelte';
@@ -25,6 +26,8 @@
     onopen?: () => void;
     onpreview?: (track: LibraryTrack) => void;
     onrelink?: (track: LibraryTrack) => void;
+    /** Opens the Rename sheet for `scope`, named `label`. */
+    onrename?: (scope: RenameScope, label: string) => void;
     onscan: () => void;
     ontogglefavourite?: (track: LibraryTrack) => void;
     onclearsearch?: () => void;
@@ -75,6 +78,7 @@
     onopen,
     onpreview,
     onrelink,
+    onrename,
     onscan,
     ontogglefavourite,
     onclearsearch,
@@ -183,6 +187,19 @@
       {#if pages.state.kind === 'ready' && pages.libraryTotal > 0}
         <div class="actions">
           <Button variant="quiet" onclick={onscan}>Scan folder</Button>
+          {#if onrename}
+            <Button
+              variant="quiet"
+              onclick={() =>
+                onrename(
+                  { kind: 'query', query: pages.query },
+                  activeCollection?.name ??
+                    (hasFiltersInView ? 'Tracks in this view' : 'Whole library'),
+                )}
+            >
+              Rename files
+            </Button>
+          {/if}
           <div class="filter-action">
             <Tooltip
               text={drawerFilterCount > 0 ? `Filters (${drawerFilterCount} active)` : 'Filters'}
@@ -255,6 +272,18 @@
           >
             Add to collection
           </Button>
+          {#if onrename}
+            <Button
+              size="sm"
+              onclick={() =>
+                onrename(
+                  { kind: 'tracks', track_ids: table?.checkedTrackIds() ?? [] },
+                  'Selected tracks',
+                )}
+            >
+              Rename
+            </Button>
+          {/if}
           {#if activeCollection}
             <Button size="sm" onclick={() => table?.removeSelectionFromCollection()}>
               <span class="collection-name">Remove from {activeCollection.name}</span>

@@ -690,3 +690,84 @@ test('Activity drawer tracks scan and identity jobs from TopBar and clears finis
     rmSync(activityFolder, { recursive: true, force: true });
   }
 });
+
+test('the Rename sheet previews names from tags, renames the selection on disk and undoes it', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1586, height: 992 });
+  await page.goto('/');
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible({ timeout: 10_000 });
+
+  const table = page.getByRole('grid', { name: 'Tracks' });
+  const search = page.getByRole('combobox', { name: 'Commands' });
+  const original = join(musicFolder, 'House', 'Ada Marsh - Second Wind.flac');
+  const renamed = join(musicFolder, 'House', 'Ada Marsh - Second Wind (Dub).flac');
+
+  // The fixtures carry no tags, so this track gets the user's values the way staging gives them.
+  await page.evaluate(async () => {
+    const socket = new WebSocket(new URL('/core', location.href));
+    await new Promise((ready) => (socket.onopen = ready));
+    let next = 0;
+    const call = (command: string, params: unknown) =>
+      new Promise<{ response: { result: unknown } }>((resolve) => {
+        const id = ++next;
+        socket.addEventListener('message', (event) => {
+          const reply = JSON.parse(String(event.data));
+          if (reply.id === id) resolve(reply);
+        });
+        socket.send(JSON.stringify({ id, request: { command, params } }));
+      });
+    const page = await call('tracks', { offset: 0, limit: 5, query: { text: 'Second Wind' } });
+    const ids = (page.response.result as { tracks: Array<{ id: number }> }).tracks.map(
+      (track) => track.id,
+    );
+    await call('set_user_tag', {
+      track_ids: ids,
+      edits: [
+        { field: 'artist', value: 'Ada Marsh' },
+        { field: 'title', value: 'Second Wind' },
+        { field: 'mix', value: 'Dub' },
+      ],
+    });
+    socket.close();
+  });
+
+  try {
+    await search.fill('Second Wind');
+    await expect(page.getByText('1 track', { exact: true })).toBeVisible();
+    await table.locator('.rows [role="row"]').first().getByRole('checkbox').click();
+    await page
+      .getByRole('region', { name: 'Selected tracks' })
+      .getByRole('button', { name: 'Rename', exact: true })
+      .click();
+
+    const sheet = page.getByRole('dialog', { name: 'Rename files' });
+    await expect(sheet).toContainText('Selected tracks');
+    await expect(sheet).toContainText('1 file');
+    const rows = sheet.getByRole('list', { name: 'Preview of new file names' });
+    await expect(rows).toContainText('Ada Marsh - Second Wind (Dub).flac');
+    expect(existsSync(original)).toBe(true);
+
+    const field = sheet.getByRole('textbox', { name: 'Filename template' });
+    await field.fill('{artist} - {title} [{bpm}]');
+    await expect(rows).toContainText('No change');
+    await field.fill('{artist} - {genre}');
+    await expect(sheet.getByRole('alert')).toContainText('{genre} is not a token');
+    await field.fill('{artist} - {title} ({mix})');
+
+    await sheet.getByRole('button', { name: 'Rename 1 file' }).click();
+    await expect(sheet.getByRole('status')).toContainText('Renamed 1 file.');
+    expect(existsSync(renamed)).toBe(true);
+    expect(existsSync(original)).toBe(false);
+
+    await sheet.getByRole('button', { name: 'Undo: Renamed 1 file' }).click();
+    await expect(sheet.getByRole('status')).toContainText('Undone.');
+    expect(existsSync(original)).toBe(true);
+    expect(existsSync(renamed)).toBe(false);
+    await sheet.getByRole('button', { name: 'Close' }).click();
+  } finally {
+    if (existsSync(renamed) && !existsSync(original)) renameSync(renamed, original);
+    await search.fill('');
+    await search.press('Escape');
+  }
+});
