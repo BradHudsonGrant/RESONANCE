@@ -308,4 +308,27 @@ The table's own work per scroll step was timed in Edge at 2,560 by 1,440: settin
 
 With wrap on, the first rows measured 37 px for one line and 67 px for three.
 
-The frame-interval pass with `measureTableScroll()` was not taken. The laptop's display was not presenting frames during the session, and Edge delivered animation frames about every 250 ms whether the window was headless or not, so frame times would have measured the display, not the table.
+Frame intervals were then measured with `measureTableScroll()` in Edge on the laptop's 240 Hz display (4.2 ms refresh), 600 fling frames and 600 jump frames a run, first at the 1,440 by 900 size of the earlier runs. The widest set there is 6 columns in view and 20 given way.
+
+| Table | Run | Pass | Median frame | 99th percentile | Longest frame | Missed frames |
+| --- | --- | --- | --- | --- | --- | --- |
+| Default columns | 1 | Fling | 4.2 ms | 8.4 ms | 8.6 ms | 23 |
+| Default columns | 1 | Jumps | 4.2 ms | 4.4 ms | 8.4 ms | 3 |
+| Widest set | 1 | Fling | 4.2 ms | 8.4 ms | 8.6 ms | 25 |
+| Widest set | 1 | Jumps | 4.2 ms | 8.2 ms | 8.4 ms | 6 |
+| Widest set | 2 | Fling | 4.2 ms | 8.4 ms | 12.5 ms | 24 |
+| Widest set | 2 | Jumps | 4.2 ms | 8.3 ms | 8.4 ms | 12 |
+| Widest set | 3 | Fling | 4.2 ms | 8.4 ms | 12.4 ms | 31 |
+| Widest set | 3 | Jumps | 4.2 ms | 8.3 ms | 8.4 ms | 12 |
+| Widest set, wrap on | 1 | Fling | 4.2 ms | 8.5 ms | 12.6 ms | 46 |
+| Widest set, wrap on | 1 | Jumps | 4.2 ms | 8.3 ms | 8.6 ms | 13 |
+| Widest set, wrap on | 2 | Fling | 4.2 ms | 8.4 ms | 8.5 ms | 27 |
+| Widest set, wrap on | 2 | Jumps | 4.2 ms | 8.3 ms | 8.5 ms | 14 |
+| Widest set, wrap on | 3 | Fling | 4.2 ms | 8.4 ms | 8.4 ms | 22 |
+| Widest set, wrap on | 3 | Jumps | 4.2 ms | 8.3 ms | 8.4 ms | 7 |
+
+At 2,560 by 1,440, with 14 columns in view, the fling misses: every run held an 8.4 ms median, a 16.7 to 16.8 ms 99th percentile and a longest frame of 16.8 to 20.9 ms, wrap on or off. Jumps kept a 4.2 ms median with the longest frame at 12.6 to 16.7 ms. The default columns at that size held a 4.2 ms median with no frame over 12.6 ms.
+
+### Conclusion
+
+At 1,440 by 900, with every column picked and with wrap on, the table holds the display's refresh rate and no frame comes near 16 ms, so the budget is met there. The large-window fling with many columns is not: the table's own work stays under 11 ms a step, so the time goes outside the page's script, as in the compositor findings above. It is open in [#136](https://github.com/BradHudsonGrant/RESONANCE/issues/136).
