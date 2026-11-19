@@ -100,6 +100,13 @@ pub struct HttpResponse {
     pub body: String,
 }
 
+/// An answer read as bytes, for pictures.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BytesResponse {
+    pub status: u16,
+    pub body: Vec<u8>,
+}
+
 /// The request never got an answer: no network, a timeout or a TLS failure.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unreachable(pub String);
@@ -113,6 +120,9 @@ impl fmt::Display for Unreachable {
 /// Sends a request. The real one goes over the network; tests answer from fixtures.
 pub trait HttpClient: Send + Sync {
     fn send(&self, request: &HttpRequest) -> Result<HttpResponse, Unreachable>;
+
+    /// Sends a GET and reads up to `limit` bytes of the answer. A longer answer is a failure.
+    fn fetch_bytes(&self, request: &HttpRequest, limit: u64) -> Result<BytesResponse, Unreachable>;
 }
 
 /// HTTPS with the operating system's certificate store. The agent is made on the first request,
@@ -181,6 +191,27 @@ impl HttpClient for NetworkClient {
             .read_to_string()
             .map_err(|error| Unreachable(failure_kind(&error)))?;
         Ok(HttpResponse { status, body })
+    }
+
+    fn fetch_bytes(&self, request: &HttpRequest, limit: u64) -> Result<BytesResponse, Unreachable> {
+        let mut builder = self.agent().get(&request.url);
+        for (name, value) in &request.params {
+            builder = builder.query(name, value);
+        }
+        if let Some(Secret::Header { name, value }) = &request.secret {
+            builder = builder.header(*name, value);
+        }
+        let mut response = builder
+            .call()
+            .map_err(|error| Unreachable(failure_kind(&error)))?;
+        let status = response.status().as_u16();
+        let body = response
+            .body_mut()
+            .with_config()
+            .limit(limit)
+            .read_to_vec()
+            .map_err(|error| Unreachable(failure_kind(&error)))?;
+        Ok(BytesResponse { status, body })
     }
 }
 

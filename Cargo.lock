@@ -3761,6 +3761,7 @@ version = "0.3.0"
 name = "resonance-db"
 version = "0.3.0"
 dependencies = [
+ "blake3",
  "resonance-core",
  "rusqlite",
 ]

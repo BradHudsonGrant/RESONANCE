@@ -183,3 +183,98 @@ async fn a_scan_over_the_socket_makes_its_tracks_available_on_the_same_connectio
         "First Light"
     );
 }
+
+fn get(address: &str, target: &str, bearer: Option<&str>) -> (String, Vec<u8>) {
+    use std::io::{Read, Write};
+    let mut stream = std::net::TcpStream::connect(address).unwrap();
+    let authorization = bearer
+        .map(|token| format!("Authorization: Bearer {token}\r\n"))
+        .unwrap_or_default();
+    write!(
+        stream,
+        "GET {target} HTTP/1.1\r\nHost: {address}\r\n{authorization}\r\n"
+    )
+    .unwrap();
+    let mut answer = Vec::new();
+    stream.read_to_end(&mut answer).unwrap();
+    let split = answer
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .unwrap();
+    let head = String::from_utf8(answer[..split].to_vec()).unwrap();
+    (head, answer[split + 4..].to_vec())
+}
+
+#[tokio::test]
+async fn a_picture_set_over_the_socket_is_served_by_hash_with_the_token() {
+    let folder = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("socket-artwork");
+    let _ = fs::remove_dir_all(&folder);
+    let mut database = Database::open_in_memory().unwrap();
+    database.set_artwork_folder(&folder);
+    let source = database.source("C:/Music").unwrap();
+    database
+        .record_scan(
+            source,
+            &[resonance_core::library::ScannedFile {
+                path: "One.mp3".to_owned(),
+                size_bytes: 1,
+                modified_ns: 1,
+                format: resonance_core::library::AudioFormat::Mp3,
+                audio: None,
+                tags: Vec::new(),
+            }],
+        )
+        .unwrap();
+    let track_id = database.tracks().unwrap()[0].track_id;
+    let server = Server::bind().await.unwrap();
+    let address = server.address().unwrap().to_string();
+    let token = server.token().to_owned();
+    let url = format!("ws://{address}");
+    tokio::spawn(server.run(Arc::new(Api::new(database))));
+    let mut socket = connect(&url, Some(&token)).await.unwrap();
+
+    // "/9j/4AAQ" is the start of a JPEG.
+    let reply = ask(
+        &mut socket,
+        &json!({ "id": 1, "request": { "command": "set_track_artwork",
+                 "params": { "track_id": track_id, "image_base64": "/9j/4AAQ" } } })
+        .to_string(),
+    )
+    .await;
+    let hash = reply["response"]["result"]["artwork"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(hash.len(), 64);
+
+    let target = format!("/artwork/{hash}");
+    let (served, refused, unknown) = tokio::task::spawn_blocking(move || {
+        (
+            get(&address, &target, Some(&token)),
+            get(&address, &target, None),
+            get(&address, "/artwork/../library.db", Some(&token)),
+        )
+    })
+    .await
+    .unwrap();
+
+    assert!(served.0.starts_with("HTTP/1.1 200 OK"), "{}", served.0);
+    assert!(served.0.contains("Content-Type: image/jpeg"));
+    assert!(served.0.contains("immutable"));
+    assert_eq!(served.1, [0xff, 0xd8, 0xff, 0xe0, 0, 16]);
+    assert!(refused.0.starts_with("HTTP/1.1 401"), "{}", refused.0);
+    assert!(refused.1.is_empty());
+    assert!(unknown.0.starts_with("HTTP/1.1 404"), "{}", unknown.0);
+
+    let refused_picture = ask(
+        &mut socket,
+        &json!({ "id": 2, "request": { "command": "set_track_artwork",
+                 "params": { "track_id": track_id, "image_base64": "R0lGODlh" } } })
+        .to_string(),
+    )
+    .await;
+    assert_eq!(
+        refused_picture["error"]["message"],
+        "The picture is not a JPEG or PNG"
+    );
+}

@@ -19,6 +19,9 @@
   let canvas: HTMLCanvasElement | undefined = $state();
   let mounted = $state(false);
   let lastCacheKey = $state('');
+  // The source that failed to load. The dot wave stands in until the source changes.
+  let failedSrc = $state<string | null>(null);
+  const showImage = $derived(Boolean(src) && src !== failedSrc);
 
   const pixelDimension = $derived(size === 'sm' ? 36 : size === 'lg' ? 96 : 60);
 
@@ -49,7 +52,7 @@
   }
 
   $effect(() => {
-    if (!mounted || src || !canvas) return;
+    if (!mounted || showImage || !canvas) return;
     void seed;
     void bands;
     void size;
@@ -72,9 +75,10 @@
   aria-hidden={alt ? undefined : 'true'}
   data-seed={seed}
   data-cache-key={lastCacheKey || undefined}
+  data-artwork={showImage ? 'image' : 'wave'}
 >
-  {#if src}
-    <img class="image" {src} {alt} />
+  {#if showImage}
+    <img class="image" {src} alt="" onerror={() => (failedSrc = src)} />
   {:else}
     <canvas bind:this={canvas} class="canvas" aria-hidden="true"></canvas>
   {/if}

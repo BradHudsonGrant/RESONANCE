@@ -34,6 +34,7 @@ export class PreviewPlayer {
   trackId = $state<number | null>(null);
   title = $state<string | null>(null);
   artist = $state<string | null>(null);
+  artwork = $state<string | null>(null);
   playing = $state(false);
   positionMs = $state(0);
   durationMs = $state(0);
@@ -237,6 +238,7 @@ export class PreviewPlayer {
     this.trackId = state.track_id;
     this.title = state.title;
     this.artist = state.artist;
+    this.artwork = state.artwork;
     this.durationMs = state.duration_ms;
     this.generation = state.generation;
     this.playing = state.playing;

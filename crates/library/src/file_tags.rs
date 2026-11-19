@@ -4,6 +4,7 @@ use std::io::{self, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use lofty::error::FileParseError;
+use lofty::picture::PictureType;
 use lofty::prelude::{AudioFile, ItemKey, TaggedFileExt};
 use lofty::probe::Probe;
 use lofty::tag::Tag;
@@ -29,6 +30,8 @@ impl std::error::Error for FileReadError {}
 pub struct FileContents {
     pub audio: AudioFacts,
     pub tags: Vec<(TagField, String)>,
+    /// The bytes of the picture the file shows as its cover.
+    pub front_cover: Option<Vec<u8>>,
 }
 
 /// The keys a field can sit under, most specific first.
@@ -70,6 +73,16 @@ fn value(tags: &[&Tag], field: TagField) -> Option<String> {
         })
         .find(|text| !text.is_empty())
         .map(str::to_owned)
+}
+
+/// The front cover, else the first picture of any kind: many files carry their only picture
+/// typed as "other".
+fn front_cover(tags: &[&Tag]) -> Option<Vec<u8>> {
+    let pictures = || tags.iter().flat_map(|tag| tag.pictures());
+    pictures()
+        .find(|picture| picture.pic_type() == PictureType::CoverFront)
+        .or_else(|| pictures().next())
+        .map(|picture| picture.data().to_vec())
 }
 
 /// A read-only file handle seen from `start` onwards, as if any stray bytes before `start` were
@@ -178,7 +191,11 @@ pub fn read(path: &Path) -> Result<FileContents, FileReadError> {
         .filter_map(|field| Some((field, value(&in_file, field)?)))
         .collect();
 
-    Ok(FileContents { audio, tags })
+    Ok(FileContents {
+        audio,
+        tags,
+        front_cover: front_cover(&in_file),
+    })
 }
 
 #[cfg(test)]

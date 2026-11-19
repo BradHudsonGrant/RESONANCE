@@ -546,6 +546,8 @@ pub struct Candidate {
     pub recording_id: Option<String>,
     pub release_id: Option<String>,
     pub url: Option<String>,
+    /// A picture of the release's front cover.
+    pub artwork_url: Option<String>,
     /// Set only when Chromaprint compared this file's audio with the candidate's.
     pub fingerprint_score: Option<f64>,
     /// From a release page the user pasted.

@@ -12,6 +12,9 @@ use resonance_core::staging::{
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
+use crate::artwork::{
+    StoredArtwork, record_file_artwork_in_tx, tracks_with_unwritten_artwork, unwritten_artwork,
+};
 use crate::search::{now_unix_ns, sync_asset_metadata_in_tx};
 use crate::{Database, DbError, FileStamp, TrackRow, tag_field};
 
@@ -28,6 +31,8 @@ pub struct TagWriteTarget {
     pub file: Vec<(TagField, String)>,
     /// The user's values not yet in the file.
     pub unwritten: Vec<(TagField, String)>,
+    /// The user's picture, when the file does not hold it yet.
+    pub artwork: Option<StoredArtwork>,
 }
 
 /// A track's three layers, as staging compares them.
@@ -292,19 +297,23 @@ fn write_target_of(
             "SELECT field, value FROM user_tag WHERE track_id = ?1 AND dirty_on_disk = 1",
             track_id,
         )?,
+        artwork: unwritten_artwork(connection, track_id)?,
     }))
 }
 
 impl Database {
     /// The tracks among `track_ids`, or among all tracks when it is empty, that hold a user value
-    /// not yet written to their file, in track order.
+    /// or picture not yet written to their file, in track order.
     pub fn tracks_with_unwritten_tags(&self, track_ids: &[i64]) -> Result<Vec<i64>, DbError> {
         let mut statement = self.connection.prepare_cached(
             "SELECT DISTINCT track_id FROM user_tag WHERE dirty_on_disk = 1 ORDER BY track_id",
         )?;
-        let unwritten: Vec<i64> = statement
+        let mut unwritten: Vec<i64> = statement
             .query_map([], |row| row.get(0))?
             .collect::<Result<_, _>>()?;
+        unwritten.extend(tracks_with_unwritten_artwork(&self.connection)?);
+        unwritten.sort_unstable();
+        unwritten.dedup();
         if track_ids.is_empty() {
             return Ok(unwritten);
         }
@@ -331,14 +340,16 @@ impl Database {
     }
 
     /// Stores what a file holds after its tags were rewritten: its new size, time and byte hash
-    /// (the audio hash is unchanged), its tags, and which user values it now carries. A user
-    /// value the file holds is written; one it does not, after an undo for instance, is not.
+    /// (the audio hash is unchanged), its tags and front cover, and which user values it now
+    /// carries. A user value the file holds is written; one it does not, after an undo for
+    /// instance, is not.
     pub fn record_rewritten_file(
         &mut self,
         asset_id: i64,
         stamp: FileStamp,
         byte_hash: &ContentHash,
         tags: &[(TagField, String)],
+        artwork: Option<&StoredArtwork>,
     ) -> Result<(), DbError> {
         let transaction = self.connection.transaction()?;
         let (track_id, path): (i64, String) = transaction.query_row(
@@ -381,6 +392,7 @@ impl Database {
                 )?
                 .execute(params![track_id, field.name(), !written])?;
         }
+        record_file_artwork_in_tx(&transaction, asset_id, track_id, artwork)?;
         sync_asset_metadata_in_tx(&transaction, asset_id, &path, tags, true)?;
         transaction.commit()?;
         Ok(())

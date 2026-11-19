@@ -14,7 +14,9 @@ use resonance_db::{Database, IdentificationInput};
 
 use crate::credentials::{CredentialError, CredentialStore, ProviderSecret};
 use crate::http::HttpClient;
-use crate::provider::{FetchCounts, Fetcher, Lookup, MetadataProvider, Query, QueryKind};
+use crate::provider::{
+    FetchCounts, Fetcher, IdentifyError, Lookup, MetadataProvider, Query, QueryKind,
+};
 use crate::providers::{AcoustId, Bandcamp, Discogs, MusicBrainz};
 use crate::rate::RateLimiter;
 
@@ -155,6 +157,23 @@ impl Pipeline {
             database,
             credentials,
         )
+    }
+
+    /// The picture at `url`, fetched at the pace of the provider that named it.
+    pub fn fetch_artwork(
+        &self,
+        provider: &str,
+        url: &str,
+    ) -> Result<Option<Vec<u8>>, IdentifyError> {
+        let Some(registered) = self
+            .registered
+            .iter()
+            .find(|registered| registered.provider.id() == provider)
+        else {
+            return Ok(None);
+        };
+        self.fetcher
+            .fetch_picture(registered.provider.id(), &registered.limiter, url)
     }
 
     /// How many answers came from the network and how many from the cache so far.

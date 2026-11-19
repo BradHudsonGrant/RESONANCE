@@ -82,6 +82,7 @@ The tables that matter:
 - `track` and `asset`. An asset belongs to a track and holds path, volume, size, mtime, audio hash, fingerprint, format facts, whether it is the primary file, and `offset_samples` and `tempo_ratio` relative to track time.
 - `source` for library folders and their options.
 - Tags in three layers: `file_tag` (what is in the file), `proposed_tag` (what providers proposed, with provider and confidence) and `user_tag` (what the user set). The user's value wins, then analysis, then the file ([ADR 0018](adr/0018-tag-layers-and-precedence.md)). The asset's sort and search columns hold the effective value.
+- Pictures in the same layers: `asset.artwork_hash` (the file's front cover), `proposed_artwork` and `user_artwork`, each pointing at a row of `artwork`. The bytes are kept once per picture in the `artwork` folder beside `library.db`, named by their BLAKE3 hash, and the page loads them by hash rather than inside track pages ([ADR 0021](adr/0021-artwork-store-and-layers.md)).
 - `analysis_run` (audio hash, analyser, version, parameter hash, status) and one result table per kind: beat grid, key, loudness, energy curve, phrases, embedding. Each has a confidence. Parallel tables hold user corrections.
 - `cue` and `loop`, stored in track time.
 - `collection`, `collection_item`, `smart_collection`, `set`, `set_item` (with play window and transition).

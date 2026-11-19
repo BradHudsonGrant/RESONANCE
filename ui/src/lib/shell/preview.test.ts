@@ -26,6 +26,7 @@ function previewState(overrides: Partial<PreviewState> = {}): PreviewState {
     track_id: 1,
     title: 'Warm Up',
     artist: 'Ada Marsh',
+    artwork: null,
     playing: true,
     position_ms: 0,
     duration_ms: 180_000,

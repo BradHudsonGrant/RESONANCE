@@ -18,7 +18,7 @@ use resonance_core::providers::ProviderKey;
 use resonance_core::staging::{ProposalStatus, staging_diff};
 use resonance_db::{Database, IdentificationInput};
 use resonance_identify::credentials::{CredentialStore, MemoryCredentialStore};
-use resonance_identify::http::{HttpClient, HttpRequest, HttpResponse, Unreachable};
+use resonance_identify::http::{BytesResponse, HttpClient, HttpRequest, HttpResponse, Unreachable};
 use resonance_identify::library::{identify_track_with_url, run_online_pass};
 use resonance_identify::pipeline::{Identification, Pipeline};
 use resonance_identify::provider::{IdentifyError, Lookup, MetadataProvider, Query, QueryKind};
@@ -35,6 +35,7 @@ struct Route {
     matches: Matcher,
     status: u16,
     body: String,
+    bytes: Option<Vec<u8>>,
 }
 
 #[derive(Default)]
@@ -50,6 +51,18 @@ impl Fixture {
             matches: Box::new(|_| true),
             status: 200,
             body: body.to_string(),
+            bytes: None,
+        });
+        self
+    }
+
+    fn route_bytes(mut self, url: &str, bytes: &[u8]) -> Self {
+        self.routes.push(Route {
+            url: url.to_owned(),
+            matches: Box::new(|_| true),
+            status: 200,
+            body: String::new(),
+            bytes: Some(bytes.to_vec()),
         });
         self
     }
@@ -65,6 +78,7 @@ impl Fixture {
             matches: Box::new(matches),
             status: 200,
             body: body.into(),
+            bytes: None,
         });
         self
     }
@@ -98,6 +112,23 @@ impl HttpClient for Fixture {
                 status: 404,
                 body: String::new(),
             },
+        })
+    }
+
+    fn fetch_bytes(
+        &self,
+        request: &HttpRequest,
+        _limit: u64,
+    ) -> Result<BytesResponse, Unreachable> {
+        let answer = self.send(request)?;
+        let bytes = self
+            .routes
+            .iter()
+            .find(|route| request.url.starts_with(&route.url))
+            .and_then(|route| route.bytes.clone());
+        Ok(BytesResponse {
+            status: answer.status,
+            body: bytes.unwrap_or_else(|| answer.body.into_bytes()),
         })
     }
 }
@@ -727,4 +758,121 @@ fn user_values_survive_a_full_rerun_and_conflicting_proposals_show_as_locked() {
     assert_eq!(accepted.fields, 3, "album, year and catalogue number");
     let user = database.tag_layers(track).unwrap().unwrap().user;
     assert!(user.contains(&(TagField::Label, "Typed Label".to_owned())));
+}
+
+const COVER: [u8; 8] = [0xff, 0xd8, 0xff, 0xe0, 0, 16, b'J', b'F'];
+
+#[test]
+fn a_musicbrainz_release_with_a_front_cover_names_its_cover_art_archive_picture() {
+    let release = |front: bool| {
+        json!({ "releases": [{
+            "id": "c0a1b2c3-0000-4000-8000-000000000001",
+            "title": "Night Drive EP",
+            "cover-art-archive": { "artwork": front, "front": front, "count": 1 }
+        }]})
+    };
+    let recording = json!({ "id": RECORDING, "title": "Night Drive", "duration": 412,
+                            "artists": [{ "name": "Some Artist" }] });
+    for front in [true, false] {
+        let fixture = Fixture::default()
+            .route(
+                "https://api.acoustid.org/v2/lookup",
+                acoustid_answer(0.97, recording.clone()),
+            )
+            .route("https://musicbrainz.org/ws/2/release", release(front));
+        let (_, pipeline, _) = setup(fixture, &[ProviderKey::AcoustId]);
+
+        let found = pipeline
+            .identify(&[input(1, 412_300, true)], &never())
+            .remove(0);
+
+        assert_eq!(
+            found.best.unwrap().candidate.artwork_url.as_deref(),
+            front.then_some(
+                "https://coverartarchive.org/release/c0a1b2c3-0000-4000-8000-000000000001/front-500"
+            )
+        );
+    }
+}
+
+#[test]
+fn a_release_cover_is_fetched_once_and_staged_for_tracks_without_a_picture() {
+    let image_url = "https://i.discogs.com/night-drive.jpg";
+    let mut release = discogs_release();
+    release["images"] = json!([
+        { "type": "secondary", "uri": "https://i.discogs.com/back.jpg" },
+        { "type": "primary", "uri": image_url }
+    ]);
+    let fixture = Fixture::default()
+        .route("https://api.discogs.com/releases/111", release)
+        .route_bytes(image_url, &COVER);
+    let (fixture, pipeline, database) = setup(fixture, &[ProviderKey::Discogs]);
+    let folder = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("cascade-artwork");
+    let _ = std::fs::remove_dir_all(&folder);
+    let (tracks, held) = {
+        let mut database = database.lock().unwrap();
+        database.set_artwork_folder(&folder);
+        let source = database.source("library").unwrap();
+        database
+            .record_scan(source, &[scanned(1), scanned(2), scanned(3)])
+            .unwrap();
+        let tracks: Vec<i64> = database
+            .tracks()
+            .unwrap()
+            .iter()
+            .map(|track| track.track_id)
+            .collect();
+        let held = database
+            .artwork_store()
+            .unwrap()
+            .put(&[0xff, 0xd8, 0xff, 0xe0, 9])
+            .unwrap();
+        database.set_user_artwork(tracks[2], &held).unwrap();
+        (tracks, held)
+    };
+
+    for track_id in &tracks {
+        identify_track_with_url(
+            &database,
+            &pipeline,
+            *track_id,
+            &ReleaseUrl::DiscogsRelease(111),
+        )
+        .unwrap();
+    }
+
+    assert_eq!(fixture.calls_to(image_url), 1);
+    assert_eq!(fixture.calls_to("https://i.discogs.com/back.jpg"), 0);
+    let database = database.lock().unwrap();
+    let staged = database.proposed_artwork(tracks[0]).unwrap().unwrap();
+    assert!(staged.pending);
+    assert_eq!(staged.provider, "discogs");
+    assert_eq!(staged.source_url, image_url);
+    assert_eq!(
+        database
+            .artwork_store()
+            .unwrap()
+            .read(&staged.artwork)
+            .unwrap(),
+        COVER
+    );
+    assert_eq!(
+        database
+            .proposed_artwork(tracks[1])
+            .unwrap()
+            .unwrap()
+            .artwork,
+        staged.artwork
+    );
+    assert_eq!(
+        database.proposed_artwork(tracks[2]).unwrap(),
+        None,
+        "a track that shows a picture is left alone"
+    );
+    assert_eq!(database.track_artwork(tracks[2]).unwrap(), Some(held));
+    assert_eq!(
+        database.track_artwork(tracks[0]).unwrap(),
+        None,
+        "a proposal is not shown until it is accepted"
+    );
 }

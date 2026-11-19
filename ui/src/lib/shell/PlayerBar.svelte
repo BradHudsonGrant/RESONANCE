@@ -4,13 +4,17 @@
   import Icon from '../design/Icon.svelte';
   import ModularDivider from '../design/ModularDivider.svelte';
   import ScrubBar from '../design/ScrubBar.svelte';
+  import Thumb from '../design/Thumb.svelte';
   import Tooltip from '../design/Tooltip.svelte';
+  import { artworkUrl } from '../ipc/artwork';
   import { duration } from '../library/format';
 
   interface Props {
     trackId?: number | null;
     title?: string | null;
     artist?: string | null;
+    /** The hash of the playing track's picture. Without one the thumb is a dot-wave frame. */
+    artwork?: string | null;
     playing?: boolean;
     positionMs?: number;
     durationMs?: number;
@@ -28,6 +32,7 @@
     trackId = null,
     title = null,
     artist = null,
+    artwork = null,
     playing = false,
     positionMs = 0,
     durationMs = 0,
@@ -81,6 +86,7 @@
         </Tooltip>
 
         {#if hasTrack}
+          <Thumb size="sm" seed={trackId ?? 0} src={artwork ? artworkUrl(artwork) : null} />
           <div class="track">
             <span class="track-title" title={title ?? undefined}>{title ?? ''}</span>
             {#if error}

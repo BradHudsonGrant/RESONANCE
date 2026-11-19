@@ -4,4 +4,8 @@ import type { FieldChange } from "./FieldChange";
 /**
  * One file a tag write would change. `blocked` says why it cannot be written as things stand.
  */
-export type FileTagWrite = { track_id: number, path: string, fields: Array<FieldChange>, blocked: string | null, };
+export type FileTagWrite = { track_id: number, path: string, fields: Array<FieldChange>, 
+/**
+ * Whether the write puts the user's picture in as the front cover.
+ */
+cover: boolean, blocked: string | null, };

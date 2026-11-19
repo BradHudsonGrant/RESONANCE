@@ -59,6 +59,60 @@ test('a scanned folder fills the table, and a selected track fills the inspector
   }
 });
 
+// A one-pixel PNG, made up here so no real cover art is involved.
+const pixel = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+test('a picked cover replaces the dot wave in the inspector, served by the core', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1586, height: 992 });
+  await page.goto('/');
+  const table = page.getByRole('grid', { name: 'Tracks' });
+  const inspector = page.getByRole('complementary', { name: 'Inspector' });
+  const cover = inspector.locator('.cover .thumb');
+
+  await table.getByText('Ada Marsh - Second Wind').click();
+  await expect(inspector.getByRole('heading', { name: 'Ada Marsh - Second Wind' })).toBeVisible();
+  await expect(cover).toHaveAttribute('data-artwork', 'wave');
+  await expect(cover.locator('canvas')).toBeVisible();
+
+  await inspector.locator('input[type="file"]').setInputFiles({
+    name: 'cover.png',
+    mimeType: 'image/png',
+    buffer: pixel,
+  });
+
+  await expect(cover).toHaveAttribute('data-artwork', 'image');
+  const image = cover.locator('img');
+  await expect(image).toHaveAttribute('src', /^\/artwork\/[0-9a-f]{64}$/);
+  await expect
+    .poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth))
+    .toBe(1);
+  const served = await page.request.get((await image.getAttribute('src')) ?? '');
+  expect(served.status()).toBe(200);
+  expect(served.headers()['content-type']).toBe('image/png');
+  expect(Buffer.from(await served.body()).equals(pixel)).toBe(true);
+
+  await table.getByText('Nia Okoro - Fourth Wall').click();
+  await expect(inspector.getByRole('heading', { name: 'Nia Okoro - Fourth Wall' })).toBeVisible();
+  await expect(cover).toHaveAttribute('data-artwork', 'wave');
+  await expect(cover.locator('canvas')).toBeVisible();
+
+  await inspector.locator('input[type="file"]').setInputFiles({
+    name: 'cover.gif',
+    mimeType: 'image/gif',
+    buffer: Buffer.from('GIF89a'),
+  });
+  await expect(inspector.getByRole('alert')).toHaveText('The picture is not a JPEG or PNG');
+  await expect(cover).toHaveAttribute('data-artwork', 'wave');
+
+  await table.getByText('Ada Marsh - Second Wind').click();
+  await expect(cover).toHaveAttribute('data-artwork', 'image');
+});
+
 test('Mix renders the header, dual waveform lanes and both full decks in dark and light themes', async ({
   page,
 }) => {

@@ -12,7 +12,9 @@ use resonance_core::library::{
     AudioFormat, SCAN_IGNORE_MARKER, ScannedFile, folder_under_source_holding,
     is_ignored_folder_with, is_subfolder_excluded,
 };
-use resonance_db::{Database, DbError, FileStamp, IdentityMatch, SourceId};
+use resonance_db::{
+    ArtworkStore, Database, DbError, FileStamp, IdentityMatch, SourceId, StoredArtwork,
+};
 
 use crate::{file_tags, identity};
 
@@ -313,7 +315,16 @@ where
         .filter_map(|own| folder_under_source_holding(&root, &own))
         .collect();
 
-    let (source, include_subfolders, excluded_subfolders, ignored_folders, stamps, has_identities) = {
+    let (
+        artwork_store,
+        artwork_unread,
+        source,
+        include_subfolders,
+        excluded_subfolders,
+        ignored_folders,
+        stamps,
+        has_identities,
+    ) = {
         let mut db = database.lock().unwrap_or_else(PoisonError::into_inner);
         let source = db.source(&source_folder)?;
         let (include_subfolders, excluded_subfolders) = match db.source_config(source)? {
@@ -323,7 +334,13 @@ where
         let ignored_folders = db.ignored_folders()?;
         let stamps = db.file_stamps(source)?;
         let has_identities = db.has_identified_assets()?;
+        let artwork_unread = match db.artwork_store() {
+            Some(_) => db.paths_without_artwork_read(source)?,
+            None => HashSet::new(),
+        };
         (
+            db.artwork_store(),
+            artwork_unread,
             source,
             include_subfolders,
             excluded_subfolders,
@@ -389,6 +406,7 @@ where
 
         let mut prepared: Vec<PreparedScanFile> = Vec::new();
         let mut chunk_unchanged = 0usize;
+        let mut covers: Vec<(String, Option<StoredArtwork>)> = Vec::new();
 
         for path in chunk {
             check_cancelled()?;
@@ -418,13 +436,27 @@ where
             let is_new_path = match stamps.get(&stored) {
                 Some(before) if *before == now => {
                     chunk_unchanged += 1;
+                    // Scanned before covers were read: read the cover once, nothing else.
+                    if let Some(store) = &artwork_store
+                        && artwork_unread.contains(&stored)
+                    {
+                        let cover = file_tags::read(path)
+                            .ok()
+                            .and_then(|contents| store_cover(store, contents.front_cover));
+                        covers.push((stored, cover));
+                    }
                     continue;
                 }
                 Some(_) => false,
                 None => true,
             };
             let (audio, tags) = match file_tags::read(path) {
-                Ok(contents) => (Some(contents.audio), contents.tags),
+                Ok(contents) => {
+                    if let Some(store) = &artwork_store {
+                        covers.push((stored.clone(), store_cover(store, contents.front_cover)));
+                    }
+                    (Some(contents.audio), contents.tags)
+                }
                 Err(source) => {
                     unreadable.push(Unreadable {
                         path: shown,
@@ -481,7 +513,8 @@ where
             batch_to_record.push(item.scanned);
         }
 
-        let wrote_changes = !resolved_moves.is_empty() || !batch_to_record.is_empty();
+        let wrote_changes =
+            !resolved_moves.is_empty() || !batch_to_record.is_empty() || !covers.is_empty();
         if wrote_changes {
             let mut db = database.lock().unwrap_or_else(PoisonError::into_inner);
             for mv in &resolved_moves {
@@ -494,6 +527,9 @@ where
             }
             if !batch_to_record.is_empty() {
                 db.record_scan(source, &batch_to_record)?;
+            }
+            if !covers.is_empty() {
+                db.record_scanned_artwork(source, &covers)?;
             }
         }
 
@@ -536,6 +572,12 @@ where
 
     report.unreadable = unreadable;
     Ok(report)
+}
+
+/// Keeps the cover in the picture store. A picture the library does not keep, or one that
+/// cannot be written, leaves the file without a cover rather than failing the scan.
+fn store_cover(store: &ArtworkStore, cover: Option<Vec<u8>>) -> Option<StoredArtwork> {
+    store.put(&cover?).ok()
 }
 
 pub(crate) fn scan_single_file(file_path: &Path, stored: String) -> io::Result<ScannedFile> {

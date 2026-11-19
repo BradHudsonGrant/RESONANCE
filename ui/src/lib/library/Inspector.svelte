@@ -6,8 +6,10 @@
   import MonoLabel from '../design/MonoLabel.svelte';
   import Thumb from '../design/Thumb.svelte';
   import Tooltip from '../design/Tooltip.svelte';
+  import { artworkUrl } from '../ipc/artwork';
   import type { LibraryCollection } from '../ipc/bindings/LibraryCollection';
   import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
+  import type { TrackArtwork } from '../ipc/bindings/TrackArtwork';
   import CollectionMenu from './CollectionMenu.svelte';
   import { audioSummary, duration, fileSize, tempo, trackSeed } from './format';
   import { keyDetail } from './key-notation.svelte';
@@ -26,6 +28,12 @@
     onaddtocollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
     onremovefromcollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
     oncreatecollectionandadd?: (name: string, trackIds: number[]) => Promise<void> | void;
+    /** The selected track's picture state, with any release picture waiting for a decision. */
+    artwork?: TrackArtwork | null;
+    artworkError?: string | null;
+    onpickartwork?: (trackId: number, file: File) => void;
+    onacceptartwork?: (trackId: number) => void;
+    onskipartwork?: (trackId: number) => void;
   }
 
   let {
@@ -42,7 +50,27 @@
     onaddtocollection,
     onremovefromcollection,
     oncreatecollectionandadd,
+    artwork = null,
+    artworkError = null,
+    onpickartwork,
+    onacceptartwork,
+    onskipartwork,
   }: Props = $props();
+
+  const proposed = $derived(
+    artwork && track && artwork.track_id === track.id ? artwork.proposed : null,
+  );
+
+  let picker = $state<HTMLInputElement | null>(null);
+  let dropping = $state(false);
+
+  function picked(file: File | undefined) {
+    if (file && track) onpickartwork?.(track.id, file);
+  }
+
+  function carriesFiles(event: DragEvent): boolean {
+    return Boolean(event.dataTransfer?.types.includes('Files'));
+  }
 
   const isMissing = $derived(Boolean(track && track.missing_since != null));
   const isPreviewTrack = $derived(Boolean(track && previewTrackId === track.id && !isMissing));
@@ -97,7 +125,48 @@
   {#if track}
     <div class="body">
       <div class="hero">
-        <Thumb size="lg" seed={trackSeed(track.location)} alt="{track.title} artwork" />
+        <Tooltip text="Choose or drop a cover" side="below">
+          <button
+            type="button"
+            class={['cover', { dropping }]}
+            aria-label="Choose a cover for {track.title}"
+            disabled={!onpickartwork}
+            onclick={() => picker?.click()}
+            ondragenter={(event) => {
+              if (carriesFiles(event)) dropping = true;
+            }}
+            ondragover={(event) => {
+              if (!carriesFiles(event)) return;
+              event.preventDefault();
+              if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+            }}
+            ondragleave={() => (dropping = false)}
+            ondrop={(event) => {
+              event.preventDefault();
+              dropping = false;
+              picked(event.dataTransfer?.files[0]);
+            }}
+          >
+            <Thumb
+              size="lg"
+              seed={trackSeed(track.location)}
+              src={track.artwork ? artworkUrl(track.artwork) : null}
+              alt="{track.title} artwork"
+            />
+          </button>
+        </Tooltip>
+        <input
+          bind:this={picker}
+          class="picker"
+          type="file"
+          accept="image/jpeg,image/png"
+          tabindex="-1"
+          aria-hidden="true"
+          onchange={(event) => {
+            picked(event.currentTarget.files?.[0]);
+            event.currentTarget.value = '';
+          }}
+        />
         <div class="identity">
           <div class="hero-top">
             <h2 class="title">{track.title}</h2>
@@ -176,6 +245,35 @@
             </Button>
           {/if}
         </div>
+      {/if}
+
+      {#if artworkError}
+        <p class="warning" role="alert">{artworkError}</p>
+      {/if}
+
+      {#if proposed}
+        <section class="proposed" aria-label="Proposed cover">
+          <Thumb
+            size="md"
+            seed={trackSeed(track.location)}
+            src={artworkUrl(proposed.artwork)}
+            alt="Proposed cover"
+          />
+          <div class="proposed-copy">
+            <MonoLabel text="Cover" size="xs" tone="muted" />
+            <p class="proposed-note">Release cover from {proposed.provider}</p>
+            <div class="proposed-actions">
+              <Button
+                size="sm"
+                variant="primary"
+                onclick={() => track && onacceptartwork?.(track.id)}
+              >
+                Use cover
+              </Button>
+              <Button size="sm" onclick={() => track && onskipartwork?.(track.id)}>Skip</Button>
+            </div>
+          </div>
+        </section>
       {/if}
 
       {#if !track.audio}
@@ -350,6 +448,59 @@
     grid-template-columns: auto minmax(0, 1fr);
     align-items: start;
     gap: var(--space-4);
+  }
+
+  .cover {
+    display: inline-flex;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-lg);
+    background: none;
+    cursor: pointer;
+  }
+
+  .cover:disabled {
+    cursor: default;
+  }
+
+  .cover.dropping {
+    outline: var(--border-width) dashed var(--color-border-control);
+    outline-offset: var(--space-0-5);
+  }
+
+  .picker {
+    display: none;
+  }
+
+  .proposed {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .proposed-copy {
+    display: grid;
+    gap: var(--space-1);
+    min-width: 0;
+  }
+
+  .proposed-note {
+    margin: 0;
+    color: var(--color-text-2);
+    font-size: var(--text-sm);
+  }
+
+  .proposed-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  @media (forced-colors: active) {
+    .cover.dropping {
+      outline-color: Highlight;
+    }
   }
 
   .identity {

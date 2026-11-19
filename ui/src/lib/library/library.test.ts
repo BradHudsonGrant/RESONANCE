@@ -525,6 +525,59 @@ describe('Inspector and track formatting', () => {
     expect(onaddtocollection).toHaveBeenCalledWith(2, [track.id]);
   });
 
+  it('shows the stored cover, takes a picked one and offers a proposed release cover', async () => {
+    const track = { ...fakeTrack(0), artwork: 'a'.repeat(64) };
+    const onpickartwork = vi.fn();
+    const onacceptartwork = vi.fn();
+    const onskipartwork = vi.fn();
+    const { container } = render(Inspector, {
+      track,
+      onclose: vi.fn(),
+      artwork: {
+        track_id: track.id,
+        artwork: track.artwork,
+        proposed: { artwork: 'b'.repeat(64), provider: 'MusicBrainz' },
+      },
+      onpickartwork,
+      onacceptartwork,
+      onskipartwork,
+    });
+
+    const images = [...container.querySelectorAll('img')].map((image) => image.getAttribute('src'));
+    expect(images).toEqual([`/artwork/${'a'.repeat(64)}`, `/artwork/${'b'.repeat(64)}`]);
+    expect(screen.getByText('Release cover from MusicBrainz')).toBeTruthy();
+
+    const picture = new File([new Uint8Array([0xff, 0xd8, 0xff])], 'cover.jpg', {
+      type: 'image/jpeg',
+    });
+    const picker = container.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!picker) throw new Error('no picker');
+    Object.defineProperty(picker, 'files', { value: [picture], configurable: true });
+    await fireEvent.change(picker);
+    expect(onpickartwork).toHaveBeenCalledWith(track.id, picture);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Use cover' }));
+    expect(onacceptartwork).toHaveBeenCalledWith(track.id);
+    await fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
+    expect(onskipartwork).toHaveBeenCalledWith(track.id);
+  });
+
+  it('draws the dot wave when a track has no cover or its cover fails to load', async () => {
+    const { container } = render(Inspector, {
+      track: { ...fakeTrack(1), artwork: 'c'.repeat(64) },
+      onclose: vi.fn(),
+    });
+    const cover = container.querySelector('.cover .thumb');
+    expect(cover?.getAttribute('data-artwork')).toBe('image');
+
+    const image = container.querySelector('.cover img');
+    if (!image) throw new Error('no image');
+    await fireEvent.error(image);
+
+    expect(cover?.getAttribute('data-artwork')).toBe('wave');
+    expect(container.querySelector('.cover canvas')).toBeTruthy();
+  });
+
   it('explains when audio properties are missing and renders a quiet empty state', () => {
     const unreadable = { ...fakeTrack(0), artist: null, audio: null, format: 'mp3' };
     const { unmount } = render(Inspector, { track: unreadable, onclose: vi.fn() });

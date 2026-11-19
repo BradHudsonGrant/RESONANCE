@@ -54,6 +54,7 @@ Live decks and the crossfade arrive in M7 and M10. In Mix the dock folds away, s
 A card, not a strip: 60 px tall, 12 px corners, on Surface with a 1 px border, inset 20 px at the sides and 17 px at the bottom. From left to right:
 
 - A 44 px round play button on Surface 2 with a control border, and a 28 px pause button.
+- While a track is loaded, its 36 px artwork `Thumb` before the title and artist.
 - Elapsed and total time in 12 px mono, the elapsed part in Text and the total in Text 2.
 - The scrub bar, which takes the free width.
 - A Vol and B Vol, each a 12 px mono readout and an 86 px slider.

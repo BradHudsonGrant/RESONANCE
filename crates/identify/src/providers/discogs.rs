@@ -145,6 +145,7 @@ fn release(id: u64, lookup: &Lookup<'_>) -> Result<Vec<Candidate>, IdentifyError
         year,
         release_id: Some(id.to_string()),
         url: Some(format!("https://www.discogs.com/release/{id}")),
+        artwork_url: primary_image(&answer),
         ..Candidate::default()
     };
     Ok(answer
@@ -169,6 +170,18 @@ fn release(id: u64, lookup: &Lookup<'_>) -> Result<Vec<Candidate>, IdentifyError
             })
         })
         .collect())
+}
+
+/// The release's primary image, else its first. Discogs lists images only to a request made with
+/// a token.
+fn primary_image(release: &Value) -> Option<String> {
+    let images = release.get("images").and_then(Value::as_array)?;
+    images
+        .iter()
+        .find(|image| image.get("type").and_then(Value::as_str) == Some("primary"))
+        .or_else(|| images.first())
+        .and_then(|image| text(image, "uri"))
+        .filter(|uri| uri.starts_with("https://"))
 }
 
 /// `6:52` or `1:02:03` as milliseconds.

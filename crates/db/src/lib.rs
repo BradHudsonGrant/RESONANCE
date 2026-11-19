@@ -1,3 +1,4 @@
+mod artwork;
 mod collections;
 mod identification;
 mod identity;
@@ -14,6 +15,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+pub use artwork::{ARTWORK_FOLDER, ArtworkError, ArtworkStore, ProposedArtwork, StoredArtwork};
 pub use collections::{CollectionSummary, TrackCollection};
 pub use identification::{
     CachedResponse, IdentificationInput, IdentificationPass, StoredIdentification,
@@ -36,7 +38,7 @@ pub use tags::{AcceptReport, StagingQueueEntry, TagLayers, TagWriteTarget};
 
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
-const MIGRATIONS: [&str; 13] = [
+const MIGRATIONS: [&str; 14] = [
     include_str!("../migrations/0001_library.sql"),
     include_str!("../migrations/0002_sources.sql"),
     include_str!("../migrations/0003_identity.sql"),
@@ -50,6 +52,7 @@ const MIGRATIONS: [&str; 13] = [
     include_str!("../migrations/0011_operations.sql"),
     include_str!("../migrations/0012_operation_renames.sql"),
     include_str!("../migrations/0013_job_pause.sql"),
+    include_str!("../migrations/0014_artwork.sql"),
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -140,11 +143,14 @@ pub struct TrackRow {
     pub missing_since: Option<i64>,
     /// Values the user typed or accepted, which the track shows in place of the file's.
     pub user_tags: Vec<(TagField, String)>,
+    /// The hash of the picture the track shows: the user's, else its file's front cover.
+    pub artwork: Option<String>,
 }
 
 /// The connection that writes. Readers open their own.
 pub struct Database {
     connection: Connection,
+    artwork: Option<ArtworkStore>,
 }
 
 fn migrate(connection: &mut Connection) -> Result<(), DbError> {
@@ -180,7 +186,11 @@ impl Database {
                 source,
             })?;
         }
-        Self::prepared(Connection::open(path)?)
+        let mut database = Self::prepared(Connection::open(path)?)?;
+        database.artwork = Some(ArtworkStore::new(
+            path.parent().unwrap_or(Path::new("")).join(ARTWORK_FOLDER),
+        ));
+        Ok(database)
     }
 
     pub fn open_in_memory() -> Result<Self, DbError> {
@@ -192,7 +202,10 @@ impl Database {
         connection.query_row("PRAGMA journal_mode = WAL", [], |_| Ok(()))?;
         connection.pragma_update(None, "foreign_keys", true)?;
         migrate(&mut connection)?;
-        Ok(Self { connection })
+        Ok(Self {
+            connection,
+            artwork: None,
+        })
     }
 
     pub fn schema_version(&self) -> Result<u32, DbError> {
@@ -403,6 +416,7 @@ impl Database {
         }
         collections::populate_track_collections(&self.connection, &mut tracks)?;
         tags::populate_user_tags(&self.connection, &mut tracks)?;
+        artwork::populate_user_artwork(&self.connection, &mut tracks)?;
         Ok(tracks)
     }
 
@@ -428,6 +442,7 @@ impl Database {
         }
         collections::populate_track_collections(&self.connection, &mut tracks)?;
         tags::populate_user_tags(&self.connection, &mut tracks)?;
+        artwork::populate_user_artwork(&self.connection, &mut tracks)?;
         Ok(tracks)
     }
 
@@ -468,7 +483,8 @@ impl Database {
 /// 585 ms instead of 13 ms.
 const TRACKS_IN_ORDER: &str = "SELECT asset.id, asset.track_id, source.folder, asset.path,
          asset.size_bytes, asset.modified_ns, asset.format, asset.duration_ms, asset.sample_rate,
-         asset.channels, asset.bit_depth, asset.bitrate_kbps, track.favourite, asset.missing_since
+         asset.channels, asset.bit_depth, asset.bitrate_kbps, track.favourite, asset.missing_since,
+         asset.artwork_hash
      FROM source
      CROSS JOIN asset ON asset.source_id = source.id
      JOIN track ON track.id = asset.track_id
@@ -502,6 +518,7 @@ pub(crate) fn track_row(row: &Row<'_>) -> Result<(i64, TrackRow), DbError> {
     };
     let favourite_raw: i64 = row.get(12)?;
     let missing_since: Option<i64> = row.get(13)?;
+    let artwork: Option<String> = row.get(14)?;
     let track = TrackRow {
         track_id: row.get(1)?,
         source_folder: row.get(2)?,
@@ -517,6 +534,7 @@ pub(crate) fn track_row(row: &Row<'_>) -> Result<(i64, TrackRow), DbError> {
         collections: Vec::new(),
         missing_since,
         user_tags: Vec::new(),
+        artwork,
     };
     Ok((row.get(0)?, track))
 }
@@ -597,7 +615,10 @@ mod tests {
         .expect("v1 asset inserts");
 
         migrate(&mut v1).expect("v1 migrates to current schema");
-        let db = Database { connection: v1 };
+        let db = Database {
+            connection: v1,
+            artwork: None,
+        };
 
         let sources = db.sources().expect("sources read");
         assert_eq!(sources.len(), 1);
@@ -666,7 +687,10 @@ mod tests {
         .expect("tags insert");
 
         migrate(&mut v3).expect("v3 migrates to v4");
-        let db = Database { connection: v3 };
+        let db = Database {
+            connection: v3,
+            artwork: None,
+        };
 
         // FTS folds diacritics and uses stem title fallback when title tag is absent.
         let found = db
@@ -737,7 +761,10 @@ mod tests {
             .expect("fts count reads");
         assert_eq!(fts_rows, 0);
 
-        let db = Database { connection: v4 };
+        let db = Database {
+            connection: v4,
+            artwork: None,
+        };
         assert_eq!(
             db.query_track_count(&TrackQuery {
                 text: Some("ghost".to_owned()),
@@ -771,7 +798,10 @@ mod tests {
 
         migrate(&mut v5).expect("v5 migrates to v6");
 
-        let mut db = Database { connection: v5 };
+        let mut db = Database {
+            connection: v5,
+            artwork: None,
+        };
         let col = db.create_collection("Warm Up").expect("collection creates");
         db.add_tracks_to_collection(col.id, &[1])
             .expect("track adds to collection");
@@ -848,7 +878,10 @@ mod tests {
         .expect("asset inserts");
 
         migrate(&mut v6).expect("v6 migrates to v7");
-        let mut db = Database { connection: v6 };
+        let mut db = Database {
+            connection: v6,
+            artwork: None,
+        };
         assert_eq!(db.tracks().expect("tracks read")[0].missing_since, None);
 
         db.set_assets_missing_since(&[(1, Some(1_730_000_000_000))])
@@ -892,7 +925,10 @@ mod tests {
         .expect("asset inserts");
 
         migrate(&mut v7).expect("v7 migrates");
-        let mut db = Database { connection: v7 };
+        let mut db = Database {
+            connection: v7,
+            artwork: None,
+        };
         assert_eq!(db.schema_version().expect("schema version"), SCHEMA_VERSION);
         assert_eq!(db.track_count().expect("tracks preserved"), 1);
 

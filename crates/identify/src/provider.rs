@@ -2,6 +2,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use resonance_core::artwork::MAX_ARTWORK_BYTES;
 use resonance_core::identify::{Candidate, KnownTags, ReleaseUrl};
 use resonance_core::providers::ProviderKey;
 use resonance_db::{Database, DbError};
@@ -252,6 +253,35 @@ impl Fetcher {
                 }
                 Ok((response.status == OK).then_some(response.body))
             }
+            status => Err(IdentifyError::Status { provider, status }),
+        }
+    }
+}
+
+impl Fetcher {
+    /// A picture, fetched straight from the network after waiting on the limiter. Pictures are
+    /// kept in the picture store, not the response cache. `None` when the address has none.
+    pub(crate) fn fetch_picture(
+        &self,
+        provider: &'static str,
+        limiter: &RateLimiter,
+        url: &str,
+    ) -> Result<Option<Vec<u8>>, IdentifyError> {
+        limiter.acquire();
+        self.counts
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .network += 1;
+        let answer = self
+            .http
+            .fetch_bytes(&HttpRequest::get(url), MAX_ARTWORK_BYTES as u64)
+            .map_err(|failure| IdentifyError::Unreachable {
+                provider,
+                reason: failure.0,
+            })?;
+        match answer.status {
+            OK => Ok(Some(answer.body)),
+            NOT_FOUND => Ok(None),
             status => Err(IdentifyError::Status { provider, status }),
         }
     }

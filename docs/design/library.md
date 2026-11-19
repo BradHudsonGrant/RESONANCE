@@ -52,7 +52,8 @@ Settings has the same template field under File names, previewing the first thre
 
 The column on the right, 420 px at the reference size, on Surface with a 1 px border on its left. It has no title bar: it opens straight into the track. Sections are split by inset 1 px dividers.
 
-- Track: 96 px artwork with 10 px corners, the title in 20 px Space Grotesk 600 and the artist in 14 px Text 2, star and more buttons on the right, then an Analysed status pill and the audio format (for example `WAV 44.1 kHz 24-bit`) in 12 px mono. Artwork arrives in M3. Until then the artwork is a still frame of the dot wave seeded from the track.
+- Track: 96 px artwork with 10 px corners, the title in 20 px Space Grotesk 600 and the artist in 14 px Text 2, star and more buttons on the right, then an Analysed status pill and the audio format (for example `WAV 44.1 kHz 24-bit`) in 12 px mono. The artwork is the user's picture, else the file's front cover, and a track with neither shows a still frame of the dot wave seeded from the track. The artwork is a button: it opens a picker for a JPEG or PNG, and takes one dropped on it, with a dashed control border while a file is over it. A picked picture shows at once and goes into the file with the next tag write ([ADR 0021](../adr/0021-artwork-store-and-layers.md)).
+- Cover: only while identification has a release cover waiting. A 60 px thumb of it, a mono Cover label, "Release cover from MusicBrainz" (or Discogs) in 13 px Text 2, and Use cover and Skip buttons. Use cover makes it the track's picture.
 - Details: two rows of mono labels over 13 px values. BPM, Key, Time and Release, then Genre, Subgenre and Label. File facts show from #52, tags from M3, BPM and key from M5.
 - Tags: removable 26 px tags and a round add button. Editing arrives in M3.
 - Audio traits: five `TraitBar` rows (Danceability, Energy, Warmth, Vocal presence, Groove), filled by M5 and M6.
