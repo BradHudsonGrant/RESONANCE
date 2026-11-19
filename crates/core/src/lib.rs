@@ -8,4 +8,5 @@ pub mod meter;
 pub mod providers;
 pub mod search;
 pub mod staging;
+pub mod template;
 pub mod waveform;
