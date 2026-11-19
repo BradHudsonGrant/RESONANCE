@@ -30,6 +30,7 @@
   import Sheet from '../design/Sheet.svelte';
   import Tooltip from '../design/Tooltip.svelte';
   import type { LibraryCollection } from '../ipc/bindings/LibraryCollection';
+  import type { SmartView } from '../ipc/bindings/SmartView';
   import Wave from '../wave/Wave.svelte';
 
   interface Props {
@@ -45,6 +46,12 @@
     onCreateCollection?: (name: string) => Promise<void> | void;
     onRenameCollection?: (collectionId: number, name: string) => Promise<void> | void;
     onDeleteCollection?: (collectionId: number) => Promise<void> | void;
+    /** Saved filter sets, listed under the collections. */
+    smartViews?: SmartView[];
+    activeViewId?: number | null;
+    onSelectView?: (view: SmartView) => void;
+    onRenameView?: (viewId: number, name: string) => Promise<void> | void;
+    onDeleteView?: (viewId: number) => Promise<void> | void;
     onCollapse: (collapsed: boolean) => void;
   }
 
@@ -59,6 +66,11 @@
     onCreateCollection,
     onRenameCollection,
     onDeleteCollection,
+    smartViews = [],
+    activeViewId = null,
+    onSelectView,
+    onRenameView,
+    onDeleteView,
     onCollapse,
   }: Props = $props();
 
@@ -67,27 +79,29 @@
   let createError = $state<string | null>(null);
   let createInput = $state<HTMLInputElement | undefined>();
 
-  let editingId = $state<number | null>(null);
+  type RowKind = 'collection' | 'view';
+  interface RowTarget {
+    kind: RowKind;
+    id: number;
+    name: string;
+  }
+
+  let editing = $state<RowTarget | null>(null);
   let renameValue = $state('');
   let renameError = $state<string | null>(null);
   let renameInput = $state<HTMLInputElement | undefined>();
 
-  let menuCollectionId = $state<number | null>(null);
+  let menuTarget = $state<RowTarget | null>(null);
   let menuAnchor = $state<HTMLElement | null>(null);
   let rowMenuEl = $state<HTMLDivElement | undefined>();
   let rowMenuPos = $state({ top: 0, left: 0 });
 
   let deleteOpen = $state(false);
-  let deleteTarget = $state<LibraryCollection | null>(null);
+  let deleteTarget = $state<RowTarget | null>(null);
   let busy = $state(false);
 
   const activeCollection = $derived(
     collections.find((col) => col.id === activeCollectionId) ?? null,
-  );
-  const menuCollection = $derived(
-    menuCollectionId != null
-      ? (collections.find((col) => col.id === menuCollectionId) ?? null)
-      : null,
   );
 
   // Only the first space still to come takes focus, so Tab does not stop on every placeholder.
@@ -98,14 +112,14 @@
   });
 
   $effect(() => {
-    if (editingId !== null && renameInput) {
+    if (editing !== null && renameInput) {
       renameInput.focus();
       renameInput.select();
     }
   });
 
   $effect(() => {
-    if (!menuCollection || !rowMenuEl) return;
+    if (!menuTarget || !rowMenuEl) return;
     try {
       rowMenuEl.showPopover?.();
     } catch {
@@ -134,14 +148,14 @@
       const target = event.target as Node | null;
       if (!target) return;
       if (rowMenuEl?.contains(target) || menuAnchor?.contains(target)) return;
-      menuCollectionId = null;
+      menuTarget = null;
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
         const anchor = menuAnchor;
-        menuCollectionId = null;
+        menuTarget = null;
         if (anchor?.isConnected) anchor.focus();
         return;
       }
@@ -188,8 +202,8 @@
   });
 
   function startCreate() {
-    menuCollectionId = null;
-    editingId = null;
+    menuTarget = null;
+    editing = null;
     renameError = null;
     creating = true;
     createName = '';
@@ -214,25 +228,26 @@
     }
   }
 
-  function startRename(col: LibraryCollection) {
-    menuCollectionId = null;
+  function startRename(target: RowTarget) {
+    menuTarget = null;
     creating = false;
     createError = null;
-    editingId = col.id;
-    renameValue = col.name;
+    editing = target;
+    renameValue = target.name;
     renameError = null;
   }
 
   async function submitRename(event: SubmitEvent) {
     event.preventDefault();
-    if (busy || editingId === null || !onRenameCollection) return;
+    const target = editing;
+    const rename = target?.kind === 'view' ? onRenameView : onRenameCollection;
+    if (busy || target === null || !rename) return;
     busy = true;
     renameError = null;
-    const targetId = editingId;
     try {
-      await onRenameCollection(targetId, renameValue);
+      await rename(target.id, renameValue);
       untrack(() => {
-        editingId = null;
+        editing = null;
         renameValue = '';
       });
     } catch (error) {
@@ -242,19 +257,20 @@
     }
   }
 
-  function askDelete(col: LibraryCollection) {
+  function askDelete(target: RowTarget) {
     const anchor = menuAnchor;
-    menuCollectionId = null;
+    menuTarget = null;
     if (anchor?.isConnected) anchor.focus();
-    deleteTarget = col;
+    deleteTarget = target;
     deleteOpen = true;
   }
 
   async function confirmDelete() {
-    if (busy || !deleteTarget || !onDeleteCollection) return;
+    const remove = deleteTarget?.kind === 'view' ? onDeleteView : onDeleteCollection;
+    if (busy || !deleteTarget || !remove) return;
     busy = true;
     try {
-      await onDeleteCollection(deleteTarget.id);
+      await remove(deleteTarget.id);
       deleteOpen = false;
       deleteTarget = null;
     } finally {
@@ -363,7 +379,7 @@
             <div class="collection-list" role="list">
               {#each collections as col (col.id)}
                 <div class="collection-entry" role="listitem">
-                  {#if editingId === col.id}
+                  {#if editing?.kind === 'collection' && editing.id === col.id}
                     <form class="collection-form" onsubmit={submitRename}>
                       <input
                         bind:this={renameInput}
@@ -375,7 +391,7 @@
                         onkeydown={(event) => {
                           if (event.key === 'Escape') {
                             event.preventDefault();
-                            editingId = null;
+                            editing = null;
                             renameError = null;
                             void tick().then(() => {
                               if (menuAnchor?.isConnected) menuAnchor.focus();
@@ -413,14 +429,15 @@
                         class="collection-more"
                         aria-label="Actions for {col.name}"
                         aria-haspopup="menu"
-                        aria-expanded={menuCollectionId === col.id}
+                        aria-expanded={menuTarget?.kind === 'collection' &&
+                          menuTarget.id === col.id}
                         onclick={(event) => {
                           event.stopPropagation();
-                          if (menuCollectionId === col.id) {
-                            menuCollectionId = null;
+                          if (menuTarget?.kind === 'collection' && menuTarget.id === col.id) {
+                            menuTarget = null;
                           } else {
                             menuAnchor = event.currentTarget;
-                            menuCollectionId = col.id;
+                            menuTarget = { kind: 'collection', id: col.id, name: col.name };
                           }
                         }}
                       >
@@ -435,6 +452,78 @@
             <p class="waiting">No collections yet.</p>
           {/if}
         </div>
+        {#if smartViews.length > 0}
+          <div class="collections">
+            <div class="collections-head">
+              <Icon name="sliders" size="sm" />
+              <span class="label">Smart views</span>
+            </div>
+            <div class="collection-list" role="list">
+              {#each smartViews as view (view.id)}
+                {@const current = activeSpace === 'Library' && view.id === activeViewId}
+                <div class="collection-entry" role="listitem">
+                  {#if editing?.kind === 'view' && editing.id === view.id}
+                    <form class="collection-form" onsubmit={submitRename}>
+                      <input
+                        bind:this={renameInput}
+                        type="text"
+                        class="collection-input"
+                        aria-label="Rename smart view"
+                        bind:value={renameValue}
+                        disabled={busy}
+                        onkeydown={(event) => {
+                          if (event.key === 'Escape') {
+                            event.preventDefault();
+                            editing = null;
+                            renameError = null;
+                            void tick().then(() => {
+                              if (menuAnchor?.isConnected) menuAnchor.focus();
+                            });
+                          }
+                        }}
+                      />
+                      {#if renameError}
+                        <p class="collection-error" role="alert">{renameError}</p>
+                      {/if}
+                    </form>
+                  {:else}
+                    <div class={['collection-row', { active: current }]}>
+                      <button
+                        type="button"
+                        class="collection-btn"
+                        aria-current={current ? 'true' : undefined}
+                        onclick={() => {
+                          onSelectSpace('Library');
+                          onSelectView?.(view);
+                        }}
+                      >
+                        <span class="label">{view.name}</span>
+                      </button>
+                      <button
+                        type="button"
+                        class="collection-more"
+                        aria-label="Actions for {view.name}"
+                        aria-haspopup="menu"
+                        aria-expanded={menuTarget?.kind === 'view' && menuTarget.id === view.id}
+                        onclick={(event) => {
+                          event.stopPropagation();
+                          if (menuTarget?.kind === 'view' && menuTarget.id === view.id) {
+                            menuTarget = null;
+                          } else {
+                            menuAnchor = event.currentTarget;
+                            menuTarget = { kind: 'view', id: view.id, name: view.name };
+                          }
+                        }}
+                      >
+                        <Icon name="more" size="xs" />
+                      </button>
+                    </div>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
       {/if}
     {/each}
   </div>
@@ -449,42 +538,42 @@
   </div>
 </nav>
 
-{#if menuCollection}
+{#if menuTarget}
+  {@const target = menuTarget}
   <div
     bind:this={rowMenuEl}
     class="row-menu"
     role="menu"
-    aria-label="Collection actions"
+    aria-label={target.kind === 'view' ? 'Smart view actions' : 'Collection actions'}
     popover="manual"
     style:top="{rowMenuPos.top}px"
     style:left="{rowMenuPos.left}px"
   >
-    <button
-      type="button"
-      class="row-menu-item"
-      role="menuitem"
-      onclick={() => startRename(menuCollection)}
-    >
+    <button type="button" class="row-menu-item" role="menuitem" onclick={() => startRename(target)}>
       Rename
     </button>
-    <button
-      type="button"
-      class="row-menu-item"
-      role="menuitem"
-      onclick={() => askDelete(menuCollection)}
-    >
+    <button type="button" class="row-menu-item" role="menuitem" onclick={() => askDelete(target)}>
       Delete
     </button>
   </div>
 {/if}
 
-<Sheet bind:open={deleteOpen} title="Delete collection">
+<Sheet
+  bind:open={deleteOpen}
+  title={deleteTarget?.kind === 'view' ? 'Delete smart view' : 'Delete collection'}
+>
   <p class="confirm-copy">
-    Delete "{deleteTarget?.name}"? Tracks and files on disk will stay in your library.
+    {#if deleteTarget?.kind === 'view'}
+      Delete "{deleteTarget.name}"? Only the saved filters go. Every track stays in your library.
+    {:else}
+      Delete "{deleteTarget?.name}"? Tracks and files on disk will stay in your library.
+    {/if}
   </p>
   {#snippet actions()}
     <Button onclick={() => (deleteOpen = false)} disabled={busy}>Cancel</Button>
-    <Button variant="danger" onclick={confirmDelete} disabled={busy}>Delete collection</Button>
+    <Button variant="danger" onclick={confirmDelete} disabled={busy}>
+      {deleteTarget?.kind === 'view' ? 'Delete smart view' : 'Delete collection'}
+    </Button>
   {/snippet}
 </Sheet>
 

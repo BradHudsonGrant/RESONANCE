@@ -23,6 +23,9 @@
     previewStart?: PreviewStartPoint;
     maxStartSeconds?: number;
     onpreviewstart?: (start: PreviewStartPoint) => void;
+    /** Whether the quick filters bar recommends filters. */
+    recommendFilters?: boolean;
+    onrecommendfilters?: (on: boolean) => void;
     onsourceschanged?: () => void;
   }
 
@@ -35,6 +38,8 @@
     previewStart = { kind: 'thirty_percent' },
     maxStartSeconds = 600,
     onpreviewstart,
+    recommendFilters = true,
+    onrecommendfilters,
     onsourceschanged,
   }: Props = $props();
 
@@ -138,6 +143,26 @@
       </p>
     </section>
 
+    <ModularDivider />
+
+    <section class="section">
+      <div class="section-head">
+        <MonoLabel text="Quick filters" tone="secondary" />
+      </div>
+      <label class="check">
+        <input
+          type="checkbox"
+          checked={recommendFilters}
+          onchange={(event) => onrecommendfilters?.(event.currentTarget.checked)}
+        />
+        <span>Recommend quick filters</span>
+      </label>
+      <p class="note">
+        Up to five filters you use most show beside the ones you pin. They are counted on this
+        computer only.
+      </p>
+    </section>
+
     {#if renameClient}
       <ModularDivider />
 
@@ -207,6 +232,22 @@
     margin: 0;
     color: var(--color-muted);
     font-size: var(--text-sm);
+  }
+
+  .check {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    cursor: pointer;
+  }
+
+  .check input {
+    width: var(--checkbox-size);
+    height: var(--checkbox-size);
+    margin: 0;
+    accent-color: var(--color-text);
   }
 
   .seconds {

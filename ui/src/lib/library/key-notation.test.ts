@@ -6,7 +6,7 @@ import { DEFAULT_TABLE_LAYOUT } from '../ipc/bindings/DefaultTableLayout';
 import { KEY_WHEEL } from '../ipc/bindings/KeyWheel';
 import SettingsSheet from '../shell/SettingsSheet.svelte';
 import { cellText } from './columns';
-import { fakeTrack } from './fake-library';
+import { FAKE_FILTER_FIELDS, fakeTrack } from './fake-library';
 import FilterDrawer from './FilterDrawer.svelte';
 import { keyCode, keyDetail, keyNotation, setKeyNotation } from './key-notation.svelte';
 
@@ -46,12 +46,15 @@ describe('key notation', () => {
     render(SettingsSheet, { open: true });
     const drawer = render(FilterDrawer, {
       open: true,
-      query: { keys: ['8A'] },
+      query: {
+        filters: [{ any_of: [{ column: 'key', condition: { op: 'any_of', values: ['8A'] } }] }],
+      },
+      fields: FAKE_FILTER_FIELDS,
       facets: null,
       onchange: () => {},
       onclear: () => {},
     });
-    const keys = () => within(drawer.container).getByRole('group', { name: 'Keys' });
+    const keys = () => within(drawer.container).getByRole('group', { name: 'Key values' });
     expect(
       within(keys()).getByRole('button', { name: '8A (Am)' }).getAttribute('aria-pressed'),
     ).toBe('true');

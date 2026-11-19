@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { CoreError } from '../ipc/client';
 import type { TrackQuery } from '../ipc/bindings/TrackQuery';
-import { fakeLibrary, fakeTableLayout, fakeTrack } from './fake-library';
+import { fakeFilters, fakeLibrary, fakeTableLayout, fakeTrack } from './fake-library';
 import { audioSummary, trackSeed } from './format';
 import Inspector from './Inspector.svelte';
 import Library from './Library.svelte';
@@ -135,6 +135,7 @@ describe('Library', () => {
       onclearsearch,
       loadFacets,
       tableLayout: fakeTableLayout(),
+      filters: fakeFilters().filters,
     });
 
     const bpmBtn = screen.getByRole('button', { name: 'BPM' });
@@ -158,13 +159,19 @@ describe('Library', () => {
     expect(ontogglefavourite).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
 
     await fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    const drawer = await screen.findByRole('dialog', { name: 'Filters' });
     expect(loadFacets).toHaveBeenCalledOnce();
-    const drawer = screen.getByRole('dialog', { name: 'Filters' });
+    await fireEvent.click(within(drawer).getByRole('button', { name: 'Add a condition' }));
+    await fireEvent.change(within(drawer).getByRole('combobox', { name: 'Column' }), {
+      target: { value: 'key' },
+    });
     await fireEvent.click(within(drawer).getByRole('button', { name: '8A (Am)' }));
-    expect(queries.at(-1)?.keys).toEqual(['8A']);
+    expect(queries.at(-1)?.filters).toEqual([
+      { any_of: [{ column: 'key', condition: { op: 'any_of', values: ['8A'] } }] },
+    ]);
 
     await fireEvent.click(within(drawer).getByRole('button', { name: 'Clear' }));
-    expect(queries.at(-1)?.keys).toBeNull();
+    expect(queries.at(-1)?.filters).toBeNull();
   });
 
   it('shows a distinct no-matches empty state when filtered results are empty and clears all filters', async () => {

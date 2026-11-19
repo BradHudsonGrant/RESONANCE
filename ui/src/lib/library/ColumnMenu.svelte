@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
 
   import Icon from '../design/Icon.svelte';
+  import type { FilterField } from '../ipc/bindings/FilterField';
   import type { LibraryTableLayout } from '../ipc/bindings/LibraryTableLayout';
   import type { TableColumn } from '../ipc/bindings/TableColumn';
   import type { TableColumnGroup } from '../ipc/bindings/TableColumnGroup';
@@ -16,11 +17,23 @@
     layout: LibraryTableLayout;
     /** Columns the table is too narrow to show right now. */
     hidden?: string[];
+    /** The header the menu was opened on, offered first as a filter. */
+    filterColumn?: FilterField | null;
+    onfilter?: (column: string) => void;
     onchange: (change: TableLayoutChange) => void;
     onclose: () => void;
   }
 
-  let { open, anchor, layout, hidden = [], onchange, onclose }: Props = $props();
+  let {
+    open,
+    anchor,
+    layout,
+    hidden = [],
+    filterColumn = null,
+    onfilter,
+    onchange,
+    onclose,
+  }: Props = $props();
 
   const groups: { id: TableColumnGroup; label: string }[] = [
     { id: 'track', label: 'Track' },
@@ -152,22 +165,38 @@
     style:top="{pos.top}px"
     style:left="{pos.left}px"
   >
-    <div class="search">
-      <Icon name="search" size="xs" />
-      <input
-        bind:this={searchEl}
-        bind:value={search}
-        type="search"
-        placeholder="Find a column"
-        aria-label="Find a column"
-        onkeydown={(event) => {
-          if (event.key === 'ArrowDown') {
-            event.preventDefault();
-            event.stopPropagation();
-            items()[0]?.focus();
-          }
-        }}
-      />
+    <div>
+      {#if filterColumn && onfilter}
+        <div class="filter">
+          <button
+            type="button"
+            class="item"
+            role="menuitem"
+            tabindex={-1}
+            onclick={() => onfilter(filterColumn.column)}
+          >
+            <span class="box blank" aria-hidden="true"><Icon name="sliders" size={11} /></span>
+            <span class="name">Filter by {filterColumn.label}…</span>
+          </button>
+        </div>
+      {/if}
+      <div class="search">
+        <Icon name="search" size="xs" />
+        <input
+          bind:this={searchEl}
+          bind:value={search}
+          type="search"
+          placeholder="Find a column"
+          aria-label="Find a column"
+          onkeydown={(event) => {
+            if (event.key === 'ArrowDown') {
+              event.preventDefault();
+              event.stopPropagation();
+              items()[0]?.focus();
+            }
+          }}
+        />
+      </div>
     </div>
     <div class="groups">
       {#each listed as group (group.id)}
@@ -239,6 +268,16 @@
     border-radius: var(--radius-md);
     background: var(--color-surface);
     color: var(--color-text);
+  }
+
+  .filter {
+    margin-bottom: var(--space-1);
+    padding-bottom: var(--space-1);
+    border-bottom: var(--border-width) solid var(--color-border);
+  }
+
+  .box.blank :global(svg) {
+    color: var(--color-text-2);
   }
 
   .search {

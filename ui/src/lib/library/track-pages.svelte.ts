@@ -26,15 +26,9 @@ export type ReadPage = (offset: number, limit: number, query: TrackQuery) => Pro
 export type LibraryState =
   { kind: 'loading' } | { kind: 'ready' } | { kind: 'error'; message: string };
 
+/** The filters on the table, the missing-files one included. */
 export function countActiveDrawerFilters(query: TrackQuery): number {
-  let count = 0;
-  if (query.missing_only) count += 1;
-  if (query.bpm_min != null || query.bpm_max != null) count += 1;
-  if (query.keys && query.keys.length > 0) count += 1;
-  if (query.year_min != null || query.year_max != null) count += 1;
-  if (query.label && query.label.trim().length > 0) count += 1;
-  if (query.formats && query.formats.length > 0) count += 1;
-  return count;
+  return (query.filters?.length ?? 0) + (query.missing_only ? 1 : 0);
 }
 
 export function hasQueryFilters(query: TrackQuery): boolean {
