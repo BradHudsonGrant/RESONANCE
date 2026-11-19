@@ -8,6 +8,7 @@ pub mod journal;
 pub mod key;
 pub mod library;
 pub mod meter;
+pub mod preview;
 pub mod providers;
 pub mod search;
 pub mod staging;

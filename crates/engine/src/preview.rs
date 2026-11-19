@@ -537,6 +537,57 @@ mod tests {
     }
 
     #[test]
+    fn a_flood_of_loads_decodes_only_the_latest() {
+        let path = test_file("flood.wav");
+        Signal::tone(440.0, 0.5, -6.0, 48_000)
+            .write_wav(&path)
+            .unwrap();
+
+        let worker = PreviewWorker::spawn().unwrap();
+        let mut feeds = Vec::new();
+        for generation in 1..=30 {
+            let (producer, samples) = rtrb::RingBuffer::new(buffer_capacity(48_000));
+            let finished = Arc::new(AtomicBool::new(false));
+            worker.enqueue(WorkerRequest {
+                generation,
+                path: path.clone(),
+                start_ms: 0,
+                output_rate: 48_000,
+                producer,
+                finished: Arc::clone(&finished),
+                initial_decoder: None,
+            });
+            feeds.push((samples, finished));
+        }
+
+        let (latest, latest_finished) = &feeds[feeds.len() - 1];
+        let started = std::time::Instant::now();
+        while !latest_finished.load(Ordering::Acquire) {
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "latest never finished"
+            );
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(latest.slots(), 48_000);
+
+        let skipped = &feeds[..feeds.len() - 1];
+        assert!(
+            skipped
+                .iter()
+                .all(|(_, finished)| !finished.load(Ordering::Acquire))
+        );
+        let decoded = skipped
+            .iter()
+            .filter(|(samples, _)| samples.slots() > 0)
+            .count();
+        assert!(
+            decoded <= 1,
+            "{decoded} superseded loads were decoded after a newer one arrived"
+        );
+    }
+
+    #[test]
     fn decodes_flac_aiff_mp3_and_id3_prefixed_m4a_through_preview_pipeline() {
         let flac = test_file("fixture.flac");
         let aiff = test_file("fixture.aiff");

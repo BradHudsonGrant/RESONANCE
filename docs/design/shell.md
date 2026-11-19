@@ -57,6 +57,7 @@ A card, not a strip: 60 px tall, 12 px corners, on Surface with a 1 px border, i
 - While a track is loaded, its 36 px artwork `Thumb` before the title and artist.
 - Elapsed and total time in 12 px mono, the elapsed part in Text and the total in Text 2.
 - The scrub bar, which takes the free width.
+- The Auto-preview toggle, an icon button that shows as active while it is on, then the preview's mute button and volume slider ([library.md](library.md#auto-preview)).
 - A Vol and B Vol, each a 12 px mono readout and an 86 px slider.
 - Curve and EQ selects, 26 px tall.
 - A 33 px vertical divider and the headphone cue button.

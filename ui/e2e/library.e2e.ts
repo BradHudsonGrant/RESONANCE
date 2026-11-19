@@ -628,6 +628,79 @@ test('preview plays from row, Inspector, double-click and Spacebar with PlayerBa
   expect(playerBox && playerBox.x + playerBox.width <= 1100).toBe(true);
 });
 
+test('auto-preview plays each row arrowed to from 30 % in, and is kept across a reload', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1586, height: 992 });
+  await page.goto('/');
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible({ timeout: 10_000 });
+
+  const table = page.getByRole('grid', { name: 'Tracks' });
+  const inspector = page.getByRole('complementary', { name: 'Inspector' });
+  const player = page.getByRole('contentinfo', { name: 'Player' });
+  const toggle = player.getByRole('button', { name: 'Auto-preview' });
+  const heading = inspector.getByRole('heading').first();
+
+  // The test stays silent: the preview plays at zero volume.
+  await player.getByRole('slider', { name: 'Volume' }).fill('0');
+  await expect(player.getByRole('button', { name: 'Unmute' })).toBeVisible();
+
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  const held = player.locator('.track-title');
+  const heldTitle = (await held.count()) > 0 ? await held.textContent() : null;
+  await table.focus();
+  await page.keyboard.press('Home');
+  const firstTitle = (await heading.textContent()) ?? '';
+  await page.keyboard.press('ArrowDown');
+  const secondTitle = (await heading.textContent()) ?? '';
+  expect(secondTitle).not.toBe(firstTitle);
+  // Off by default: moving does not change what the player holds.
+  if (heldTitle === null) await expect(held).toHaveCount(0);
+  else await expect(held).toHaveText(heldTitle);
+
+  await page.keyboard.press('p');
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  // Turning it on plays the row the user is on.
+  await expect(player).toContainText(secondTitle);
+  await expect(table.getByRole('button', { name: `Pause ${secondTitle}` })).toBeVisible();
+  await expect(player.locator('.time.elapsed')).not.toHaveText('0:00');
+
+  await page.keyboard.press('ArrowUp');
+  await expect(player).toContainText(firstTitle);
+  await expect(table.getByRole('button', { name: `Pause ${firstTitle}` })).toBeVisible();
+  await expect(table.getByRole('button', { name: `Play ${secondTitle}` })).toBeAttached();
+
+  // A held arrow key ends on the last row reached, with one track playing. An earlier test
+  // deletes a file, and a missing row keeps the last track playing instead.
+  for (let step = 0; step < 4; step += 1) await page.keyboard.press('ArrowDown');
+  const landed = (await heading.textContent()) ?? '';
+  const landedMissing = table.getByRole('button', { name: `Missing file for ${landed} — Relink` });
+  if ((await landedMissing.count()) > 0) {
+    await expect(player).not.toContainText(landed);
+    await page.keyboard.press('ArrowUp');
+    const playable = (await heading.textContent()) ?? '';
+    await expect(player).toContainText(playable);
+  } else {
+    await expect(player).toContainText(landed);
+  }
+  await expect(table.getByRole('button', { name: /^Pause / })).toHaveCount(1);
+
+  // Space still pauses and plays.
+  await page.keyboard.press('Space');
+  await expect(player.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
+  await page.keyboard.press('Space');
+  await expect(player.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+
+  await player.getByRole('button', { name: 'Pause', exact: true }).click();
+  await player.getByRole('slider', { name: 'Volume' }).fill('100');
+});
+
 test('missing files stay in the library and collections, warn on mismatched audio, and relink to moved copies', async ({
   page,
 }) => {

@@ -104,6 +104,7 @@ Everything is reachable from the keyboard. Shortcuts appear in menus and tooltip
 | I | Show or hide the inspector |
 | D | Collapse or expand the dock |
 | Space | Play or pause the preview in Library, or the focused deck in Mix |
+| P | Turn auto-preview on or off in Library |
 | Up, Down, Page Up, Page Down, Home, End | Move through the table |
 | Shift with Up or Down | Extend the selection |
 | X | Tick or untick the row |

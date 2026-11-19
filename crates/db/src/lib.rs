@@ -4,6 +4,7 @@ mod identification;
 mod identity;
 mod jobs;
 mod operations;
+mod preview_settings;
 mod renames;
 mod search;
 mod sources;

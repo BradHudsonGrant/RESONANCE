@@ -924,6 +924,42 @@ mod tests {
     }
 
     #[test]
+    fn swapping_tracks_crossfades_to_the_latest_and_retires_the_skipped_ones() {
+        let mut harness = Harness::new();
+        harness.send(Control::PreviewLoad {
+            feed: preview_feed(2000, 0.8, 0.8, false),
+            play: true,
+        });
+        let before = harness.render(480);
+
+        // A held arrow key can land several loads between two callbacks.
+        for level in [0.1, 0.2, -0.6] {
+            harness.send(Control::PreviewLoad {
+                feed: preview_feed(2000, level, level, false),
+                play: true,
+            });
+        }
+        let swap = harness.render(960);
+
+        let mut previous = before[before.len() - 2];
+        for frame in swap.as_chunks::<2>().0 {
+            assert!(
+                (frame[0] - previous).abs() < 0.05,
+                "step from {previous} to {}",
+                frame[0]
+            );
+            previous = frame[0];
+        }
+        assert!((swap[swap.len() - 2] + 0.6).abs() < 0.01);
+
+        let mut retired = 0;
+        while harness.retired.pop().is_ok() {
+            retired += 1;
+        }
+        assert_eq!(retired, 3, "two skipped tracks and the faded one");
+    }
+
+    #[test]
     fn preview_track_that_ends_stops_playing() {
         let mut harness = Harness::new();
         harness.send(Control::PreviewLoad {

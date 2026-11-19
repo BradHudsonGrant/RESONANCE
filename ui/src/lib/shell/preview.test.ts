@@ -178,4 +178,48 @@ describe('PreviewPlayer', () => {
     expect(player.error).toBe('The file could not be opened.');
     player.destroy();
   });
+
+  it('sends nothing on focus while auto-preview is off', async () => {
+    const call = vi.fn();
+    const player = new PreviewPlayer({ call: call as PreviewTransport['call'] });
+    await player.focus(3);
+    expect(call).not.toHaveBeenCalled();
+    player.destroy();
+  });
+
+  it('keeps one focus call in flight and only the latest row waiting', async () => {
+    const replies: Array<(state: PreviewState) => void> = [];
+    const call = vi.fn((command: string, params?: { track_id?: number }) => {
+      if (command === 'set_preview_settings') {
+        return Promise.resolve({
+          auto_preview: true,
+          start: { kind: 'thirty_percent' },
+          max_start_seconds: 600,
+        });
+      }
+      return new Promise<PreviewState>((resolve) => {
+        replies.push(() =>
+          resolve(previewState({ track_id: params?.track_id ?? null, generation: replies.length })),
+        );
+      });
+    });
+    const player = new PreviewPlayer({ call: call as unknown as PreviewTransport['call'] });
+    await player.changeSettings({ auto_preview: true });
+
+    // A held arrow key: ten rows before the first load answers.
+    const first = player.focus(1);
+    for (let row = 2; row <= 10; row += 1) void player.focus(row);
+    const focusCalls = () => call.mock.calls.filter(([command]) => command === 'preview_focus');
+    expect(focusCalls()).toHaveLength(1);
+
+    replies[0]?.(previewState());
+    await vi.waitFor(() => expect(focusCalls()).toHaveLength(2));
+    expect(focusCalls()[1]).toEqual(['preview_focus', { track_id: 10 }]);
+
+    replies[1]?.(previewState());
+    await first;
+    expect(focusCalls()).toHaveLength(2);
+    expect(player.trackId).toBe(10);
+    player.destroy();
+  });
 });

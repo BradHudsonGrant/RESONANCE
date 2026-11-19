@@ -293,6 +293,15 @@
     void preview.toggleOrPlayTrack(item.id);
   }
 
+  function playTrack(item: LibraryTrack) {
+    if (item.missing_since != null) return;
+    void preview.playTrack(item.id);
+  }
+
+  function toggleAutoPreview() {
+    if (space === 'Library') void preview.toggleAutoPreview(track?.id ?? null);
+  }
+
   const track = $derived(pages.selectedTrack);
 
   let trackArtwork = $state<TrackArtwork | null>(null);
@@ -430,6 +439,11 @@
     { name: 'Manage library sources', run: openSettings },
     { name: 'Open activity', run: openActivity },
     { name: 'Show or hide the inspector', shortcut: 'I', run: toggleInspector },
+    {
+      name: preview.settings.auto_preview ? 'Turn auto-preview off' : 'Turn auto-preview on',
+      shortcut: 'P',
+      run: toggleAutoPreview,
+    },
     { name: 'Collapse or expand the sidebar', shortcut: '[', run: toggleSidebar },
     { name: 'Collapse or expand the dock', shortcut: 'D', run: toggleDock },
     { name: 'Open settings', run: openSettings },
@@ -475,6 +489,7 @@
   const keys: Record<string, () => void> = {
     '/': () => document.getElementById(commandInput)?.focus(),
     i: toggleInspector,
+    p: toggleAutoPreview,
     '[': toggleSidebar,
     d: toggleDock,
     '1': () => (space = 'Library'),
@@ -515,6 +530,7 @@
   pages.load();
   void loadCollections();
   void preview.refresh();
+  void preview.loadSettings();
   void refreshActivity();
 </script>
 
@@ -582,6 +598,8 @@
           {tableLayout}
           onopen={showInspector}
           onpreview={previewTrack}
+          onplay={playTrack}
+          onfocustrack={(item) => void preview.focus(item.id)}
           onrelink={openRelink}
           onrename={openRename}
           onscan={openScan}
@@ -640,6 +658,8 @@
         volume={preview.volume}
         muted={preview.muted}
         canPlay={preview.trackId !== null || (track != null && track.missing_since == null)}
+        autoPreview={preview.settings.auto_preview}
+        ontoggleautopreview={toggleAutoPreview}
         error={preview.error}
         ontoggleplay={() => {
           if (preview.trackId !== null) void preview.togglePlay();
@@ -720,6 +740,9 @@
     {providerKeysClient}
     {renameClient}
     {sourcesRevision}
+    previewStart={preview.settings.start}
+    maxStartSeconds={preview.settings.max_start_seconds}
+    onpreviewstart={(start) => void preview.changeSettings({ start })}
     onsourceschanged={() => {
       void pages.refresh();
       void loadCollections();

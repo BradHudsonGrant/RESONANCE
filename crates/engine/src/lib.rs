@@ -784,6 +784,37 @@ mod tests {
     }
 
     #[test]
+    fn swapping_preview_tracks_plays_the_last_one_from_its_start() {
+        let first = test_file("swap-first.wav");
+        let second = test_file("swap-second.wav");
+        Signal::tone(440.0, 2.0, -6.0, 44_100)
+            .write_wav(&first)
+            .unwrap();
+        Signal::tone(880.0, 2.0, -6.0, 44_100)
+            .write_wav(&second)
+            .unwrap();
+
+        let mix = Mix::new_silent();
+        let started = mix.preview_load_and_play(&first, 0, None).unwrap();
+        thread::sleep(Duration::from_millis(30));
+
+        let mut last = started.clone();
+        for swap in 0..20 {
+            let path = if swap % 2 == 0 { &second } else { &first };
+            last = mix.preview_load_and_play(path, 600, None).unwrap();
+        }
+        assert_eq!(last.generation, started.generation + 20);
+        assert_eq!(last.path.as_deref(), Some(first.as_path()));
+        assert!(last.playing);
+
+        thread::sleep(Duration::from_millis(80));
+        let playing = mix.preview_status();
+        assert_eq!(playing.generation, last.generation);
+        assert!(playing.playing);
+        assert!(playing.position_ms > 600, "{}", playing.position_ms);
+    }
+
+    #[test]
     fn preview_restarts_from_zero_after_reaching_natural_eof() {
         let path = test_file("preview-eof.wav");
         Signal::tone(440.0, 0.12, -6.0, 44_100)

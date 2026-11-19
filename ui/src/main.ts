@@ -26,6 +26,9 @@ if (import.meta.env.DEV || import.meta.env.MODE === 'benchmark') {
     void import('./lib/mix/measure-mix').then(({ measureMix }) => {
       Object.assign(window, { measureMix });
     });
+    void import('./lib/shell/measure-auto-preview').then(({ measureAutoPreview }) => {
+      Object.assign(window, { measureAutoPreview });
+    });
   }, 250);
 }
 

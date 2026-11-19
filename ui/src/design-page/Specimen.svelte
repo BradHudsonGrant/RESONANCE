@@ -77,6 +77,7 @@
     'volume-mute',
     'missing',
     'relink',
+    'auto-preview',
   ];
 
   const segmentedItems = [
@@ -410,6 +411,16 @@
       </TableCell>
       <TableCell numeric>
         <Provenance origin={{ kind: 'measured' }}>11B</Provenance>
+      </TableCell>
+    </TableRow>
+    <TableRow checked>
+      <TableCell>Fourth Wall</TableCell>
+      <TableCell>Nia Okoro</TableCell>
+      <TableCell numeric>
+        <Provenance origin={{ kind: 'measured' }}>126.00</Provenance>
+      </TableCell>
+      <TableCell numeric>
+        <Provenance origin={{ kind: 'measured' }}>9A</Provenance>
       </TableCell>
     </TableRow>
     <TableRow disabled>

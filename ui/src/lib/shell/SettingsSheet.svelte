@@ -4,6 +4,8 @@
   import MonoLabel from '../design/MonoLabel.svelte';
   import SegmentedTabs, { type SegmentedTabItem } from '../design/SegmentedTabs.svelte';
   import Sheet from '../design/Sheet.svelte';
+  import TextInput from '../design/TextInput.svelte';
+  import type { PreviewStartPoint } from '../ipc/bindings/PreviewStartPoint';
   import { getTheme, setTheme, type Theme } from '../design/theme';
   import FilenameSettings from '../library/FilenameSettings.svelte';
   import { keyNotation, setKeyNotation, type KeyNotation } from '../library/key-notation.svelte';
@@ -17,6 +19,10 @@
     providerKeysClient?: ProviderKeysClient;
     renameClient?: RenamePreviewClient;
     sourcesRevision?: number;
+    /** Where auto-preview starts each track. */
+    previewStart?: PreviewStartPoint;
+    maxStartSeconds?: number;
+    onpreviewstart?: (start: PreviewStartPoint) => void;
     onsourceschanged?: () => void;
   }
 
@@ -26,8 +32,36 @@
     providerKeysClient,
     renameClient,
     sourcesRevision = 0,
+    previewStart = { kind: 'thirty_percent' },
+    maxStartSeconds = 600,
+    onpreviewstart,
     onsourceschanged,
   }: Props = $props();
+
+  const startTabs: SegmentedTabItem[] = [
+    { id: 'beginning', label: 'Beginning' },
+    { id: 'thirty_percent', label: '30 % in' },
+    { id: 'seconds', label: 'Fixed time' },
+  ];
+
+  const DEFAULT_START_SECONDS = 30;
+
+  let secondsText = $derived(
+    String(previewStart.kind === 'seconds' ? previewStart.seconds : DEFAULT_START_SECONDS),
+  );
+
+  function chooseStart(kind: string) {
+    if (kind === 'seconds') {
+      onpreviewstart?.({ kind, seconds: Number(secondsText) || DEFAULT_START_SECONDS });
+    } else if (kind === 'beginning' || kind === 'thirty_percent') {
+      onpreviewstart?.({ kind });
+    }
+  }
+
+  function commitSeconds() {
+    const seconds = Math.round(Number(secondsText));
+    if (Number.isFinite(seconds) && seconds >= 0) onpreviewstart?.({ kind: 'seconds', seconds });
+  }
 
   const themeTabs: SegmentedTabItem[] = [
     { id: 'dark', label: 'Dark' },
@@ -71,6 +105,37 @@
         onChange={(id) => setKeyNotation(id as KeyNotation)}
       />
       <p class="note">Sorting and key filters work the same in every notation.</p>
+    </section>
+
+    <ModularDivider />
+
+    <section class="section">
+      <div class="section-head">
+        <MonoLabel text="Previews" tone="secondary" />
+      </div>
+      <SegmentedTabs
+        items={startTabs}
+        value={previewStart.kind}
+        ariaLabel="Preview start"
+        onChange={chooseStart}
+      />
+      {#if previewStart.kind === 'seconds'}
+        <div class="seconds">
+          <TextInput
+            label="Seconds in"
+            type="number"
+            inputmode="numeric"
+            min="0"
+            max={maxStartSeconds}
+            step="1"
+            bind:value={secondsText}
+            onchange={commitSeconds}
+          />
+        </div>
+      {/if}
+      <p class="note">
+        Where auto-preview starts each track. Turn auto-preview on in the player bar, or press P.
+      </p>
     </section>
 
     {#if renameClient}
@@ -142,5 +207,9 @@
     margin: 0;
     color: var(--color-muted);
     font-size: var(--text-sm);
+  }
+
+  .seconds {
+    max-width: calc(var(--space-6) * 6);
   }
 </style>

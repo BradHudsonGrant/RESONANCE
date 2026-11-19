@@ -1,3 +1,4 @@
+import type { PreviewSettings } from '../ipc/bindings/PreviewSettings';
 import type { PreviewState } from '../ipc/bindings/PreviewState';
 import type { FrameListener } from '../ipc/client';
 import { core } from '../ipc/core';
@@ -29,6 +30,8 @@ export class PreviewPlayer {
   #queuedSeekMs: number | null = null;
   #volumeInFlight = false;
   #queuedVolume: number | null = null;
+  #focusInFlight = false;
+  #queuedFocus: number | null = null;
   #destroyed = false;
 
   trackId = $state<number | null>(null);
@@ -42,6 +45,11 @@ export class PreviewPlayer {
   muted = $state(false);
   generation = $state(0);
   error = $state<string | null>(null);
+  settings = $state<PreviewSettings>({
+    auto_preview: false,
+    start: { kind: 'thirty_percent' },
+    max_start_seconds: 600,
+  });
 
   constructor(transport: PreviewTransport = core) {
     this.#transport = transport;
@@ -91,6 +99,74 @@ export class PreviewPlayer {
       if (this.#destroyed || loadSeq !== this.#loadSeq) return;
       this.error = messageOf(cause);
     }
+  }
+
+  async loadSettings(): Promise<void> {
+    try {
+      const settings = await this.#transport.call('preview_settings');
+      if (!this.#destroyed) this.settings = settings;
+    } catch {
+      // Without a core the defaults stand: auto-preview off.
+    }
+  }
+
+  async changeSettings(change: Partial<Pick<PreviewSettings, 'auto_preview' | 'start'>>) {
+    const wanted = { ...this.settings, ...change };
+    this.settings = wanted;
+    try {
+      const saved = await this.#transport.call('set_preview_settings', { settings: wanted });
+      if (!this.#destroyed) this.settings = saved;
+    } catch (cause) {
+      if (!this.#destroyed) this.error = messageOf(cause);
+    }
+  }
+
+  /**
+   * The user moved to a row. The core decides whether that plays it. One call is in flight at a
+   * time and only the latest row waits behind it, so a held arrow key sends at most two loads.
+   */
+  async focus(trackId: number): Promise<void> {
+    if (!this.settings.auto_preview) return;
+    if (this.#focusInFlight) {
+      this.#queuedFocus = trackId;
+      return;
+    }
+    this.#focusInFlight = true;
+    const seq = ++this.#opSeq;
+    const loadSeq = ++this.#loadSeq;
+    this.#queuedSeekMs = null;
+    this.#scrubHoldUntil = 0;
+    this.#eofRetryAfter = 0;
+    this.error = null;
+    try {
+      const state = await this.#transport.call('preview_focus', { track_id: trackId });
+      if (!this.#destroyed && loadSeq === this.#loadSeq && this.#queuedFocus === null) {
+        this.#applyState(state, { forcePosition: seq >= this.#opSeq });
+      }
+    } catch (cause) {
+      if (!this.#destroyed && loadSeq === this.#loadSeq) this.error = messageOf(cause);
+    } finally {
+      this.#focusInFlight = false;
+      const queued = this.#queuedFocus;
+      this.#queuedFocus = null;
+      if (!this.#destroyed && queued !== null) await this.focus(queued);
+    }
+  }
+
+  /** Turns auto-preview over. Turning it on plays the row the user is on. */
+  async toggleAutoPreview(focusedTrackId: number | null): Promise<void> {
+    const on = !this.settings.auto_preview;
+    await this.changeSettings({ auto_preview: on });
+    if (on && this.settings.auto_preview && focusedTrackId !== null) {
+      await this.focus(focusedTrackId);
+    }
+  }
+
+  /** A double click: plays the track and never pauses it. */
+  async playTrack(trackId: number): Promise<void> {
+    if (this.settings.auto_preview) return this.focus(trackId);
+    if (this.trackId === trackId && this.playing) return;
+    return this.loadAndPlay(trackId);
   }
 
   async toggleOrPlayTrack(trackId: number): Promise<void> {

@@ -161,6 +161,16 @@ pub enum Request {
     },
     /// Current state of the single-track preview player.
     PreviewStatus,
+    /// The user moved to a row. With auto-preview on, the preview swaps to it.
+    PreviewFocus {
+        #[ts(type = "number")]
+        track_id: i64,
+    },
+    /// Whether auto-preview is on and where previews start.
+    PreviewSettings,
+    SetPreviewSettings {
+        settings: PreviewSettings,
+    },
     /// Discovers ranked audio-matched candidate files across sources (or inside `search_folder`)
     /// for relinking `track_id`.
     RelinkCandidates {
@@ -346,6 +356,9 @@ pub enum Response {
     PreviewSeek(PreviewState),
     PreviewSetVolume(PreviewState),
     PreviewStatus(PreviewState),
+    PreviewFocus(PreviewState),
+    PreviewSettings(PreviewSettings),
+    SetPreviewSettings(PreviewSettings),
     RelinkCandidates(Vec<RelinkCandidate>),
     PreviewRelink(Box<RelinkPreview>),
     ApplyRelink(Box<LibraryTrack>),
@@ -1234,6 +1247,29 @@ pub struct PreviewState {
     pub duration_ms: u64,
     pub volume: f32,
     pub generation: u32,
+}
+
+/// Where a preview started by auto-preview begins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum PreviewStartPoint {
+    Beginning,
+    ThirtyPercent,
+    /// Held between 0 and `max_start_seconds`.
+    Seconds {
+        seconds: u32,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PreviewSettings {
+    pub auto_preview: bool,
+    pub start: PreviewStartPoint,
+    /// The furthest a fixed start can be set. The core ignores what is sent here.
+    #[serde(default)]
+    pub max_start_seconds: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, TS)]
