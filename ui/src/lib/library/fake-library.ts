@@ -14,7 +14,7 @@ export function fakeTrack(index: number): LibraryTrack {
     label: null,
     comment: null,
     bpm: 124,
-    key: { camelot: '8A', name: 'Am' },
+    key: { camelot: '8A', open_key: '1m', name: 'Am' },
     key_tag: 'Am',
     format: 'flac',
     favourite: false,

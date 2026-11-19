@@ -207,6 +207,28 @@ test('instant search, filter drawer, favourites and column sorting filter the re
   await drawer.getByRole('button', { name: 'Done' }).click();
   await expect(drawer).toBeHidden();
 
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await settings.getByRole('tab', { name: 'Open Key' }).click();
+  await settings.getByRole('button', { name: 'Done' }).click();
+  await page.reload();
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await page.getByRole('button', { name: 'Filters' }).click();
+  const keys = drawer.getByRole('group', { name: 'Keys' });
+  await keys.getByRole('button', { name: '1m (Am)' }).click();
+  await expect(keys.getByRole('button', { name: '1m (Am)' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(page.getByRole('heading', { name: 'No tracks match' })).toBeVisible();
+  await drawer.getByRole('button', { name: 'Clear' }).click();
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible();
+  await drawer.getByRole('button', { name: 'Done' }).click();
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await settings.getByRole('tab', { name: 'Camelot' }).click();
+  await settings.getByRole('button', { name: 'Done' }).click();
+  await expect(settings).toBeHidden();
+
   const titleHeader = table.getByRole('columnheader', { name: 'Title' });
   await titleHeader.getByRole('button', { name: 'Title' }).click();
   await expect(titleHeader).toHaveAttribute('aria-sort', 'ascending');

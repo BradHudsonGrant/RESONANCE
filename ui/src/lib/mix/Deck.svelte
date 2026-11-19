@@ -9,6 +9,7 @@
   import Tooltip from '../design/Tooltip.svelte';
   import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
   import { audioSummary, duration, tempo, trackSeed } from '../library/format';
+  import { keyDetail } from '../library/key-notation.svelte';
 
   interface Props {
     deck: 'A' | 'B';
@@ -54,7 +55,7 @@
   );
 
   const keyTag = $derived.by(() => {
-    if (loadedTrack?.key) return `${loadedTrack.key.camelot} · ${loadedTrack.key.name}`;
+    if (loadedTrack?.key) return keyDetail(loadedTrack.key);
     return loadedTrack?.key_tag ?? null;
   });
 

@@ -1,5 +1,6 @@
 import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
 import { duration, tempo } from './format';
+import { keyCode } from './key-notation.svelte';
 
 export interface DataColumn {
   key: 'title' | 'artist' | 'bpm' | 'key' | 'time';
@@ -47,7 +48,7 @@ export const dataColumns: DataColumn[] = [
     label: 'Key',
     track: '52px',
     mono: true,
-    text: (track) => track.key?.camelot ?? track.key_tag ?? '',
+    text: (track) => (track.key ? keyCode(track.key) : (track.key_tag ?? '')),
   },
   {
     key: 'time',

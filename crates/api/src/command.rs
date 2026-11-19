@@ -763,8 +763,10 @@ pub struct TrackCollection {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export)]
+/// A key in each notation the user can choose to read keys in. Sort and filter use `camelot`.
 pub struct TrackKey {
     pub camelot: String,
+    pub open_key: String,
     pub name: String,
 }
 

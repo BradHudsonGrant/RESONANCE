@@ -147,7 +147,7 @@ Stems are large. Cache them compressed, under a size limit the user sets, evicti
 
 Text search is instant, over all tags (SQLite FTS).
 
-Filters: BPM range, key (Camelot and musical), energy, year, label, format, quality flags, tags, collection.
+Filters: BPM range, key (Camelot, Open Key and musical, shown in the notation chosen in Settings), energy, year, label, format, quality flags, tags, collection.
 
 "Similar to this" uses embedding neighbours, combined with any active filters.
 
