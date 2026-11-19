@@ -4,6 +4,7 @@ mod collections;
 pub mod command;
 pub mod data_folder;
 pub mod error;
+mod filters;
 mod identity;
 mod jobs;
 pub mod mix_frame;
@@ -27,13 +28,13 @@ use std::time::Duration;
 use command::{
     AppInfo, FavouriteState, IdentifyReport, LibraryFacets, LibraryTrack, MixDeck, MixDeckState,
     MixDevice, MixState, PreviewState, Request, Response, ScanReport, TrackAudio, TrackCollection,
-    TrackFilterPill, TrackFormat, TrackKey, TrackPage, TrackQuery,
+    TrackFilterPill, TrackKey, TrackPage, TrackQuery,
 };
 use error::ApiError;
 use identity::{run_identify_pass, to_command_report};
 use jobs::{enqueue_identify_if_needed, execute_job, scan_source_job};
 use resonance_core::key::Key;
-use resonance_core::library::{AudioFormat, ScannedFile, TagField};
+use resonance_core::library::{ScannedFile, TagField};
 use resonance_core::search::{FilterPill as CoreFilterPill, TrackQuery as CoreTrackQuery};
 use resonance_core::staging::effective_tags;
 use resonance_db::{Database, TrackRow};
@@ -295,6 +296,28 @@ impl Api {
                 .remove_tracks_from_collection(collection_id, &track_ids)
                 .map(Response::RemoveTracksFromCollection),
             Request::LibraryFacets => self.library_facets().map(Response::LibraryFacets),
+            Request::FilterFields => Ok(Response::FilterFields(self.filter_fields())),
+            Request::FilterSummaries { query } => {
+                self.filter_summaries(query).map(Response::FilterSummaries)
+            }
+            Request::ParseFilter { text } => self.parse_filter(&text).map(Response::ParseFilter),
+            Request::RecordFilterUse { term } => {
+                self.record_filter_use(term).map(Response::RecordFilterUse)
+            }
+            Request::QuickFilters => self.quick_filters().map(Response::QuickFilters),
+            Request::ChangeQuickFilters { change } => self
+                .change_quick_filters(change)
+                .map(Response::ChangeQuickFilters),
+            Request::SmartViews => self.smart_views().map(Response::SmartViews),
+            Request::SaveSmartView { name, query } => self
+                .save_smart_view(&name, query)
+                .map(Response::SaveSmartView),
+            Request::RenameSmartView { view_id, name } => self
+                .rename_smart_view(view_id, &name)
+                .map(Response::RenameSmartView),
+            Request::DeleteSmartView { view_id } => self
+                .delete_smart_view(view_id)
+                .map(Response::DeleteSmartView),
             Request::TableLayout => self.table_layout().map(Response::TableLayout),
             Request::ChangeTableLayout { change } => self
                 .change_table_layout(change)
@@ -475,7 +498,7 @@ impl Api {
         limit: u32,
         query: Option<TrackQuery>,
     ) -> Result<TrackPage, ApiError> {
-        let core_query = core_track_query(query);
+        let core_query = core_track_query(query)?;
         // A panic while the lock was held leaves nothing half-written: reads hold it, and a
         // write is one transaction that SQLite rolls back.
         let library = self
@@ -486,16 +509,16 @@ impl Api {
         let library_total = library
             .track_count()
             .map_err(ApiError::library_unreadable)?;
-        let total = if core_query.is_narrowed() {
+        let (rows, total) = if core_query.is_narrowed() {
             library
-                .query_track_count(&core_query)
+                .query_tracks_and_total(&core_query, offset, limit)
                 .map_err(ApiError::library_unreadable)?
         } else {
-            library_total
+            let rows = library
+                .query_tracks_page(&core_query, offset, limit)
+                .map_err(ApiError::library_unreadable)?;
+            (rows, library_total)
         };
-        let rows = library
-            .query_tracks_page(&core_query, offset, limit)
-            .map_err(ApiError::library_unreadable)?;
         Ok(TrackPage {
             total,
             library_total,
@@ -686,35 +709,19 @@ fn mix_state(status: MixStatus) -> MixState {
     }
 }
 
-pub(crate) fn core_track_query(query: Option<TrackQuery>) -> CoreTrackQuery {
+/// The query the core runs. Filters that do not suit their columns are refused.
+pub(crate) fn core_track_query(query: Option<TrackQuery>) -> Result<CoreTrackQuery, ApiError> {
     let Some(query) = query else {
-        return CoreTrackQuery::default();
+        return Ok(CoreTrackQuery::default());
     };
-    CoreTrackQuery {
+    Ok(CoreTrackQuery {
         text: query.text,
         pill: match query.pill.unwrap_or_default() {
             TrackFilterPill::All => CoreFilterPill::All,
             TrackFilterPill::Favourites => CoreFilterPill::Favourites,
             TrackFilterPill::Recent => CoreFilterPill::Recent,
         },
-        bpm_min: query.bpm_min,
-        bpm_max: query.bpm_max,
-        keys: query.keys.unwrap_or_default(),
-        year_min: query.year_min,
-        year_max: query.year_max,
-        label: query.label,
-        formats: query
-            .formats
-            .unwrap_or_default()
-            .into_iter()
-            .map(|format| match format {
-                TrackFormat::Mp3 => AudioFormat::Mp3,
-                TrackFormat::Flac => AudioFormat::Flac,
-                TrackFormat::Aiff => AudioFormat::Aiff,
-                TrackFormat::Wav => AudioFormat::Wav,
-                TrackFormat::M4a => AudioFormat::M4a,
-            })
-            .collect(),
+        filters: filters::core_terms(query.filters.unwrap_or_default())?,
         collection_id: query.collection_id,
         missing_only: query.missing_only.unwrap_or(false),
         sort: table_layout::core_sort_field(query.sort.unwrap_or_default()),
@@ -725,7 +732,7 @@ pub(crate) fn core_track_query(query: Option<TrackQuery>) -> CoreTrackQuery {
                 table_layout::core_direction(query.then_direction.unwrap_or_default()),
             )
         }),
-    }
+    })
 }
 
 /// The track's file with the user's values in place of the file's tags.
@@ -1047,8 +1054,7 @@ mod tests {
                 limit: 10,
                 query: Some(TrackQuery {
                     pill: Some(TrackFilterPill::Favourites),
-                    keys: Some(vec!["11A".to_owned()]),
-                    ..TrackQuery::default()
+                    ..filters::filtered(&["key 11A"])
                 }),
             })
             .unwrap()

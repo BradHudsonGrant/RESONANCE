@@ -53,6 +53,41 @@ pub enum Request {
     },
     /// Distinct labels and BPM/year bounds across the library, for filter controls.
     LibraryFacets,
+    /// Every column the filter builder offers, with its conditions.
+    FilterFields,
+    /// How each of the query's filter terms reads, and how many tracks it keeps on its own.
+    FilterSummaries {
+        query: TrackQuery,
+    },
+    /// Reads a command bar filter such as `/missing genre` or `/bitrate < 320`.
+    ParseFilter {
+        text: String,
+    },
+    /// Counts one use of a filter for the recommended quick filters.
+    RecordFilterUse {
+        term: FilterTerm,
+    },
+    /// The pinned and recommended quick filters.
+    QuickFilters,
+    ChangeQuickFilters {
+        change: QuickFilterChange,
+    },
+    /// Every smart view in sidebar order.
+    SmartViews,
+    /// Saves the query's search text, pill and filters as a smart view.
+    SaveSmartView {
+        name: String,
+        query: TrackQuery,
+    },
+    RenameSmartView {
+        #[ts(type = "number")]
+        view_id: i64,
+        name: String,
+    },
+    DeleteSmartView {
+        #[ts(type = "number")]
+        view_id: i64,
+    },
     /// The library table's columns, wrap setting and sort, and every column it can show.
     TableLayout,
     /// Changes the library table and keeps the change for next time.
@@ -328,6 +363,16 @@ pub enum Response {
     AddTracksToCollection(LibraryCollection),
     RemoveTracksFromCollection(LibraryCollection),
     LibraryFacets(LibraryFacets),
+    FilterFields(Vec<FilterField>),
+    FilterSummaries(Vec<FilterSummary>),
+    ParseFilter(DescribedFilter),
+    RecordFilterUse(QuickFilters),
+    QuickFilters(QuickFilters),
+    ChangeQuickFilters(QuickFilters),
+    SmartViews(Vec<SmartView>),
+    SaveSmartView(Vec<SmartView>),
+    RenameSmartView(Vec<SmartView>),
+    DeleteSmartView(Vec<SmartView>),
     TableLayout(LibraryTableLayout),
     ChangeTableLayout(LibraryTableLayout),
     Scan(ScanReport),
@@ -926,17 +971,6 @@ pub enum SortDirection {
     Desc,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "lowercase")]
-#[ts(export)]
-pub enum TrackFormat {
-    Mp3,
-    Flac,
-    Aiff,
-    Wav,
-    M4a,
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct TrackQuery {
@@ -946,27 +980,10 @@ pub struct TrackQuery {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub pill: Option<TrackFilterPill>,
+    /// Filters on columns, joined by AND.
     #[serde(default)]
     #[ts(optional = nullable)]
-    pub bpm_min: Option<f64>,
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub bpm_max: Option<f64>,
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub keys: Option<Vec<String>>,
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub year_min: Option<i32>,
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub year_max: Option<i32>,
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub label: Option<String>,
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub formats: Option<Vec<TrackFormat>>,
+    pub filters: Option<Vec<FilterTerm>>,
     #[serde(default)]
     #[ts(optional = nullable, type = "number | null")]
     pub collection_id: Option<i64>,
@@ -1061,6 +1078,180 @@ pub struct LibraryTrack {
     /// Unix epoch milliseconds when the file was last changed on disk.
     #[ts(type = "number")]
     pub modified_ms: i64,
+}
+
+/// What a filter asks of its column. Numbers are in seconds for Time, bytes for File size,
+/// hertz for Sample rate and Unix milliseconds for dates.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "op", rename_all = "snake_case")]
+#[ts(export)]
+pub enum FilterCondition {
+    Contains {
+        value: String,
+    },
+    Is {
+        value: String,
+    },
+    IsNot {
+        value: String,
+    },
+    StartsWith {
+        value: String,
+    },
+    AnyOf {
+        values: Vec<String>,
+    },
+    NoneOf {
+        values: Vec<String>,
+    },
+    /// Inclusive at both ends. An absent end has no bound.
+    Range {
+        #[serde(default)]
+        #[ts(optional = nullable)]
+        min: Option<f64>,
+        #[serde(default)]
+        #[ts(optional = nullable)]
+        max: Option<f64>,
+    },
+    Below {
+        value: f64,
+    },
+    Above {
+        value: f64,
+    },
+    Missing,
+    Present,
+}
+
+/// The name of a condition, without its values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum FilterConditionName {
+    Contains,
+    Is,
+    IsNot,
+    StartsWith,
+    AnyOf,
+    NoneOf,
+    Range,
+    Below,
+    Above,
+    Missing,
+    Present,
+}
+
+/// One condition on one column, by the column's id.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TrackFilter {
+    pub column: String,
+    pub condition: FilterCondition,
+}
+
+/// One AND term of a query: one filter, or several of which any may match.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FilterTerm {
+    pub any_of: Vec<TrackFilter>,
+}
+
+/// What a column holds, which decides the conditions it offers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum FilterFieldKind {
+    Text,
+    Number,
+    Date,
+    Choice,
+    Picture,
+    Location,
+}
+
+/// A value a choice column offers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct FilterChoice {
+    pub value: String,
+    pub label: String,
+}
+
+/// A column the filter builder offers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct FilterField {
+    pub column: String,
+    pub label: String,
+    /// The column's name inside a sentence, such as "catalogue number".
+    pub noun: String,
+    pub group: TableColumnGroup,
+    pub kind: FilterFieldKind,
+    pub conditions: Vec<FilterConditionName>,
+    /// The values a choice column holds. Empty for every other kind.
+    pub choices: Vec<FilterChoice>,
+}
+
+/// A filter term with how it reads and the key that names it.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct DescribedFilter {
+    pub term: FilterTerm,
+    pub label: String,
+    pub key: String,
+}
+
+/// One active filter term as the bar shows it. `count` is the tracks it keeps on its own inside
+/// the search, pill and collection, and is absent when it is the only filter, whose count is the
+/// page's total.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct FilterSummary {
+    pub label: String,
+    pub key: String,
+    pub count: Option<u32>,
+}
+
+/// The quick filters bar: pinned filters, then the recommended ones.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct QuickFilters {
+    pub pinned: Vec<DescribedFilter>,
+    pub recommended: Vec<DescribedFilter>,
+    pub recommend: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum QuickFilterChange {
+    /// Pins a filter at the end.
+    Pin {
+        term: FilterTerm,
+    },
+    /// Unpins a pinned filter, or stops a recommended one coming back.
+    Remove {
+        term: FilterTerm,
+    },
+    /// Puts a filter at a place in the bar, counting pinned then recommended. A recommended
+    /// filter that moves is pinned.
+    Move {
+        term: FilterTerm,
+        to: u32,
+    },
+    SetRecommend {
+        on: bool,
+    },
+}
+
+/// A saved set of filters, search text and pill.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct SmartView {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub name: String,
+    pub query: TrackQuery,
 }
 
 /// Where the column chooser lists a column.
