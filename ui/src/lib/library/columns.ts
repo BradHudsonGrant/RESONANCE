@@ -1,3 +1,6 @@
+import type { FilterCondition } from '../ipc/bindings/FilterCondition';
+import type { FilterField } from '../ipc/bindings/FilterField';
+import type { FilterTerm } from '../ipc/bindings/FilterTerm';
 import type { LibraryTableLayout } from '../ipc/bindings/LibraryTableLayout';
 import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
 import type { TableColumn } from '../ipc/bindings/TableColumn';
@@ -86,6 +89,70 @@ const text: Record<string, (track: LibraryTrack) => string> = {
 /** The value a cell shows, as plain text. A column this build cannot read shows nothing. */
 export function cellText(column: TableColumn, track: LibraryTrack): string {
   return text[column.id]?.(track) ?? '';
+}
+
+/** A cell's value as a filter compares it, for the columns whose values can be picked out. */
+const raw: Record<string, (track: LibraryTrack) => string | null | undefined> = {
+  title: (track) => track.title,
+  artist: (track) => track.artist,
+  composer: (track) => track.composer,
+  remixer: (track) => track.remixer,
+  mix: (track) => track.mix,
+  comment: (track) => track.comment,
+  album: (track) => track.album,
+  genre: (track) => track.genre,
+  label: (track) => track.label,
+  catno: (track) => track.catno,
+  key: (track) => track.key?.camelot,
+  format: (track) => track.format,
+  'tag:album_artist': (track) => track.album_artist,
+  'tag:track_number': (track) => track.track_number,
+  'tag:subgenre': (track) => track.subgenre,
+};
+
+/** Whether a cell has a value for "is missing", by what it shows. */
+const has: Record<string, (track: LibraryTrack) => boolean> = {
+  bpm: (track) => track.bpm != null,
+  time: (track) => track.audio?.duration_ms != null,
+  year: (track) => Boolean(track.year),
+  artwork: (track) => Boolean(track.artwork),
+  bitrate: (track) => track.audio?.bitrate_kbps != null,
+  sample_rate: (track) => track.audio?.sample_rate != null,
+  bit_depth: (track) => track.audio?.bit_depth != null,
+  channels: (track) => track.audio?.channels != null,
+};
+
+/** The filters a right click on a cell offers: this value, not this value, or no value. */
+export function cellFilters(
+  field: FilterField,
+  track: LibraryTrack,
+): { label: string; term: FilterTerm }[] {
+  const one = (condition: FilterCondition): FilterTerm => ({
+    any_of: [{ column: field.column, condition }],
+  });
+  const value = raw[field.column]?.(track)?.trim();
+  const choice = field.kind === 'choice';
+  const offers: { label: string; term: FilterTerm }[] = [];
+  if (value && field.conditions.includes(choice ? 'any_of' : 'is')) {
+    offers.push(
+      {
+        label: `Only tracks with this ${field.noun}`,
+        term: one(choice ? { op: 'any_of', values: [value] } : { op: 'is', value }),
+      },
+      {
+        label: `Hide this ${field.noun}`,
+        term: one(choice ? { op: 'none_of', values: [value] } : { op: 'is_not', value }),
+      },
+    );
+  }
+  const present = value ? true : (has[field.column]?.(track) ?? false);
+  if (!present && field.conditions.includes('missing')) {
+    offers.push({ label: `Only tracks with no ${field.noun}`, term: one({ op: 'missing' }) });
+  }
+  if (present && field.kind === 'picture') {
+    offers.push({ label: `Only tracks with ${field.noun}`, term: one({ op: 'present' }) });
+  }
+  return offers;
 }
 
 /** The width a column takes on its own: the user's, else its default, else its floor. */

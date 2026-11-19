@@ -1,16 +1,24 @@
 <script lang="ts" module>
-  /** A command runs now, or names the milestone that builds it and cannot be chosen. */
+  /**
+   * A command runs now, names the milestone that builds it, or is a note that cannot be chosen,
+   * such as why the text is not a filter.
+   */
   export type Command = { name: string; shortcut?: string } & (
-    { run: () => void; arrives?: undefined } | { arrives: string; run?: undefined }
+    | { run: () => void; arrives?: undefined; note?: undefined }
+    | { arrives: string; run?: undefined; note?: undefined }
+    | { note: true; run?: undefined; arrives?: undefined }
   );
 </script>
 
 <script lang="ts">
+  import { untrack } from 'svelte';
+
   import Button from '../design/Button.svelte';
   import DataTag from '../design/DataTag.svelte';
   import Icon from '../design/Icon.svelte';
   import SlashChip from '../design/SlashChip.svelte';
   import TextInput from '../design/TextInput.svelte';
+  import type { DescribedFilter } from '../ipc/bindings/DescribedFilter';
   import Tooltip from '../design/Tooltip.svelte';
 
   interface Props {
@@ -18,12 +26,20 @@
     /** The id of the field, so Ctrl+K anywhere can put the cursor in it. */
     inputId: string;
     search?: string;
-    bpmActive?: boolean;
+    /** Reads a `/` filter in the core. */
+    parseFilter?: (text: string) => Promise<DescribedFilter>;
     onsearch?: (text: string) => void;
-    onbpm?: (min: number | null, max: number | null) => void;
+    onfilter?: (filter: DescribedFilter) => void;
   }
 
-  let { commands, inputId, search = '', bpmActive = false, onsearch, onbpm }: Props = $props();
+  let { commands, inputId, search = '', parseFilter, onsearch, onfilter }: Props = $props();
+
+  const examples = [
+    { text: 'missing genre', description: 'Tracks with no genre' },
+    { text: 'bitrate < 320', description: 'Files under 320 kbps' },
+    { text: 'format flac', description: 'Only FLAC files' },
+    { text: 'bpm 125-132', description: 'Tracks by tempo' },
+  ];
 
   const futureChips = [
     { command: '/ key 8A', description: 'Compatible with A minor', arrives: 'M5' },
@@ -45,92 +61,73 @@
     }
   });
 
-  function parseBpmCommand(text: string): Command | null {
-    const trimmed = text.trim();
-    const match = /^\/\s*bpm(?:\s+(.*))?$/i.exec(trimmed);
-    if (!match) return null;
-    const arg = (match[1] ?? '').trim();
-    if (/^(clear|reset)$/i.test(arg)) {
-      return {
-        name: '/ bpm clear — Remove BPM filter',
-        run: () => onbpm?.(null, null),
-      };
+  // The filter the slash text makes, read by the core. One read is on the wire at a time and
+  // only the newest text waits behind it, with no timer.
+  let parsed = $state<{ text: string; filter: DescribedFilter | null; error: string | null }>({
+    text: '',
+    filter: null,
+    error: null,
+  });
+  let parsing = false;
+  let parseWaiting: string | null = null;
+
+  async function readFilter(text: string) {
+    if (!parseFilter) return;
+    if (parsing) {
+      parseWaiting = text;
+      return;
     }
-    const range = /^(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)$/.exec(arg);
-    if (range) {
-      const a = Number(range[1]);
-      const b = Number(range[2]);
-      if (a > 0 && b > 0) {
-        const min = Math.min(a, b);
-        const max = Math.max(a, b);
-        return {
-          name: `/ bpm ${min}–${max} — Filter tracks by tempo`,
-          run: () => onbpm?.(min, max),
+    parsing = true;
+    let next: string | null = text;
+    while (next !== null) {
+      const asked = next;
+      parseWaiting = null;
+      try {
+        const filter = await parseFilter(asked);
+        parsed = { text: asked, filter, error: null };
+      } catch (error) {
+        parsed = {
+          text: asked,
+          filter: null,
+          error: error instanceof Error ? error.message : String(error),
         };
       }
+      next = parseWaiting;
     }
-    const minOnly = /^(\d+(?:\.\d+)?)\s*[-–]$/.exec(arg);
-    if (minOnly) {
-      const min = Number(minOnly[1]);
-      if (min > 0) {
-        return {
-          name: `/ bpm ${min}+ — Filter tracks at or above ${min} BPM`,
-          run: () => onbpm?.(min, null),
-        };
-      }
-    }
-    const maxOnly = /^[-–]\s*(\d+(?:\.\d+)?)$/.exec(arg);
-    if (maxOnly) {
-      const max = Number(maxOnly[1]);
-      if (max > 0) {
-        return {
-          name: `/ bpm ≤${max} — Filter tracks up to ${max} BPM`,
-          run: () => onbpm?.(null, max),
-        };
-      }
-    }
-    const exact = /^(\d+(?:\.\d+)?)$/.exec(arg);
-    if (exact) {
-      const value = Number(exact[1]);
-      if (value > 0) {
-        return {
-          name: `/ bpm ${value} — Filter tracks at ${value} BPM`,
-          run: () => onbpm?.(value, value),
-        };
-      }
-    }
-    return {
-      name: '/ bpm 125-132 — Filter tracks by tempo (e.g. 125-132)',
-      run: () => onbpm?.(125, 132),
-    };
+    parsing = false;
   }
 
   const slashMode = $derived(query.trim().startsWith('/'));
-  const bpmCommand = $derived(parseBpmCommand(query));
-  const matching = $derived.by(() => {
+  const slashText = $derived(query.trim().replace(/^\/\s*/, ''));
+  const matching = $derived.by((): Command[] => {
     const trimmed = query.trim().toLowerCase();
     if (slashMode) {
-      const list: Command[] = [];
-      if (bpmCommand) {
-        list.push(bpmCommand);
-      } else if (trimmed === '/' || '/ bpm'.startsWith(trimmed)) {
-        list.push({
-          name: '/ bpm 125-132 — Filter tracks by tempo',
-          run: () => onbpm?.(125, 132),
-        });
+      if (slashText === '') {
+        return examples.map((example): Command => ({
+          name: `/ ${example.text} — ${example.description}`,
+          run: () => startExample(example.text),
+        }));
       }
-      if (trimmed !== '/' && bpmCommand && bpmActive) {
-        list.push({
-          name: '/ bpm clear — Remove BPM filter',
-          run: () => onbpm?.(null, null),
-        });
+      const current = parsed.text === slashText ? parsed : null;
+      if (current?.filter) {
+        const filter = current.filter;
+        return [{ name: `Filter: ${filter.label}`, run: () => onfilter?.(filter) }];
       }
-      return list;
+      return [{ name: current?.error ?? 'Reading the filter…', note: true }];
     }
     if (!trimmed) return commands;
     return commands.filter((command) => command.name.toLowerCase().includes(trimmed));
   });
   const open = $derived(focused && (slashMode || query.trim() === '' || matching.length > 0));
+
+  // A filter read after the text was typed turns the list's note into a command, so the
+  // highlight moves onto it.
+  $effect(() => {
+    void matching;
+    untrack(() => {
+      if (!matching[active]?.run) active = nextRunnable(0, 1);
+    });
+  });
 
   /** The nearest command that can run, from `from` in the direction of `step`. */
   function nextRunnable(from: number, step: 1 | -1): number {
@@ -151,6 +148,8 @@
     reset();
     if (!query.trim().startsWith('/')) {
       onsearch?.(query);
+    } else if (slashText !== '') {
+      void readFilter(slashText);
     }
   }
 
@@ -179,13 +178,16 @@
     command.run();
   }
 
-  function activateBpmChip() {
-    query = '/ bpm 125-132';
+  /** Puts an example in the field with its value selected, ready to be typed over. */
+  function startExample(text: string) {
+    query = `/ ${text}`;
     focused = true;
     active = 0;
+    void readFilter(text);
     const el = document.getElementById(inputId) as HTMLInputElement | null;
     el?.focus();
-    el?.setSelectionRange(6, query.length);
+    const space = text.lastIndexOf(' ');
+    el?.setSelectionRange(space >= 0 ? space + 3 : 2, query.length);
   }
 
   function onkeydown(event: KeyboardEvent) {
@@ -234,7 +236,7 @@
             class={['option', { active: index === active }]}
             role="option"
             aria-selected={index === active}
-            aria-disabled={command.arrives ? 'true' : undefined}
+            aria-disabled={command.run ? undefined : 'true'}
             onmousedown={(event) => {
               event.preventDefault();
               choose(command);
@@ -261,10 +263,9 @@
     <div class="chips">
       <!-- Only the first chip takes focus, so Tab does not stop on every placeholder. -->
       <SlashChip
-        command="/ bpm 125-132"
-        description="Filter by tempo"
-        active={bpmActive}
-        onclick={activateBpmChip}
+        command="/ missing genre"
+        description="Filter on any column"
+        onclick={() => startExample('missing genre')}
       />
       {#each futureChips as chip (chip.command)}
         <Tooltip text="{chip.description} arrives in {chip.arrives}" side="below">

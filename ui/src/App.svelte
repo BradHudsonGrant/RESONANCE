@@ -6,10 +6,12 @@
   import type { LibraryCollection } from './lib/ipc/bindings/LibraryCollection';
   import type { LibraryTrack } from './lib/ipc/bindings/LibraryTrack';
   import type { RenameScope } from './lib/ipc/bindings/RenameScope';
+  import type { SmartView } from './lib/ipc/bindings/SmartView';
   import type { TrackArtwork } from './lib/ipc/bindings/TrackArtwork';
   import { pictureBase64 } from './lib/ipc/artwork';
   import { CoreError } from './lib/ipc/client';
   import { core } from './lib/ipc/core';
+  import { FilterState } from './lib/library/filters.svelte';
   import Inspector from './lib/library/Inspector.svelte';
   import Library from './lib/library/Library.svelte';
   import RelinkSheet, { type RelinkClient } from './lib/library/RelinkSheet.svelte';
@@ -38,6 +40,18 @@
     () => core.call('table_layout'),
     (change) => core.call('change_table_layout', { change }),
   );
+  const filters = new FilterState({
+    fields: () => core.call('filter_fields'),
+    summaries: (query) => core.call('filter_summaries', { query }),
+    parse: (text) => core.call('parse_filter', { text }),
+    recordUse: (term) => core.call('record_filter_use', { term }),
+    quickFilters: () => core.call('quick_filters'),
+    changeQuickFilters: (change) => core.call('change_quick_filters', { change }),
+    smartViews: () => core.call('smart_views'),
+    saveView: (name, query) => core.call('save_smart_view', { name, query }),
+    renameView: (view_id, name) => core.call('rename_smart_view', { view_id, name }),
+    deleteView: (view_id) => core.call('delete_smart_view', { view_id }),
+  });
   const preview = new PreviewPlayer(core);
   const sourcesClient: SourcesClient = {
     sources: () => core.call('sources'),
@@ -108,6 +122,7 @@
   let searchText = $state('');
   let collections = $state<LibraryCollection[]>([]);
   let activeCollectionId = $state<number | null>(null);
+  let activeViewId = $state<number | null>(null);
 
   const activeCollection = $derived(
     collections.find((collection) => collection.id === activeCollectionId) ?? null,
@@ -125,8 +140,17 @@
     searchText = '';
   }
 
-  function setBpmFilter(min: number | null, max: number | null) {
-    void pages.setQuery({ ...pages.query, bpm_min: min, bpm_max: max });
+  function openView(view: SmartView) {
+    activeCollectionId = null;
+    activeViewId = view.id;
+    searchText = view.query.text ?? '';
+    void pages.setQuery({
+      ...pages.query,
+      collection_id: null,
+      text: view.query.text ?? null,
+      pill: view.query.pill ?? null,
+      filters: view.query.filters ?? null,
+    });
   }
 
   async function toggleFavourite(target: LibraryTrack) {
@@ -170,6 +194,7 @@
 
   function selectCollection(collectionId: number | null) {
     activeCollectionId = collectionId;
+    activeViewId = null;
     if ((pages.query.collection_id ?? null) !== collectionId) {
       void pages.setQuery({ ...pages.query, collection_id: collectionId });
     }
@@ -567,6 +592,14 @@
         }}
         onRenameCollection={renameCollection}
         onDeleteCollection={deleteCollection}
+        smartViews={filters.views}
+        {activeViewId}
+        onSelectView={openView}
+        onRenameView={(viewId, name) => filters.renameView(viewId, name)}
+        onDeleteView={async (viewId) => {
+          await filters.deleteView(viewId);
+          if (activeViewId === viewId) activeViewId = null;
+        }}
         onCollapse={(collapsed) => (sidebarChoice = collapsed ? 'collapsed' : 'expanded')}
       />
     {/if}
@@ -577,9 +610,13 @@
       {commands}
       inputId={commandInput}
       search={searchText}
-      bpmActive={pages.query.bpm_min != null || pages.query.bpm_max != null}
+      parseFilter={(text) => filters.parse(text)}
       onsearch={setSearch}
-      onbpm={setBpmFilter}
+      onfilter={(filter) => {
+        space = 'Library';
+        filters.remember(filter);
+        filters.add(pages, filter.term);
+      }}
     />
     <main class="workspace-content">
       {#if space === 'Mix'}
@@ -589,6 +626,7 @@
       {:else}
         <Library
           {pages}
+          {filters}
           bind:selected={pages.selected}
           previewTrackId={preview.trackId}
           previewPlaying={preview.playing}
@@ -743,6 +781,8 @@
     previewStart={preview.settings.start}
     maxStartSeconds={preview.settings.max_start_seconds}
     onpreviewstart={(start) => void preview.changeSettings({ start })}
+    recommendFilters={filters.quick.recommend}
+    onrecommendfilters={(on) => void filters.change({ kind: 'set_recommend', on })}
     onsourceschanged={() => {
       void pages.refresh();
       void loadCollections();

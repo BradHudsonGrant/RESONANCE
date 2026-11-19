@@ -395,12 +395,12 @@ describe('CommandBar', () => {
     expect(input.getAttribute('placeholder')).toBe('Search your library, or type a command…');
   });
 
-  it('activates the BPM slash command chip and keeps future milestones marked', () => {
+  it('offers the filter slash command chip and keeps future milestones marked', () => {
     render(CommandBar, { commands: [], inputId: 'commands' });
 
-    const bpmChip = screen.getByRole('button', { name: '/ bpm 125-132 Filter by tempo' });
-    expect(bpmChip.getAttribute('aria-disabled')).toBeNull();
-    expect(bpmChip.tabIndex).toBe(0);
+    const filterChip = screen.getByRole('button', { name: '/ missing genre Filter on any column' });
+    expect(filterChip.getAttribute('aria-disabled')).toBeNull();
+    expect(filterChip.tabIndex).toBe(0);
 
     const chips = [
       '/ key 8A Compatible with A minor',
@@ -419,10 +419,9 @@ describe('CommandBar', () => {
     }
   });
 
-  it('searches as you type without showing an empty command list, and runs / bpm commands', async () => {
+  it('searches as you type without showing an empty command list', async () => {
     const onsearch = vi.fn();
-    const onbpm = vi.fn();
-    render(CommandBar, { commands: [], inputId: 'commands', onsearch, onbpm });
+    render(CommandBar, { commands: [], inputId: 'commands', onsearch });
 
     const input = screen.getByRole('combobox', { name: 'Commands' }) as HTMLInputElement;
     await fireEvent.focus(input);
@@ -430,10 +429,10 @@ describe('CommandBar', () => {
     expect(onsearch).toHaveBeenLastCalledWith('daft punk');
     expect(screen.queryByRole('listbox', { name: 'Commands' })).toBeNull();
 
-    await fireEvent.click(screen.getByRole('button', { name: '/ bpm 125-132 Filter by tempo' }));
-    expect(input.value).toBe('/ bpm 125-132');
-    await fireEvent.keyDown(input, { key: 'Enter' });
-    expect(onbpm).toHaveBeenLastCalledWith(125, 132);
+    await fireEvent.click(
+      screen.getByRole('button', { name: '/ missing genre Filter on any column' }),
+    );
+    expect(input.value).toBe('/ missing genre');
   });
 
   it('runs the command chosen from the list', async () => {

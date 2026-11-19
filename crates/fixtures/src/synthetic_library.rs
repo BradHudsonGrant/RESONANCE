@@ -76,16 +76,23 @@ pub fn tracks(count: usize) -> Vec<ScannedFile> {
             (TagField::Title, title.clone()),
             (TagField::Artist, artist.clone()),
             (TagField::Album, album),
-            (TagField::Genre, genre.to_string()),
             (TagField::Year, year.to_string()),
             (TagField::Bpm, bpm),
         ];
+
+        // Some tracks lack a genre or a label, as in a real library, so filters for missing tags
+        // have something to find.
+        if i % 9 != 0 {
+            tags.push((TagField::Genre, genre.to_string()));
+        }
 
         if i % 11 != 0 {
             tags.push((TagField::Key, format!("{camelot_number}{camelot_letter}")));
         }
 
-        tags.push((TagField::Label, label.to_string()));
+        if i % 13 != 0 {
+            tags.push((TagField::Label, label.to_string()));
+        }
 
         // Tags the table can add as columns, on some tracks and not others, so sorts by them
         // have empty values to put last and wrapped rows have something to wrap.

@@ -5,14 +5,18 @@
   import FilterPill from '../design/FilterPill.svelte';
   import GridDots from '../design/GridDots.svelte';
   import Icon, { type IconName } from '../design/Icon.svelte';
+  import Sheet from '../design/Sheet.svelte';
   import Tooltip from '../design/Tooltip.svelte';
   import type { LibraryCollection } from '../ipc/bindings/LibraryCollection';
   import type { LibraryFacets } from '../ipc/bindings/LibraryFacets';
   import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
   import type { RenameScope } from '../ipc/bindings/RenameScope';
+  import type { FilterTerm } from '../ipc/bindings/FilterTerm';
   import type { TrackFilterPill } from '../ipc/bindings/TrackFilterPill';
   import type { TrackQuery } from '../ipc/bindings/TrackQuery';
   import FilterDrawer from './FilterDrawer.svelte';
+  import { FilterState, termsOf, withTerms } from './filters.svelte';
+  import QuickFilterBar from './QuickFilterBar.svelte';
   import { trackCount } from './format';
   import { sameSort, sortQuery, TableLayoutState } from './table-layout.svelte';
   import { countActiveDrawerFilters, hasQueryFilters, type TrackPages } from './track-pages.svelte';
@@ -28,6 +32,10 @@
     loadFacets?: () => Promise<LibraryFacets>;
     /** The table's columns, widths, wrap and sort, kept by the core. */
     tableLayout?: TableLayoutState;
+    /** Quick filters, token words and smart views, kept by the core. */
+    filters?: FilterState;
+    /** The hook for sending a filter's tracks to Prep, wired when Prep lands. */
+    onsendtoprep?: (query: TrackQuery) => void;
     onopen?: () => void;
     onpreview?: (track: LibraryTrack) => void;
     onplay?: (track: LibraryTrack) => void;
@@ -83,6 +91,8 @@
     activeCollection = null,
     loadFacets,
     tableLayout = new TableLayoutState(),
+    filters = new FilterState(),
+    onsendtoprep,
     onopen,
     onpreview,
     onplay,
@@ -141,17 +151,72 @@
   }
 
   function clearDrawerFilters() {
-    void pages.setQuery({
-      ...pages.query,
-      bpm_min: null,
-      bpm_max: null,
-      keys: null,
-      year_min: null,
-      year_max: null,
-      label: null,
-      formats: null,
-      missing_only: null,
+    void pages.setQuery({ ...pages.query, filters: null, missing_only: null });
+  }
+
+  const terms = $derived(termsOf(pages.query));
+  const summaries = $derived(terms.map((term) => filters.summaryFor(term)));
+  let startColumn = $state<string | null>(null);
+  let saveOpen = $state(false);
+  let saveName = $state('');
+  let saveError = $state<string | null>(null);
+
+  $effect(() => {
+    void filters.load().catch(() => {
+      // The bar shows no quick filters until the core can be read.
     });
+    void filters.loadFields().catch(() => {
+      // The header and cell menus offer no filters until the core can be read.
+    });
+  });
+
+  $effect(() => {
+    const query = pages.query;
+    untrack(() => filters.refreshSummaries(query));
+  });
+
+  function addFilter(term: FilterTerm) {
+    filters.add(pages, term);
+  }
+
+  /** Opens the drawer with a new condition on `column`. */
+  function filterByColumn(column: string) {
+    startColumn = column;
+    openDrawer();
+  }
+
+  function removeFilter(index: number) {
+    void pages.setQuery(
+      withTerms(
+        pages.query,
+        terms.filter((_, at) => at !== index),
+      ),
+    );
+  }
+
+  function openSave() {
+    saveName = summaries
+      .map((summary) => summary?.label)
+      .filter(Boolean)
+      .join(', ')
+      .slice(0, 60);
+    saveError = null;
+    saveOpen = true;
+  }
+
+  async function save(event: SubmitEvent) {
+    event.preventDefault();
+    saveError = null;
+    try {
+      await filters.saveView(saveName, {
+        text: pages.query.text ?? null,
+        pill: pages.query.pill ?? null,
+        filters: pages.query.filters ?? null,
+      });
+      saveOpen = false;
+    } catch (error) {
+      saveError = error instanceof Error ? error.message : String(error);
+    }
   }
 
   function clearAllFilters() {
@@ -169,7 +234,7 @@
   const hasFiltersInView = $derived(hasQueryFilters(pages.query));
 
   function openDrawer() {
-    drawerOpen = true;
+    void filters.loadFields().then(() => (drawerOpen = true));
     if (!loadFacets) return;
     void loadFacets()
       .then((next) => {
@@ -267,6 +332,22 @@
               onclick={() => selectPill(pill)}
             />
           {/each}
+          {#if filters.available}
+            <span class="bar-rule" aria-hidden="true"></span>
+            <QuickFilterBar
+              {terms}
+              {summaries}
+              total={pages.total}
+              quick={filters.quick}
+              onadd={addFilter}
+              onremove={removeFilter}
+              onedit={openDrawer}
+              onsave={openSave}
+              onclear={clearDrawerFilters}
+              onchange={(change) => void filters.change(change)}
+              onsendtoprep={onsendtoprep ? () => onsendtoprep(pages.query) : undefined}
+            />
+          {/if}
         </div>
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
         <div
@@ -386,6 +467,9 @@
         {onremovefromcollection}
         {oncreatecollectionandadd}
         layout={tableLayout}
+        filterFields={filters.fields}
+        onfilter={addFilter}
+        onfiltercolumn={filterByColumn}
       />
     {/if}
   </div>
@@ -394,22 +478,47 @@
 <FilterDrawer
   bind:open={drawerOpen}
   query={pages.query}
+  fields={filters.fields}
   {facets}
+  {startColumn}
   onchange={(next) => void pages.setQuery(next)}
+  onadded={(added) => {
+    startColumn = null;
+    for (const term of added) void filters.recordUse(term);
+  }}
   onclear={clearDrawerFilters}
 />
+
+<Sheet bind:open={saveOpen} title="Save as smart view">
+  <form id="save-view" class="save-form" onsubmit={save}>
+    <label class="save-label" for="save-view-name">Name</label>
+    <input id="save-view-name" class="save-input" type="text" bind:value={saveName} />
+    <p class="save-note">
+      The view keeps the filters, search and pill, so new tracks that match show in it.
+    </p>
+    {#if saveError}<p class="save-error" role="alert">{saveError}</p>{/if}
+  </form>
+  {#snippet actions()}
+    <Button onclick={() => (saveOpen = false)}>Cancel</Button>
+    <Button variant="primary" type="submit" form="save-view">Save view</Button>
+  {/snippet}
+</Sheet>
 
 <style>
   .library {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
     height: 100%;
+    min-width: 0;
     min-height: 0;
   }
 
   .header {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--space-4);
+    min-width: 0;
     padding: var(--space-4) var(--space-5) var(--space-3);
   }
 
@@ -524,11 +633,73 @@
     min-width: 0;
   }
 
+  /* One line that scrolls sideways when it is too long, so tokens and chips never push the
+     table down. */
   .pills {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
-    gap: var(--space-2) var(--space-6);
+    gap: var(--space-2-5);
+    height: var(--control-height-sm);
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .pills::-webkit-scrollbar {
+    display: none;
+  }
+
+  .pills > :global(*) {
+    flex: 0 0 auto;
+  }
+
+  .pills > :global(.filter-pill + .filter-pill) {
+    margin-left: var(--space-3-5);
+  }
+
+  .bar-rule {
+    width: var(--border-width);
+    height: var(--space-3-5);
+    margin: 0 var(--space-1-5);
+    background: var(--color-border);
+  }
+
+  .save-form {
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .save-label {
+    color: var(--color-text-2);
+    font-size: var(--text-sm);
+  }
+
+  .save-input {
+    height: var(--control-height-md);
+    padding: 0 var(--space-2-5);
+    border: var(--border-width) solid var(--color-border-control);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-size: var(--text-md);
+  }
+
+  .save-note,
+  .save-error {
+    margin: 0;
+    color: var(--color-text-2);
+    font-size: var(--text-sm);
+  }
+
+  .save-error {
+    color: var(--color-text);
+  }
+
+  @media (forced-colors: active) {
+    .bar-rule {
+      background: CanvasText;
+    }
   }
 
   .pills.covered {

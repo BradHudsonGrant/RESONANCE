@@ -332,3 +332,34 @@ At 2,560 by 1,440, with 14 columns in view, the fling misses: every run held an 
 ### Conclusion
 
 At 1,440 by 900, with every column picked and with wrap on, the table holds the display's refresh rate and no frame comes near 16 ms, so the budget is met there. The large-window fling with many columns is not: the table's own work stays under 11 ms a step, so the time goes outside the page's script, as in the compositor findings above. It is open in [#136](https://github.com/BradHudsonGrant/RESONANCE/issues/136).
+
+## 19 November 2026, filters on any field and three-condition combinations
+
+Machine: the same ROG Zephyrus G16, Core Ultra 9 285H, 64 GB RAM, Windows 11 Pro. The library is the same 100,000-track synthetic database (`target/bench/synthetic/library.db`, 225 MB with the `asset_tag_missing` index and missing-tag fixtures). Each case runs in Rust's release profile (`cargo test --release -p resonance-db --test filter_speed -- --ignored --nocapture`): one cold call and 20 warm calls to `Database::query_tracks_and_total` for the first page of 200 rows and the total count, plus `Database::query_filter_counts` when more than one filter term is active.
+
+| Filter | Matches | Cold | Median | Slowest | Token counts, median |
+| --- | --- | --- | --- | --- | --- |
+| `genre contains house` | 16,738 | 20.5 ms | 20.2 ms | 23.5 ms | – |
+| `artist is Vela Hollow` | 176 | 15.7 ms | 16.3 ms | 17.8 ms | – |
+| `genre not techno` | 94,422 | 35.3 ms | 35.0 ms | 42.1 ms | – |
+| `artist starts with ve` | 8,349 | 15.1 ms | 14.2 ms | 16.7 ms | – |
+| `label is any of Neon Pulse, Static Bloom` | 7,540 | 4.8 ms | 4.7 ms | 5.2 ms | – |
+| `missing genre` | 11,112 | 15.3 ms | 14.6 ms | 16.2 ms | – |
+| `has label` | 92,307 | 24.9 ms | 25.0 ms | 26.9 ms | – |
+| `no artwork` | 100,000 | 21.3 ms | 21.5 ms | 23.6 ms | – |
+| `missing track number` | 20,000 | 40.3 ms | 41.8 ms | 43.6 ms | – |
+| `track number is 7` | 6,666 | 30.9 ms | 31.3 ms | 33.3 ms | – |
+| `bpm 124-128` | 5,082 | 4.8 ms | 4.6 ms | 5.3 ms | – |
+| `bitrate < 320` | 20,000 | 15.8 ms | 15.7 ms | 17.7 ms | – |
+| `year >= 2015` | 32,433 | 9.9 ms | 10.0 ms | 20.2 ms | – |
+| `added after 2026-01-01` | 100,000 | 22.6 ms | 23.4 ms | 30.9 ms | – |
+| `format flac, wav` | 40,000 | 10.9 ms | 10.2 ms | 11.2 ms | – |
+| `key 8A, 9A` | 7,530 | 4.8 ms | 4.9 ms | 5.8 ms | – |
+| `format not mp3` | 80,000 | 21.8 ms | 20.6 ms | 23.6 ms | – |
+| `path contains deep` | 10,229 | 36.8 ms | 34.9 ms | 44.3 ms | – |
+| `missing genre, bitrate < 320, format mp3` | 0 | 29.8 ms | 29.8 ms | 31.1 ms | 9.2 ms |
+| `bpm 120-130, has label, genre not techno` | 9,927 | 48.3 ms | 48.7 ms | 50.7 ms | 8.1 ms |
+
+### Conclusion
+
+Every condition type (text, missing/present, artwork, generic tag, numeric range and bound, date, choice, location) and both three-condition combinations run in 4.6 to 48.7 ms median on 100,000 tracks, inside the 50 ms filter budget. None of the query plans touches `file_tag`.

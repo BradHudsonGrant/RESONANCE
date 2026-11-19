@@ -140,7 +140,9 @@ impl Api {
         let library = self.locked_library();
         match scope {
             RenameScope::Tracks { track_ids } => library.primary_asset_ids(&track_ids),
-            RenameScope::Query { query } => library.query_asset_ids(&core_track_query(Some(query))),
+            RenameScope::Query { query } => {
+                library.query_asset_ids(&core_track_query(Some(query))?)
+            }
         }
         .map_err(ApiError::library_unreadable)
     }

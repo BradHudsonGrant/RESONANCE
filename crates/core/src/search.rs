@@ -1,7 +1,8 @@
 use std::collections::BTreeSet;
 
+use crate::filter::FilterTerm;
 use crate::key::Key;
-use crate::library::{AudioFormat, TagField};
+use crate::library::TagField;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum FilterPill {
@@ -55,14 +56,10 @@ pub struct TrackQuery {
     pub text: Option<String>,
     pub pill: FilterPill,
     pub collection_id: Option<i64>,
+    /// Only tracks whose file is gone from disk.
     pub missing_only: bool,
-    pub bpm_min: Option<f64>,
-    pub bpm_max: Option<f64>,
-    pub keys: Vec<String>,
-    pub year_min: Option<i32>,
-    pub year_max: Option<i32>,
-    pub label: Option<String>,
-    pub formats: Vec<AudioFormat>,
+    /// Filters on columns, joined by AND.
+    pub filters: Vec<FilterTerm>,
     pub sort: TrackSortField,
     pub direction: SortDirection,
     /// Orders tracks that tie on `sort`.
@@ -70,7 +67,7 @@ pub struct TrackQuery {
 }
 
 impl TrackQuery {
-    /// Whether any filter pill, collection, search text or drawer criterion narrows the library.
+    /// Whether any filter pill, collection, search text or filter narrows the library.
     pub fn is_narrowed(&self) -> bool {
         self.pill != FilterPill::All
             || self.collection_id.is_some()
@@ -78,32 +75,9 @@ impl TrackQuery {
             || self.active_filter_count() > 0
     }
 
-    /// Number of active drawer criteria (`missing_only`, `bpm`, `keys`, `year`, `label`, `formats`).
+    /// Number of active filters, the missing-files one included.
     pub fn active_filter_count(&self) -> usize {
-        let mut count = 0;
-        if self.missing_only {
-            count += 1;
-        }
-        if self.bpm_min.is_some() || self.bpm_max.is_some() {
-            count += 1;
-        }
-        if self.keys.iter().any(|key| !key.trim().is_empty()) {
-            count += 1;
-        }
-        if self.year_min.is_some() || self.year_max.is_some() {
-            count += 1;
-        }
-        if self
-            .label
-            .as_deref()
-            .is_some_and(|label| !label.trim().is_empty())
-        {
-            count += 1;
-        }
-        if !self.formats.is_empty() {
-            count += 1;
-        }
-        count
+        self.filters.len() + usize::from(self.missing_only)
     }
 }
 

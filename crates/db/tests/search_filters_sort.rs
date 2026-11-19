@@ -1,3 +1,4 @@
+use resonance_core::filter::{FilterTerm, parse_command};
 use resonance_core::library::{AudioFacts, AudioFormat, ScannedFile, TagField};
 use resonance_core::search::{FilterPill, SortDirection, TrackQuery, TrackSortField};
 use resonance_db::Database;
@@ -105,6 +106,13 @@ fn seed_catalogue() -> Database {
     db
 }
 
+fn filters(texts: &[&str]) -> Vec<FilterTerm> {
+    texts
+        .iter()
+        .map(|text| parse_command(text).expect("filter reads"))
+        .collect()
+}
+
 fn titles(db: &Database, query: &TrackQuery) -> Vec<String> {
     db.query_tracks_page(query, 0, 50)
         .expect("page queries")
@@ -201,7 +209,7 @@ fn filters_handle_bpm_key_aliases_year_label_format_favourites_and_recent() {
         titles(
             &db,
             &TrackQuery {
-                keys: vec!["8A".to_owned()],
+                filters: filters(&["key 8A"]),
                 ..TrackQuery::default()
             }
         ),
@@ -211,7 +219,7 @@ fn filters_handle_bpm_key_aliases_year_label_format_favourites_and_recent() {
         titles(
             &db,
             &TrackQuery {
-                keys: vec!["AM".to_owned()],
+                filters: filters(&["key AM"]),
                 ..TrackQuery::default()
             }
         ),
@@ -222,8 +230,7 @@ fn filters_handle_bpm_key_aliases_year_label_format_favourites_and_recent() {
         titles(
             &db,
             &TrackQuery {
-                bpm_min: Some(125.0),
-                bpm_max: Some(139.0),
+                filters: filters(&["bpm 125-139"]),
                 ..TrackQuery::default()
             }
         ),
@@ -234,8 +241,7 @@ fn filters_handle_bpm_key_aliases_year_label_format_favourites_and_recent() {
         titles(
             &db,
             &TrackQuery {
-                year_min: Some(2004),
-                year_max: Some(2020),
+                filters: filters(&["year 2004-2020"]),
                 ..TrackQuery::default()
             }
         ),
@@ -246,7 +252,7 @@ fn filters_handle_bpm_key_aliases_year_label_format_favourites_and_recent() {
         titles(
             &db,
             &TrackQuery {
-                label: Some("anjunadeep".to_owned()),
+                filters: filters(&["label is anjunadeep"]),
                 ..TrackQuery::default()
             }
         ),
@@ -257,7 +263,7 @@ fn filters_handle_bpm_key_aliases_year_label_format_favourites_and_recent() {
         titles(
             &db,
             &TrackQuery {
-                formats: vec![AudioFormat::Flac, AudioFormat::Wav],
+                filters: filters(&["format flac, wav"]),
                 ..TrackQuery::default()
             }
         ),

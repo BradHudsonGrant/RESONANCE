@@ -6,13 +6,24 @@
   import TableCell from '../design/TableCell.svelte';
   import TableRow from '../design/TableRow.svelte';
   import { artworkUrl } from '../ipc/artwork';
+  import type { FilterField } from '../ipc/bindings/FilterField';
+  import type { FilterTerm } from '../ipc/bindings/FilterTerm';
   import type { LibraryCollection } from '../ipc/bindings/LibraryCollection';
   import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
   import type { TableColumn } from '../ipc/bindings/TableColumn';
   import type { TableLayoutChange } from '../ipc/bindings/TableLayoutChange';
   import CollectionMenu from './CollectionMenu.svelte';
   import ColumnMenu, { type MenuAnchor } from './ColumnMenu.svelte';
-  import { cellLook, cellText, columnWidth, fitColumns, gridTemplate, tableWidth } from './columns';
+  import {
+    cellFilters,
+    cellLook,
+    cellText,
+    columnWidth,
+    fitColumns,
+    gridTemplate,
+    tableWidth,
+  } from './columns';
+  import FilterMenu, { type FilterMenuAnchor, type FilterMenuItem } from './FilterMenu.svelte';
   import { RowHeights } from './row-heights';
   import { TableLayoutState } from './table-layout.svelte';
   import type { TrackPages } from './track-pages.svelte';
@@ -39,6 +50,12 @@
     onaddtocollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
     onremovefromcollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
     oncreatecollectionandadd?: (name: string, trackIds: number[]) => Promise<void> | void;
+    /** The columns filters can use, for the header and cell menus. */
+    filterFields?: FilterField[];
+    /** A filter picked from a cell's menu. */
+    onfilter?: (term: FilterTerm) => void;
+    /** "Filter by" in a header's menu, for the column's id. */
+    onfiltercolumn?: (column: string) => void;
     /** How many tracks are ticked, for the selection actions that Library shows above. */
     checkedCount?: number;
     allChecked?: boolean;
@@ -61,6 +78,9 @@
     onaddtocollection,
     onremovefromcollection,
     oncreatecollectionandadd,
+    filterFields = [],
+    onfilter,
+    onfiltercolumn,
     checkedCount = $bindable(0),
     allChecked = $bindable(false),
   }: Props = $props();
@@ -415,6 +435,37 @@
   let columnMenuOpen = $state(false);
   let columnMenuAnchor = $state<MenuAnchor | null>(null);
   let columnMenuReturn: HTMLElement | null = null;
+  // The header that was right-clicked, which the menu offers to filter by.
+  let columnMenuFilter = $state<FilterField | null>(null);
+
+  let cellMenuOpen = $state(false);
+  let cellMenuAnchor = $state<FilterMenuAnchor | null>(null);
+  let cellMenuItems = $state<FilterMenuItem[]>([]);
+
+  function openCellMenu(event: MouseEvent) {
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    const cell = target?.closest<HTMLElement>('[data-column]');
+    const row = target?.closest<HTMLElement>('[aria-rowindex]');
+    if (!cell || !row || !onfilter) return;
+    const index = Number(row.getAttribute('aria-rowindex')) - 2;
+    const track = pages.track(index);
+    const field = filterFields.find((item) => item.column === cell.dataset.column);
+    if (!track || !field) return;
+    const offers = cellFilters(field, track);
+    if (offers.length === 0) return;
+    event.preventDefault();
+    cellMenuItems = offers.map((offer) => ({
+      label: offer.label,
+      run: () => onfilter(offer.term),
+    }));
+    cellMenuAnchor = {
+      left: event.clientX,
+      right: event.clientX,
+      top: event.clientY,
+      bottom: event.clientY,
+    };
+    cellMenuOpen = true;
+  }
 
   function openColumnMenu(event: MouseEvent) {
     const button = event.currentTarget as HTMLElement;
@@ -423,6 +474,7 @@
       return;
     }
     columnMenuReturn = button;
+    columnMenuFilter = null;
     columnMenuAnchor = button.getBoundingClientRect();
     columnMenuOpen = true;
   }
@@ -430,6 +482,10 @@
   function openColumnMenuAt(event: MouseEvent) {
     event.preventDefault();
     const target = event.target instanceof HTMLElement ? event.target : null;
+    const headerColumn = target?.closest<HTMLElement>('[data-column]')?.dataset.column;
+    columnMenuFilter = onfiltercolumn
+      ? (filterFields.find((item) => item.column === headerColumn) ?? null)
+      : null;
     columnMenuReturn =
       target
         ?.closest<HTMLElement>('[role="columnheader"]')
@@ -939,7 +995,13 @@
       {/if}
     </div>
     <div class="body" role="rowgroup" style:height="{bodyHeight}px">
-      <div class="rows" bind:this={rowsEl} style:transform="translateY({rowsTop}px)">
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="rows"
+        bind:this={rowsEl}
+        style:transform="translateY({rowsTop}px)"
+        oncontextmenu={openCellMenu}
+      >
         {#each { length: shown }, offset}
           {@const index = first + offset}
           {@const track = pages.track(index)}
@@ -1039,6 +1101,7 @@
                 <TableCell compact>
                   <span
                     class="thumb"
+                    data-column={column.id}
                     style:background-image={track?.artwork
                       ? `url("${artworkUrl(track.artwork)}")`
                       : 'none'}
@@ -1053,7 +1116,11 @@
                   tone={look.tone}
                   weight={look.weight}
                 >
-                  <span class="value" title={!wrap && value ? value : undefined}>{value}</span>
+                  <span
+                    class="value"
+                    data-column={column.id}
+                    title={!wrap && value ? value : undefined}>{value}</span
+                  >
                 </TableCell>
               {/if}
             {/each}
@@ -1113,8 +1180,22 @@
   anchor={columnMenuAnchor}
   layout={layout.current}
   hidden={fit.hidden.map((column) => column.id)}
+  filterColumn={columnMenuFilter}
+  onfilter={(column) => {
+    columnMenuOpen = false;
+    onfiltercolumn?.(column);
+  }}
   onchange={(change) => void changeLayout(change)}
   onclose={closeColumnMenu}
+/>
+
+<FilterMenu
+  open={cellMenuOpen}
+  anchor={cellMenuAnchor}
+  label="Filter by this cell"
+  items={cellMenuItems}
+  returnFocus={gridEl ?? null}
+  onclose={() => (cellMenuOpen = false)}
 />
 
 <CollectionMenu

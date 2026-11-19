@@ -8,7 +8,7 @@ The table is the library. It starts right under the filter pills, with no collec
 
 - The title "Library" in 27 px Space Grotesk 500, and the track count beside it in 13 px mono and Text 2.
 - On the right, a 34 px filter button with a sliders icon (the filter drawer arrives in M2), and the scan form while the library is empty.
-- 16 px under the title, the filter pills: All tracks, Analysed, Unanalysed, Favourites and Recent, 24 px apart. The active pill is inverted. The others are Text 2 with a 13 px icon. #52 makes them toggle. The filters behind them arrive in M2, and Analysed and Unanalysed need M5.
+- 16 px under the title, the quick filters bar (below). It starts with the filter pills: All tracks, Analysed, Unanalysed, Favourites and Recent, 24 px apart. The active pill is inverted. The others are Text 2 with a 13 px icon. #52 makes them toggle. The filters behind them arrive in M2, and Analysed and Unanalysed need M5.
 
 ## Track table
 
@@ -85,9 +85,53 @@ Wrap is off by default. Off, every row is 33 px, a value too long for its column
 
 The defaults still drop the way the track table above says. Columns the user picked give way first, the last picked first, as soon as they do not fit at their widths. When any have dropped, a "+N" mono button sits beside the columns button and opens the chooser, where each dropped column is marked "Hidden, too narrow". The columns come back in reverse order as the table widens. Nothing moves above the table, and the header keeps its height.
 
+## Filters
+
+Any column can narrow the table, with conditions that suit what it holds. The rules, the wording of every filter and the ranking of recommendations live in `crates/core/src/filter.rs`, so the bar, the drawer, the command bar and the menus all say the same thing.
+
+| Column holds | Conditions |
+| --- | --- |
+| Text (Title, Artist, Album, Genre, Label, Catalogue number, Composer, Remixer, Mix, Comment, tags) | contains, is, is not, starts with, is any of, is none of |
+| A number (BPM, Time, Year, Bitrate, Sample rate, Bit depth, Channels, File size) | between, under, over |
+| A date (Date added, Date modified) | between, before, after |
+| A choice (Key, Format) | is any of, is none of |
+| Artwork | is missing, is present |
+| Path, Folder | contains, starts with |
+
+Every column that a track can lack also has "is missing" and "is present", so "No genre" and "No artwork" are one step. "Is not" and "is none of" keep tracks that have no value, so hiding a genre never hides untagged tracks. Conditions combine with AND. One level of "any of these" groups conditions with OR, for example "No genre or no label".
+
+### Adding a filter
+
+- The column chooser opened by right-clicking a header starts with "Filter by Genre…", which opens the drawer with a new Genre condition.
+- Right-clicking a cell offers the two filters its value suggests, "Only tracks from this label" and "Hide this label", and "Only tracks without a label" when the cell is empty.
+- The filter drawer lists the active conditions, each as a field, a condition and a value, and "Add a condition" and "Add an any-of group" under them. The drawer applies each condition as soon as it is complete.
+- The command bar takes `/` filters: `/missing genre`, `/has artwork`, `/bitrate < 320`, `/bpm 125-132`, `/format flac`, `/year >= 2020`, `/label is Anjunadeep`, `/genre not techno`. The list under the field names the filter the text makes before Enter applies it.
+
+Every filter added counts once in the library database, for recommendations. Nothing leaves the machine.
+
+### Quick filters bar
+
+The bar is the pills row. It keeps the pills' height and slot, does not wrap, and scrolls sideways when it is too long, so nothing above the table ever moves. From left to right:
+
+- The pills.
+- The active filters as removable 26 px tokens on Surface 2 with a 1 px control border: the filter's words in 12 px sans, the number of tracks it matches in mono Text 2, and a 24 px remove button separated by a 1 px hairline. Clicking a token opens its menu: Edit in the drawer, Pin to quick filters (or Unpin), Save as smart view, Remove. After the tokens, a Clear filters button when more than one filter is active.
+- The pinned filters, then up to five recommended ones, as 26 px chips on Surface with a 1 px border and 12 px horizontal padding, spaced 10 px apart with no decorative dots or badges. A chip adds its filter, and its tooltip says whether it is pinned or recommended. A pinned or recommended filter that is active shows as a token and not as a chip.
+
+Right-clicking a chip, or `Shift+F10` on it, opens its menu: Move left, Move right, Pin (on a recommended one) and Remove. `Alt+Left` and `Alt+Right` move a focused chip one place. Moving a recommended chip pins it. Removing a recommended one stops it coming back.
+
+Recommendations are on by default and come from what the user filters by most, with recent use counting for more. A new library starts with No genre, No artwork, Lossless and Under 320 kbps until real use replaces them. Settings, under Library, has "Recommend quick filters" to turn them off.
+
+The match counts follow the table: while one count is on the wire only the newest waits behind it, with no timer.
+
+### Smart views
+
+"Save as smart view" names the active filters, search and pill and adds them to the sidebar under Smart views, beside Collections. Opening one puts its filters back. A smart view holds filters, never tracks, so new tracks that match show in it. It can be renamed and deleted from its row menu.
+
+The filter results are the hook for "Send these to Prep", which the Prep space wires in M3.
+
 ## Selection actions
 
-Selection never moves the table. While any track is ticked, the selection actions take the place of the filter pills, in the same slot: the count ("3 selected"), Select all, Add to collection, Rename, Remove from the open collection, and Clear. When the selection clears, the pills come back. Nothing is inserted above the table, so the header and every row stay where they were and the pointer stays on the row it clicked. No bar, chip row or banner may appear above the table and push it down.
+Selection never moves the table. While any track is ticked, the selection actions take the place of the quick filters bar, in the same slot: the count ("3 selected"), Select all, Add to collection, Rename, Remove from the open collection, and Clear. When the selection clears, the bar comes back. Nothing is inserted above the table, so the header and every row stay where they were and the pointer stays on the row it clicked. No bar, chip row or banner may appear above the table and push it down.
 
 - The pills stay in the layout, hidden, so the slot keeps their height.
 - Select all stays in place and turns disabled once every track is ticked. The count uses tabular figures and a fixed minimum width, so going from 9 to 10 does not move the buttons.
