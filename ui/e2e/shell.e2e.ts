@@ -79,11 +79,11 @@ test('sidebar tooltips show whole, beside the sidebar and in the collapsed rail'
   page,
 }) => {
   await open(page, 1586, 992);
-  await page.getByRole('button', { name: 'Prep' }).hover();
-  const prep = page.getByRole('tooltip', { name: 'Prep arrives in M3' });
-  await expect(prep).toBeVisible();
-  await expect(prep).toBeInViewport({ ratio: 1 });
-  expect(await prep.evaluate((tip) => tip.matches(':popover-open'))).toBe(true);
+  await page.getByRole('button', { name: 'Sets' }).hover();
+  const sets = page.getByRole('tooltip', { name: 'Sets arrives in M10' });
+  await expect(sets).toBeVisible();
+  await expect(sets).toBeInViewport({ ratio: 1 });
+  expect(await sets.evaluate((tip) => tip.matches(':popover-open'))).toBe(true);
 
   await open(page, 1280, 720);
   const rail = page.getByRole('button', { name: 'Mix', exact: true });
@@ -192,7 +192,7 @@ test('with forced colours the disabled spaces and scrub tracks stay distinct', a
     page
       .getByRole('button', { name, exact: true })
       .evaluate((button) => getComputedStyle(button).color);
-  expect(await colour('Prep')).not.toBe(await colour('Mix'));
+  expect(await colour('Sets')).not.toBe(await colour('Mix'));
 
   const track = await page
     .getByRole('slider', { name: 'Scrub' })

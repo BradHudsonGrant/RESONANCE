@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use resonance_core::identify::{Candidate, KnownTags, ReleaseUrl, StepOutcome};
+use resonance_core::prep::local_proposals;
 use resonance_core::staging::proposals_from;
 use resonance_db::{Database, IdentificationPass, StoredIdentification};
 use serde_json::{Value, json};
@@ -48,6 +49,10 @@ pub fn run_local_pass(
         after = last.track_id;
         for input in &inputs {
             database.record_identification(&stored(&identify_locally(input), false))?;
+            let proposals = local_proposals(&input.tags, &input.path);
+            if !proposals.is_empty() {
+                database.store_proposals(input.track_id, &proposals)?;
+            }
         }
         done += inputs.len() as u64;
     }

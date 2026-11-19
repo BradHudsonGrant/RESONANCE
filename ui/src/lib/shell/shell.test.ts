@@ -271,14 +271,13 @@ describe('Sidebar', () => {
     const onSelectSpace = vi.fn();
     render(Sidebar, { ...props, onSelectSpace });
 
-    for (const name of ['Prep', 'Sets', 'Replay']) {
+    for (const name of ['Sets', 'Replay']) {
       expect(screen.getByRole('button', { name }).getAttribute('aria-disabled')).toBe('true');
     }
-    await fireEvent.click(screen.getByRole('button', { name: 'Prep' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Sets' }));
     expect(onSelectSpace).not.toHaveBeenCalled();
 
     const tooltips = tooltipTexts();
-    expect(tooltips.some((text) => text?.includes('Prep arrives in M3'))).toBe(true);
     expect(tooltips.some((text) => text?.includes('Sets arrives in M10'))).toBe(true);
     expect(tooltips.some((text) => text?.includes('Replay arrives in M9'))).toBe(true);
   });
@@ -287,7 +286,7 @@ describe('Sidebar', () => {
     render(Sidebar, props);
 
     expect(screen.getByRole('button', { name: 'Prep' }).tabIndex).toBe(0);
-    expect(screen.getByRole('button', { name: 'Sets' }).tabIndex).toBe(-1);
+    expect(screen.getByRole('button', { name: 'Sets' }).tabIndex).toBe(0);
     expect(screen.getByRole('button', { name: 'Replay' }).tabIndex).toBe(-1);
     expect(screen.getByRole('button', { name: 'New collection' }).tabIndex).toBe(0);
   });
@@ -295,6 +294,9 @@ describe('Sidebar', () => {
   it('opens a space that exists', async () => {
     const onSelectSpace = vi.fn();
     render(Sidebar, { ...props, onSelectSpace });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Prep' }));
+    expect(onSelectSpace).toHaveBeenCalledWith('Prep');
 
     await fireEvent.click(screen.getByRole('button', { name: 'Mix' }));
     expect(onSelectSpace).toHaveBeenCalledWith('Mix');
@@ -670,8 +672,11 @@ describe('App shell', () => {
     expect(screen.getByRole('complementary', { name: 'Inspector' })).toBeTruthy();
   });
 
-  it('switches between Library and Mix with 1 and 4, and leaves the dock out of Mix', async () => {
+  it('switches between Library, Prep and Mix with 1, 2 and 4, and leaves the dock out of Mix', async () => {
     await renderApp();
+
+    await fireEvent.keyDown(window, { key: '2' });
+    expect(screen.getByRole('button', { name: 'Prep' }).getAttribute('aria-current')).toBe('page');
 
     await fireEvent.keyDown(window, { key: '4' });
     expect(screen.getByRole('button', { name: 'Mix' }).getAttribute('aria-current')).toBe('page');

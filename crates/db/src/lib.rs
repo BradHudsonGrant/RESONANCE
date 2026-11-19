@@ -5,6 +5,7 @@ mod identification;
 mod identity;
 mod jobs;
 mod operations;
+mod prep;
 mod preview_settings;
 mod renames;
 mod search;
@@ -29,6 +30,7 @@ pub use identity::{
     StoredTrackRelinkTarget,
 };
 pub use operations::StoredOperation;
+pub use prep::BatchTagOperation;
 pub use renames::{RenameTarget, StoredRename};
 use resonance_core::collections::CollectionNameError;
 use resonance_core::library::{

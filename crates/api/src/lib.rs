@@ -9,6 +9,7 @@ mod identity;
 mod jobs;
 pub mod mix_frame;
 mod online;
+mod prep;
 mod providers;
 mod relink;
 mod renames;
@@ -489,6 +490,24 @@ impl Api {
             Request::ApplyRename { scope, template } => self
                 .apply_rename(scope, &template)
                 .map(Response::ApplyRename),
+            Request::PrepQueue {
+                query,
+                proposals_only,
+            } => self
+                .prep_queue(query, proposals_only)
+                .map(Response::PrepQueue),
+            Request::AcceptPrepItems { track_ids, fields } => self
+                .accept_prep_items(&track_ids, &fields)
+                .map(Response::AcceptPrepItems),
+            Request::SkipPrepItems { track_ids, fields } => self
+                .skip_prep_items(&track_ids, &fields)
+                .map(Response::SkipPrepItems),
+            Request::PreviewBatchTag { track_ids, tool } => self
+                .preview_batch_tag(&track_ids, tool)
+                .map(Response::PreviewBatchTag),
+            Request::ApplyBatchTag { track_ids, tool } => self
+                .apply_batch_tag(&track_ids, tool)
+                .map(Response::ApplyBatchTag),
         }
     }
 

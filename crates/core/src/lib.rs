@@ -9,6 +9,7 @@ pub mod journal;
 pub mod key;
 pub mod library;
 pub mod meter;
+pub mod prep;
 pub mod preview;
 pub mod providers;
 pub mod quick_filters;

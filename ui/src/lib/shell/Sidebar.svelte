@@ -13,7 +13,7 @@
   /** In sidebar order. The number keys 1 to 5 follow it. */
   export const spaces: Space[] = [
     { name: 'Library', icon: 'library' },
-    { name: 'Prep', icon: 'prep', arrives: 'M3' },
+    { name: 'Prep', icon: 'prep' },
     { name: 'Sets', icon: 'sets', arrives: 'M10' },
     { name: 'Mix', icon: 'mix' },
     { name: 'Replay', icon: 'replay', arrives: 'M9' },

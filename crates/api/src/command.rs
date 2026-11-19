@@ -332,6 +332,46 @@ pub enum Request {
         scope: RenameScope,
         template: String,
     },
+    /// The Prep queue and staging diffs, either for tracks with pending proposals or for a batch
+    /// matching `query` sent from Library.
+    PrepQueue {
+        #[serde(default)]
+        #[ts(optional = nullable)]
+        query: Option<TrackQuery>,
+        #[serde(default = "default_true")]
+        proposals_only: bool,
+    },
+    /// Accepts pending proposals on one or more tracks (such as a release group) in one
+    /// transaction. When `fields` is empty, takes all pending unlocked changing fields.
+    AcceptPrepItems {
+        #[ts(type = "Array<number>")]
+        track_ids: Vec<i64>,
+        #[serde(default)]
+        fields: Vec<TagName>,
+    },
+    /// Skips pending proposals on one or more tracks in one transaction.
+    SkipPrepItems {
+        #[ts(type = "Array<number>")]
+        track_ids: Vec<i64>,
+        #[serde(default)]
+        fields: Vec<TagName>,
+    },
+    /// Previews how many tracks and fields a batch tag tool will update in the user tag layer.
+    PreviewBatchTag {
+        #[ts(type = "Array<number>")]
+        track_ids: Vec<i64>,
+        tool: BatchTagTool,
+    },
+    /// Applies a batch tag tool across `track_ids` (or a release folder) in the user tag layer.
+    ApplyBatchTag {
+        #[ts(type = "Array<number>")]
+        track_ids: Vec<i64>,
+        tool: BatchTagTool,
+    },
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Which files a rename covers: the selected tracks, or every track a filter or collection
@@ -426,6 +466,11 @@ pub enum Response {
     ApplyRename(RenameReport),
     RecentOperations(Vec<JournalOperation>),
     UndoOperation(UndoReport),
+    PrepQueue(PrepQueueSnapshot),
+    AcceptPrepItems(AcceptedProposals),
+    SkipPrepItems(AcceptedProposals),
+    PreviewBatchTag(AcceptedProposals),
+    ApplyBatchTag(AcceptedProposals),
 }
 
 /// One field a tag write changes. `null` is no value.
@@ -1508,4 +1553,76 @@ pub struct RelinkPreview {
     pub candidate: RelinkFileSummary,
     #[ts(type = "number | null")]
     pub merges_existing_track_id: Option<i64>,
+}
+
+/// How Prep groups tracks that belong to the same release or folder.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct PrepReleaseGroup {
+    pub key: String,
+    pub title: String,
+    pub subtitle: Option<String>,
+}
+
+/// One track in the Prep queue, with its 13-field staging diff and artwork ready to render.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct PrepItem {
+    pub track: LibraryTrack,
+    pub fields: Vec<StagedField>,
+    pub artwork: TrackArtwork,
+    pub pending_fields: u32,
+    pub provider: Option<String>,
+    pub confidence: f64,
+    pub audio_matched: bool,
+    pub needs_url: bool,
+    /// Confidences of every pending unlocked changing field on this track, for live threshold
+    /// previews.
+    pub changeable_confidences: Vec<f64>,
+    pub release: Option<PrepReleaseGroup>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct PrepQueueSnapshot {
+    pub items: Vec<PrepItem>,
+    pub unwritten_tracks: u32,
+    pub last_operation: Option<JournalOperation>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum TextCaseName {
+    Title,
+    Sentence,
+    Upper,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum BatchTagTool {
+    SetFields {
+        edits: Vec<UserTagEdit>,
+    },
+    FindAndReplace {
+        #[serde(default)]
+        fields: Vec<TagName>,
+        find: String,
+        replace: String,
+        #[serde(default)]
+        case_sensitive: bool,
+    },
+    FixCase {
+        #[serde(default)]
+        fields: Vec<TagName>,
+        text_case: TextCaseName,
+    },
+    ApplyReleaseFields {
+        #[ts(type = "number")]
+        source_track_id: i64,
+        #[serde(default)]
+        fields: Vec<TagName>,
+    },
 }
