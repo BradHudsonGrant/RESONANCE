@@ -89,7 +89,8 @@
     applying = true;
     error = null;
     try {
-      const report = await client.apply(trackIds);
+      const readyIds = readyFiles.map((file) => file.track_id);
+      const report = await client.apply(readyIds);
       onwritten?.(report);
       if (report.failed.length === 0) {
         open = false;
@@ -110,10 +111,6 @@
 
   function onDialogKeyDown(event: KeyboardEvent) {
     if (!open || event.key !== 'Enter' || loading || applying || readyFiles.length === 0) return;
-    const target = event.target;
-    if (target instanceof HTMLButtonElement && target.id !== 'write-tags-submit') {
-      return;
-    }
     event.preventDefault();
     void applyWrites();
   }
