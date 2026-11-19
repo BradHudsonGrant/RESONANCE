@@ -216,7 +216,6 @@ fn filter_field(column: LibraryColumn) -> FilterField {
             })
             .collect(),
         LibraryColumn::Key => Key::all()
-            .into_iter()
             .map(|key| FilterChoice {
                 value: key.camelot(),
                 label: key.camelot(),
