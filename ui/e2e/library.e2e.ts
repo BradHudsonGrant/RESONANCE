@@ -696,10 +696,11 @@ test('the Rename sheet previews names from tags, renames the selection on disk a
 }) => {
   await page.setViewportSize({ width: 1586, height: 992 });
   await page.goto('/');
-  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible({ timeout: 10_000 });
-
   const table = page.getByRole('grid', { name: 'Tracks' });
   const search = page.getByRole('combobox', { name: 'Commands' });
+  // The previous test removes a source, so the count settles at its own pace; this test only
+  // needs its one track.
+  await expect(table).toBeVisible({ timeout: 10_000 });
   const original = join(musicFolder, 'House', 'Ada Marsh - Second Wind.flac');
   const renamed = join(musicFolder, 'House', 'Ada Marsh - Second Wind (Dub).flac');
 
@@ -734,7 +735,7 @@ test('the Rename sheet previews names from tags, renames the selection on disk a
 
   try {
     await search.fill('Second Wind');
-    await expect(page.getByText('1 track', { exact: true })).toBeVisible();
+    await expect(page.getByText('1 track', { exact: true })).toBeVisible({ timeout: 10_000 });
     await table.locator('.rows [role="row"]').first().getByRole('checkbox').click();
     await page
       .getByRole('region', { name: 'Selected tracks' })
