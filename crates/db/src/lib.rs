@@ -1,5 +1,6 @@
 mod artwork;
 mod collections;
+mod filters;
 mod identification;
 mod identity;
 mod jobs;
@@ -19,6 +20,7 @@ use std::path::{Path, PathBuf};
 
 pub use artwork::{ARTWORK_FOLDER, ArtworkError, ArtworkStore, ProposedArtwork, StoredArtwork};
 pub use collections::{CollectionSummary, TrackCollection};
+pub use filters::SmartView;
 pub use identification::{
     CachedResponse, IdentificationInput, IdentificationPass, StoredIdentification,
 };
@@ -40,7 +42,7 @@ pub use tags::{AcceptReport, StagingQueueEntry, TagLayers, TagWriteTarget};
 
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
-const MIGRATIONS: [&str; 15] = [
+const MIGRATIONS: [&str; 16] = [
     include_str!("../migrations/0001_library.sql"),
     include_str!("../migrations/0002_sources.sql"),
     include_str!("../migrations/0003_identity.sql"),
@@ -56,6 +58,7 @@ const MIGRATIONS: [&str; 15] = [
     include_str!("../migrations/0013_job_pause.sql"),
     include_str!("../migrations/0014_artwork.sql"),
     include_str!("../migrations/0015_table_columns.sql"),
+    include_str!("../migrations/0016_filters.sql"),
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -71,6 +74,7 @@ pub enum DbError {
     UnknownName { column: &'static str, name: String },
     InvalidCollectionName(CollectionNameError),
     DuplicateCollectionName { name: String },
+    DuplicateViewName { name: String },
 }
 
 impl fmt::Display for DbError {
@@ -96,6 +100,9 @@ impl fmt::Display for DbError {
             Self::InvalidCollectionName(error) => error.fmt(f),
             Self::DuplicateCollectionName { name } => {
                 write!(f, "A collection named \"{name}\" already exists.")
+            }
+            Self::DuplicateViewName { name } => {
+                write!(f, "A smart view named \"{name}\" already exists.")
             }
         }
     }
@@ -278,9 +285,10 @@ impl Database {
                 "INSERT INTO asset (track_id, source_id, path, size_bytes, modified_ns, format,
                      duration_ms, sample_rate, channels, bit_depth, bitrate_kbps, included,
                      sort_title, sort_artist, tag_album, tag_genre, tag_label, tag_key, sort_key,
-                     tag_bpm, tag_year, tag_catno, tag_comment, tag_composer, tag_remixer, tag_mix)
+                     tag_bpm, tag_year, tag_catno, tag_comment, tag_composer, tag_remixer, tag_mix,
+                     title_tagged)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                         ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
+                         ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
             )?;
             let mut update_asset = transaction.prepare(
                 "UPDATE asset SET size_bytes = ?2, modified_ns = ?3, format = ?4, duration_ms = ?5,
@@ -288,7 +296,8 @@ impl Database {
                      included = ?10, missing_since = NULL, sort_title = ?11, sort_artist = ?12,
                      tag_album = ?13, tag_genre = ?14, tag_label = ?15, tag_key = ?16,
                      sort_key = ?17, tag_bpm = ?18, tag_year = ?19, tag_catno = ?20,
-                     tag_comment = ?21, tag_composer = ?22, tag_remixer = ?23, tag_mix = ?24
+                     tag_comment = ?21, tag_composer = ?22, tag_remixer = ?23, tag_mix = ?24,
+                     title_tagged = ?25
                  WHERE id = ?1",
             )?;
             let mut clear_tags = transaction.prepare("DELETE FROM file_tag WHERE asset_id = ?1")?;
@@ -350,6 +359,7 @@ impl Database {
                             meta.composer,
                             meta.remixer,
                             meta.mix,
+                            meta.title_tagged,
                         ])?;
                         clear_tags.execute([asset])?;
                         del_fts.execute([asset])?;
@@ -386,6 +396,7 @@ impl Database {
                             meta.composer,
                             meta.remixer,
                             meta.mix,
+                            meta.title_tagged,
                         ])?;
                         transaction.last_insert_rowid()
                     }
@@ -394,6 +405,7 @@ impl Database {
                     add_tag.execute(params![asset, field.name(), value])?;
                 }
                 search::write_tag_values(&transaction, asset, shown_tags)?;
+                search::write_missing_tags(&transaction, asset, shown_tags)?;
                 add_fts.execute(params![
                     asset,
                     meta.title,
@@ -717,11 +729,11 @@ mod tests {
             .query_tracks_page(
                 &TrackQuery {
                     text: Some("tiesto".to_owned()),
-                    bpm_min: Some(127.0),
-                    bpm_max: Some(128.0),
-                    keys: vec!["8A".to_owned()],
-                    year_min: Some(2021),
-                    year_max: Some(2021),
+                    filters: ["bpm 127-128", "key 8A", "year 2021"]
+                        .map(|text| {
+                            resonance_core::filter::parse_command(text).expect("filter reads")
+                        })
+                        .to_vec(),
                     ..TrackQuery::default()
                 },
                 0,

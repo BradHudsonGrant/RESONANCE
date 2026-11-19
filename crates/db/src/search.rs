@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use resonance_core::columns::{generic_tag_fields, tag_sort_value};
+use resonance_core::columns::{LibraryColumn, generic_tag_fields, tag_sort_value};
+use resonance_core::filter::{Condition, FieldFilter, FilterTerm};
 use resonance_core::key::Key;
 use resonance_core::library::{TagField, bpm_from_tags, title_from_tags};
 use resonance_core::search::{
@@ -28,6 +29,8 @@ pub struct LibraryFacets {
 
 pub(crate) struct AssetSearchMeta<'a> {
     pub title: &'a str,
+    /// Whether a tag gave the title, rather than the file name.
+    pub title_tagged: bool,
     pub artist: Option<&'a str>,
     pub album: Option<&'a str>,
     pub genre: Option<&'a str>,
@@ -61,6 +64,7 @@ impl<'a> AssetSearchMeta<'a> {
 
         Self {
             title: title_from_tags(path, tags),
+            title_tagged: trimmed_tag(TagField::Title).is_some(),
             artist: trimmed_tag(TagField::Artist),
             album: trimmed_tag(TagField::Album),
             genre: trimmed_tag(TagField::Genre),
@@ -120,7 +124,11 @@ fn write_asset_metadata(
 ) -> Result<(), DbError> {
     let meta = AssetSearchMeta::from_path_and_tags(path, tags);
     write_search_columns(tx, asset_id, path, &meta, delete_existing_fts)?;
-    write_table_columns(tx, asset_id, &meta, tags)
+    // Schema v16 added it, so the earlier backfills that share the writers above leave it out.
+    tx.prepare_cached("UPDATE asset SET title_tagged = ?2 WHERE id = ?1")?
+        .execute(params![asset_id, meta.title_tagged])?;
+    write_table_columns(tx, asset_id, &meta, tags)?;
+    write_missing_tags(tx, asset_id, tags)
 }
 
 /// The sort, filter and search columns schema v4 added.
@@ -218,6 +226,30 @@ pub(crate) fn write_tag_values(
             .and_then(|(_, value)| tag_sort_value(value));
         if let Some(value) = value {
             add.execute(params![asset_id, field.name(), value])?;
+        }
+    }
+    Ok(())
+}
+
+/// Replaces the asset's rows in the missing tag index: the tags without a column of their own
+/// that it lacks. Schema v16 added the index, so the v15 backfill leaves it out.
+pub(crate) fn write_missing_tags(
+    tx: &Transaction<'_>,
+    asset_id: i64,
+    tags: &[(TagField, String)],
+) -> Result<(), DbError> {
+    tx.prepare_cached("DELETE FROM asset_tag_missing WHERE asset_id = ?1")?
+        .execute([asset_id])?;
+    let mut add = tx.prepare_cached(
+        "INSERT INTO asset_tag_missing (asset_id, field, included)
+         SELECT ?1, ?2, included FROM asset WHERE id = ?1",
+    )?;
+    for field in generic_tag_fields() {
+        let has = tags
+            .iter()
+            .any(|(tag, value)| *tag == field && tag_sort_value(value).is_some());
+        if !has {
+            add.execute(params![asset_id, field.name()])?;
         }
     }
     Ok(())
@@ -331,6 +363,39 @@ impl Database {
         Ok(count)
     }
 
+    /// A page of matching tracks and how many match in all. A first page shorter than `limit`
+    /// holds every match, so it is the count and the count query is not run.
+    pub fn query_tracks_and_total(
+        &self,
+        query: &TrackQuery,
+        offset: u32,
+        limit: u32,
+    ) -> Result<(Vec<TrackRow>, u32), DbError> {
+        let rows = self.query_tracks_page(query, offset, limit)?;
+        let total = if offset == 0 && (rows.len() as u64) < u64::from(limit) {
+            rows.len() as u32
+        } else {
+            self.query_track_count(query)?
+        };
+        Ok((rows, total))
+    }
+
+    /// How many tracks each of the query's filter terms keeps on its own, inside the query's
+    /// search, pill and collection.
+    pub fn query_filter_counts(&self, query: &TrackQuery) -> Result<Vec<u32>, DbError> {
+        query
+            .filters
+            .iter()
+            .map(|term| {
+                let alone = TrackQuery {
+                    filters: vec![term.clone()],
+                    ..query.clone()
+                };
+                self.query_track_count(&alone)
+            })
+            .collect()
+    }
+
     pub fn set_track_favourite(&mut self, track_id: i64, favourite: bool) -> Result<bool, DbError> {
         let changed = self.connection.execute(
             "UPDATE track SET favourite = ?2 WHERE id = ?1",
@@ -383,6 +448,18 @@ impl Database {
         })
     }
 
+    /// Query plan steps for counting `query`'s tracks.
+    pub fn explain_track_count(&self, query: &TrackQuery) -> Result<Vec<String>, DbError> {
+        let (sql, params) = build_query_sql(query, true);
+        let mut stmt = self
+            .connection
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
+        let steps = stmt
+            .query_map(params_from_iter(params), |row| row.get(3))?
+            .collect::<Result<Vec<String>, _>>()?;
+        Ok(steps)
+    }
+
     /// Query plan steps (`EXPLAIN QUERY PLAN`) for tests verifying index usage.
     pub fn explain_track_query(
         &self,
@@ -409,6 +486,283 @@ impl Database {
 fn bind_param(params: &mut Vec<Value>, value: Value) -> String {
     params.push(value);
     format!("?{}", params.len())
+}
+
+/// With `plain`, the conditions keep SQLite off the column indexes. Several terms together are
+/// quickest as one read of the whole table: following one term's index read each of its tracks
+/// from the table in turn, 11,000 of them took 35 ms, and a set of ids for each term took longer
+/// still.
+fn term_sql(term: &FilterTerm, plain: bool, params: &mut Vec<Value>) -> String {
+    let parts: Vec<String> = term
+        .filters()
+        .iter()
+        .map(|filter| filter_sql(filter, plain, params))
+        .collect();
+    if parts.len() == 1 {
+        parts.into_iter().next().unwrap_or_default()
+    } else {
+        format!("({})", parts.join(" OR "))
+    }
+}
+
+/// Where a column's value lives, and how a filter's numbers turn into the stored units.
+enum FilterTarget {
+    /// A column on `asset`, or an expression over one. `scale` turns the filter's unit into the
+    /// stored one.
+    Column {
+        sql: &'static str,
+        scale: f64,
+        missing: Option<&'static str>,
+    },
+    /// A generic tag, held in `asset_tag_value` and `asset_tag_missing`.
+    Tag(&'static str),
+    Artwork,
+    /// When the track came in, kept on `track`.
+    Added,
+}
+
+fn filter_target(column: LibraryColumn) -> FilterTarget {
+    let column_of = |sql: &'static str| FilterTarget::Column {
+        sql,
+        scale: 1.0,
+        missing: None,
+    };
+    match column {
+        LibraryColumn::Title => FilterTarget::Column {
+            sql: "asset.sort_title",
+            scale: 1.0,
+            missing: Some("asset.title_tagged = 0"),
+        },
+        LibraryColumn::Artist => column_of("asset.sort_artist"),
+        LibraryColumn::Album => column_of("asset.tag_album"),
+        LibraryColumn::Genre => column_of("asset.tag_genre"),
+        LibraryColumn::Label => column_of("asset.tag_label"),
+        LibraryColumn::CatNo => column_of("asset.tag_catno"),
+        LibraryColumn::Comment => column_of("asset.tag_comment"),
+        LibraryColumn::Composer => column_of("asset.tag_composer"),
+        LibraryColumn::Remixer => column_of("asset.tag_remixer"),
+        LibraryColumn::Mix => column_of("asset.tag_mix"),
+        LibraryColumn::Key => column_of("asset.tag_key"),
+        LibraryColumn::Format => column_of("asset.format"),
+        LibraryColumn::Bpm => column_of("asset.tag_bpm"),
+        LibraryColumn::Year => column_of("asset.tag_year"),
+        LibraryColumn::Time => FilterTarget::Column {
+            sql: "asset.duration_ms",
+            scale: 1000.0,
+            missing: None,
+        },
+        LibraryColumn::Bitrate => column_of("asset.bitrate_kbps"),
+        LibraryColumn::SampleRate => column_of("asset.sample_rate"),
+        LibraryColumn::BitDepth => column_of("asset.bit_depth"),
+        LibraryColumn::Channels => column_of("asset.channels"),
+        LibraryColumn::FileSize => column_of("asset.size_bytes"),
+        LibraryColumn::Modified => FilterTarget::Column {
+            sql: "asset.modified_ns",
+            scale: 1_000_000.0,
+            missing: None,
+        },
+        LibraryColumn::Added => FilterTarget::Added,
+        LibraryColumn::Path => column_of("asset.path"),
+        // The path inside the music folder up to its last slash.
+        LibraryColumn::Folder => column_of("rtrim(asset.path, replace(asset.path, '/', ''))"),
+        LibraryColumn::Artwork => FilterTarget::Artwork,
+        LibraryColumn::Tag(field) => FilterTarget::Tag(field.name()),
+    }
+}
+
+fn like_pattern(text: &str, leading: bool) -> String {
+    let mut pattern = String::with_capacity(text.len() + 2);
+    if leading {
+        pattern.push('%');
+    }
+    for ch in text.chars() {
+        if matches!(ch, '\\' | '%' | '_') {
+            pattern.push('\\');
+        }
+        pattern.push(ch);
+    }
+    pattern.push('%');
+    pattern
+}
+
+fn text_list(values: &[String], params: &mut Vec<Value>) -> String {
+    values
+        .iter()
+        .map(|value| bind_param(params, Value::Text(value.clone())))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn filter_sql(filter: &FieldFilter, plain: bool, params: &mut Vec<Value>) -> String {
+    match filter_target(filter.column) {
+        FilterTarget::Added => {
+            let ns = |value: f64, params: &mut Vec<Value>| {
+                bind_param(params, Value::Real(value * 1_000_000.0))
+            };
+            let test = match &filter.condition {
+                Condition::Range { min, max } => {
+                    let mut bounds = Vec::new();
+                    if let Some(min) = min {
+                        bounds.push(format!("added.added_ns >= {}", ns(*min, params)));
+                    }
+                    if let Some(max) = max {
+                        bounds.push(format!("added.added_ns <= {}", ns(*max, params)));
+                    }
+                    bounds.join(" AND ")
+                }
+                Condition::Below(value) => format!("added.added_ns < {}", ns(*value, params)),
+                Condition::Above(value) => format!("added.added_ns > {}", ns(*value, params)),
+                // Every track has a date added, and the core offers nothing else for it.
+                _ => return "1".to_owned(),
+            };
+            format!(
+                "EXISTS (SELECT 1 FROM track AS added WHERE added.id = asset.track_id AND {test})"
+            )
+        }
+        FilterTarget::Artwork => {
+            let user =
+                "EXISTS (SELECT 1 FROM user_artwork WHERE user_artwork.track_id = asset.track_id)";
+            match filter.condition {
+                Condition::Missing => format!("(asset.artwork_hash IS NULL AND NOT {user})"),
+                _ => format!("(asset.artwork_hash IS NOT NULL OR {user})"),
+            }
+        }
+        FilterTarget::Tag(field) => tag_filter_sql(field, &filter.condition, params),
+        FilterTarget::Column {
+            sql,
+            scale,
+            missing,
+        } => {
+            // A unary plus keeps the column's collation and hides its indexes.
+            let sql = if plain {
+                format!("+{sql}")
+            } else {
+                sql.to_owned()
+            };
+            let missing = missing.map(|test| {
+                if plain {
+                    format!("+{test}")
+                } else {
+                    test.to_owned()
+                }
+            });
+            let number = |value: f64, params: &mut Vec<Value>| {
+                bind_param(params, Value::Real(value * scale))
+            };
+            match &filter.condition {
+                Condition::Missing => missing.unwrap_or_else(|| format!("{sql} IS NULL")),
+                Condition::Present => missing.map_or_else(
+                    || format!("{sql} IS NOT NULL"),
+                    |test| format!("NOT ({test})"),
+                ),
+                Condition::Contains(text) => {
+                    let slot = bind_param(params, Value::Text(like_pattern(text, true)));
+                    format!("{sql} LIKE {slot} ESCAPE '\\'")
+                }
+                Condition::StartsWith(text) => {
+                    let slot = bind_param(params, Value::Text(like_pattern(text, false)));
+                    format!("{sql} LIKE {slot} ESCAPE '\\'")
+                }
+                Condition::Is(text) => {
+                    let slot = bind_param(params, Value::Text(text.clone()));
+                    format!("{sql} = {slot}")
+                }
+                Condition::IsNot(text) => {
+                    let slot = bind_param(params, Value::Text(text.clone()));
+                    format!("({sql} IS NULL OR {sql} <> {slot})")
+                }
+                Condition::AnyOf(values) => {
+                    let values = choice_values(filter.column, values);
+                    format!("{sql} IN ({})", text_list(&values, params))
+                }
+                Condition::NoneOf(values) => {
+                    let values = choice_values(filter.column, values);
+                    format!(
+                        "({sql} IS NULL OR {sql} NOT IN ({}))",
+                        text_list(&values, params)
+                    )
+                }
+                Condition::Range { min, max } => {
+                    let mut bounds = Vec::new();
+                    if let Some(min) = min {
+                        bounds.push(format!("{sql} >= {}", number(*min, params)));
+                    }
+                    if let Some(max) = max {
+                        bounds.push(format!("{sql} <= {}", number(*max, params)));
+                    }
+                    format!("({})", bounds.join(" AND "))
+                }
+                Condition::Below(value) => format!("{sql} < {}", number(*value, params)),
+                Condition::Above(value) => format!("{sql} > {}", number(*value, params)),
+            }
+        }
+    }
+}
+
+/// A key matches every spelling stored tags may use for it.
+fn choice_values(column: LibraryColumn, values: &[String]) -> Vec<String> {
+    if column == LibraryColumn::Key {
+        key_filter_values(values)
+    } else {
+        values.to_vec()
+    }
+}
+
+/// A generic tag condition. Values compare the way the tag sorts, with a leading number padded,
+/// and text matches read the value without that padding.
+fn tag_filter_sql(field: &'static str, condition: &Condition, params: &mut Vec<Value>) -> String {
+    let field_slot = bind_param(params, Value::Text(field.to_owned()));
+    // A set of ids read from the tag index once, rather than a lookup for every track.
+    let has = |test: &str| {
+        format!(
+            "asset.id IN (SELECT asset_tag_value.asset_id FROM asset_tag_value \
+             WHERE asset_tag_value.field = {field_slot} AND asset_tag_value.included = 1{test})"
+        )
+    };
+    let shown = "ltrim(asset_tag_value.sort_value, '0')";
+    match condition {
+        Condition::Missing => format!(
+            "asset.id IN (SELECT asset_tag_missing.asset_id FROM asset_tag_missing \
+             WHERE asset_tag_missing.field = {field_slot} AND asset_tag_missing.included = 1)"
+        ),
+        Condition::Present => has(""),
+        Condition::Contains(text) => {
+            let slot = bind_param(params, Value::Text(like_pattern(text, true)));
+            has(&format!(" AND {shown} LIKE {slot} ESCAPE '\\'"))
+        }
+        Condition::StartsWith(text) => {
+            let slot = bind_param(params, Value::Text(like_pattern(text, false)));
+            has(&format!(" AND {shown} LIKE {slot} ESCAPE '\\'"))
+        }
+        Condition::Is(text) => {
+            let slot = bind_param(params, Value::Text(FieldFilter::tag_value(text)));
+            has(&format!(" AND asset_tag_value.sort_value = {slot}"))
+        }
+        Condition::IsNot(text) => {
+            let slot = bind_param(params, Value::Text(FieldFilter::tag_value(text)));
+            format!(
+                "NOT {}",
+                has(&format!(" AND asset_tag_value.sort_value = {slot}"))
+            )
+        }
+        Condition::AnyOf(values) | Condition::NoneOf(values) => {
+            let padded: Vec<String> = values
+                .iter()
+                .map(|value| FieldFilter::tag_value(value))
+                .collect();
+            let test = has(&format!(
+                " AND asset_tag_value.sort_value IN ({})",
+                text_list(&padded, params)
+            ));
+            if matches!(condition, Condition::NoneOf(_)) {
+                format!("NOT {test}")
+            } else {
+                test
+            }
+        }
+        // Generic tags are text, so the core never builds a number condition for one.
+        Condition::Range { .. } | Condition::Below(_) | Condition::Above(_) => "0".to_owned(),
+    }
 }
 
 fn build_query_sql(query: &TrackQuery, count_only: bool) -> (String, Vec<Value>) {
@@ -453,65 +807,29 @@ fn build_query_sql(query: &TrackQuery, count_only: bool) -> (String, Vec<Value>)
         conditions.push("asset.missing_since IS NOT NULL".to_owned());
     }
 
-    if let Some(bpm_min) = query.bpm_min.filter(|value| value.is_finite()) {
-        let slot = bind_param(&mut params, Value::Real(bpm_min));
-        conditions.push(format!("asset.tag_bpm >= {slot}"));
-    }
-    if let Some(bpm_max) = query.bpm_max.filter(|value| value.is_finite()) {
-        let slot = bind_param(&mut params, Value::Real(bpm_max));
-        conditions.push(format!("asset.tag_bpm <= {slot}"));
-    }
-    if let Some(year_min) = query.year_min {
-        let slot = bind_param(&mut params, Value::Integer(i64::from(year_min)));
-        conditions.push(format!("asset.tag_year >= {slot}"));
-    }
-    if let Some(year_max) = query.year_max {
-        let slot = bind_param(&mut params, Value::Integer(i64::from(year_max)));
-        conditions.push(format!("asset.tag_year <= {slot}"));
-    }
-    if let Some(label) = query
-        .label
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        let slot = bind_param(&mut params, Value::Text(label.to_owned()));
-        conditions.push(format!("asset.tag_label = {slot}"));
-    }
-
-    let expanded_keys = key_filter_values(&query.keys);
-    let has_keys = !expanded_keys.is_empty();
-    if has_keys {
-        let placeholders: Vec<String> = expanded_keys
-            .into_iter()
-            .map(|value| bind_param(&mut params, Value::Text(value)))
-            .collect();
-        conditions.push(format!("asset.tag_key IN ({})", placeholders.join(", ")));
-    }
-
-    if !query.formats.is_empty() {
-        let placeholders: Vec<String> = query
-            .formats
+    if !query.filters.is_empty() {
+        let plain = query.filters.len() > 1;
+        let terms: Vec<String> = query
+            .filters
             .iter()
-            .map(|format| bind_param(&mut params, Value::Text(format.name().to_owned())))
+            .map(|term| term_sql(term, plain, &mut params))
             .collect();
-        conditions.push(format!("asset.format IN ({})", placeholders.join(", ")));
+        if count_only {
+            conditions.extend(terms);
+        } else {
+            // The filters pick their tracks in one pass, and the page then walks its order's
+            // index checking each id against that set. Tested in the walk itself, each row was
+            // read from the table in path order, and a filter that kept few tracks read all
+            // 100,000 that way: 320 ms.
+            conditions.push(format!(
+                "asset.id IN (SELECT asset.id FROM asset WHERE asset.included = 1 AND {})",
+                terms.join(" AND ")
+            ));
+        }
     }
-
     // Choose join order to keep SQLite walking the matching index without a temp sort.
-    let has_selective_filter = query.pill == FilterPill::Favourites
-        || query.collection_id.is_some()
-        || query.missing_only
-        || query.bpm_min.is_some()
-        || query.bpm_max.is_some()
-        || query.year_min.is_some()
-        || query.year_max.is_some()
-        || query
-            .label
-            .as_deref()
-            .is_some_and(|label| !label.trim().is_empty())
-        || has_keys
-        || !query.formats.is_empty();
+    let has_selective_filter =
+        query.pill == FilterPill::Favourites || query.collection_id.is_some() || query.missing_only;
 
     let from = if fts_match.is_some() {
         let mut from =

@@ -323,7 +323,7 @@ impl fmt::Display for LibraryColumn {
     }
 }
 
-fn tag_label(field: TagField) -> &'static str {
+pub(crate) fn tag_label(field: TagField) -> &'static str {
     match field {
         TagField::Title => "Title",
         TagField::Artist => "Artist",

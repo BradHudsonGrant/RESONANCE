@@ -303,9 +303,9 @@ fn collection_queries_combine_search_filters_sorts_without_temp_btree() {
     let search_q = TrackQuery {
         collection_id: Some(col.id),
         text: Some("bicep".to_owned()),
-        bpm_min: Some(120.0),
-        bpm_max: Some(135.0),
-        formats: vec![AudioFormat::Flac],
+        filters: ["bpm 120-135", "format flac"]
+            .map(|text| resonance_core::filter::parse_command(text).expect("filter reads"))
+            .to_vec(),
         sort: TrackSortField::Bpm,
         direction: SortDirection::Desc,
         ..TrackQuery::default()

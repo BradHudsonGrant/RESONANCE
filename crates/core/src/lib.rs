@@ -1,6 +1,7 @@
 pub mod artwork;
 pub mod collections;
 pub mod columns;
+pub mod filter;
 pub mod identify;
 pub mod identity;
 pub mod jobs;
@@ -10,6 +11,7 @@ pub mod library;
 pub mod meter;
 pub mod preview;
 pub mod providers;
+pub mod quick_filters;
 pub mod search;
 pub mod staging;
 pub mod template;
