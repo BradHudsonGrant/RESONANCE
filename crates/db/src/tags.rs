@@ -93,7 +93,7 @@ fn user_tags_of_track(
     )
 }
 
-fn file_tags_of_asset(
+pub(crate) fn file_tags_of_asset(
     connection: &Connection,
     asset_id: i64,
 ) -> Result<Vec<(TagField, String)>, DbError> {
@@ -104,7 +104,10 @@ fn file_tags_of_asset(
     )
 }
 
-fn primary_asset(connection: &Connection, track_id: i64) -> Result<Option<i64>, DbError> {
+pub(crate) fn primary_asset(
+    connection: &Connection,
+    track_id: i64,
+) -> Result<Option<i64>, DbError> {
     Ok(connection
         .prepare_cached(
             "SELECT id FROM asset WHERE track_id = ?1

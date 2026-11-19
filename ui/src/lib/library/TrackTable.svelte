@@ -262,6 +262,10 @@
     });
   }
 
+  export function checkedTrackIds(): number[] {
+    return Array.from(checkedIds);
+  }
+
   export function removeSelectionFromCollection() {
     if (activeCollection) {
       void removeTracksFromCollection(activeCollection.id, Array.from(checkedIds));

@@ -208,6 +208,16 @@ impl Database {
         load_tracks_by_ids(&self.connection, &ids)
     }
 
+    /// Every included file matching `query`, in its order.
+    pub fn query_asset_ids(&self, query: &TrackQuery) -> Result<Vec<i64>, DbError> {
+        let (sql, params) = build_query_sql(query, false);
+        let mut stmt = self.connection.prepare(&sql)?;
+        let ids = stmt
+            .query_map(params_from_iter(params), |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        Ok(ids)
+    }
+
     /// Number of included tracks matching `query`.
     pub fn query_track_count(&self, query: &TrackQuery) -> Result<u32, DbError> {
         let (sql, params) = build_query_sql(query, true);

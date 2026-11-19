@@ -5,7 +5,9 @@
   import SegmentedTabs, { type SegmentedTabItem } from '../design/SegmentedTabs.svelte';
   import Sheet from '../design/Sheet.svelte';
   import { getTheme, setTheme, type Theme } from '../design/theme';
+  import FilenameSettings from '../library/FilenameSettings.svelte';
   import { keyNotation, setKeyNotation, type KeyNotation } from '../library/key-notation.svelte';
+  import type { RenamePreviewClient } from '../library/rename-template.svelte';
   import SourcesSettings, { type SourcesClient } from '../library/SourcesSettings.svelte';
   import ProviderKeysSettings, { type ProviderKeysClient } from './ProviderKeysSettings.svelte';
 
@@ -13,6 +15,7 @@
     open: boolean;
     sourcesClient?: SourcesClient;
     providerKeysClient?: ProviderKeysClient;
+    renameClient?: RenamePreviewClient;
     sourcesRevision?: number;
     onsourceschanged?: () => void;
   }
@@ -21,6 +24,7 @@
     open = $bindable(false),
     sourcesClient,
     providerKeysClient,
+    renameClient,
     sourcesRevision = 0,
     onsourceschanged,
   }: Props = $props();
@@ -68,6 +72,17 @@
       />
       <p class="note">Sorting and key filters work the same in every notation.</p>
     </section>
+
+    {#if renameClient}
+      <ModularDivider />
+
+      <section class="section">
+        <div class="section-head">
+          <MonoLabel text="File names" tone="secondary" />
+        </div>
+        <FilenameSettings client={renameClient} />
+      </section>
+    {/if}
 
     <ModularDivider />
 

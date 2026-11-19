@@ -34,12 +34,19 @@ A selected row sits on Raised inside a 1 px control border frame with 6 px corne
 
 ## Selection actions
 
-Selection never moves the table. While any track is ticked, the selection actions take the place of the filter pills, in the same slot: the count ("3 selected"), Select all, Add to collection, Remove from the open collection, and Clear. When the selection clears, the pills come back. Nothing is inserted above the table, so the header and every row stay where they were and the pointer stays on the row it clicked. No bar, chip row or banner may appear above the table and push it down.
+Selection never moves the table. While any track is ticked, the selection actions take the place of the filter pills, in the same slot: the count ("3 selected"), Select all, Add to collection, Rename, Remove from the open collection, and Clear. When the selection clears, the pills come back. Nothing is inserted above the table, so the header and every row stay where they were and the pointer stays on the row it clicked. No bar, chip row or banner may appear above the table and push it down.
 
 - The pills stay in the layout, hidden, so the slot keeps their height.
 - Select all stays in place and turns disabled once every track is ticked. The count uses tabular figures and a fixed minimum width, so going from 9 to 10 does not move the buttons.
 - Escape clears the selection unless a menu or sheet is open, and focus goes back to the table. The count is a polite live region.
 - In forced colours the actions carry a 2 px Highlight mark at their left, so they read as different from the pills.
+
+
+## Renaming files
+
+Rename files, in the header beside Scan folder, opens the Rename sheet for the tracks the table shows: the open collection, the filtered view, or the whole library. Rename in the selection actions opens it for the ticked tracks. The sheet names the scope and the file count first, then the template field, its tokens, and a preview of up to 50 files with problems first: old name, new name and a status (Ready, No change, Name taken, No artist, Folder path too long, File missing). A line under it counts ready, unchanged and blocked files. The primary button says what it will do ("Rename 1,240 files") and is off when nothing is ready. After a rename, or once a large batch has finished in Activity, the sheet offers Undo for the last rename.
+
+Settings has the same template field under File names, previewing the first three tracks. It holds the template the sheet starts from. Nothing is renamed from Settings.
 
 ## Inspector
 
