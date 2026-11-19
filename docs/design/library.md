@@ -32,6 +32,47 @@ The table is a container (`container-type: inline-size`), so it drops columns by
 
 A selected row sits on Raised inside a 1 px control border frame with 6 px corners. Its tick box is filled in Text with a dark tick, its status cell shows the play icon, and the 2 px accent mark sits at its left. The accent goes nowhere else on the row.
 
+## Columns
+
+The table opens with Title, Artist, BPM, Key and Time, the same five a new library has always had. Every other column is one step away and never shown until the user picks it. The rules live in `crates/core/src/columns.rs` and the choice is kept in the library database, so it is the same after a restart.
+
+### Column chooser
+
+A 24 px columns button sits in the header cell above the row actions, and right-clicking anywhere on the header opens the same menu under the pointer. It is a `role="menu"` popover on Surface with a 1 px control border:
+
+- A search field at the top. Typing narrows the list by column name.
+- The columns in five groups, each under a mono label: Track (Title, Artist, BPM, Key, Time, Composer, Remixer, Mix, Comment), Release (Album, Genre, Label, Catalogue number, Year, Artwork), Audio (Format, Bitrate, Sample rate, Bit depth, Channels), File (File size, Date added, Date modified, Path, Folder) and Tags. Tags lists the tags the library holds that have no column of their own, as "Tag: Album artist", "Tag: Track number" and so on, and only the ones at least one track has.
+- Each column is a `menuitemcheckbox`. Title is always ticked and cannot be cleared.
+- Under the list, "Wrap long text" as a checkbox, and "Reset to default", which puts back the five columns, their widths, library order and no wrap.
+
+The menu takes focus on its first item, and `ArrowDown`, `ArrowUp`, `Home` and `End` move through it. `Escape` closes it and gives focus back to the button or the header that opened it. A ticked or cleared column changes the table at once and the menu stays open.
+
+### Order and width
+
+A header can be dragged left or right to move its column, and the other headers part to show where it will land. With a header focused, `Alt+Left` and `Alt+Right` move it one place.
+
+Every column has a 6 px resize handle on its right edge, a `separator` in the tab order with its width as its value. Dragging it, or `ArrowLeft` and `ArrowRight` while it has focus (8 px a step, 1 px with `Shift`), sets the width between 40 and 640 px. A double click, or `Enter` on the handle, fits the column to its widest value in view. Title and Artist share the room the other columns leave until the user gives them a width.
+
+### Column states
+
+- A header reads in Text 2. Hover and a sort turn it to Text.
+- A sorted header shows an 11 px chevron. A secondary sort shows a smaller chevron and a mono "2" beside it, so the two read apart.
+- A header being dragged sits on Raised with the control border. The rest keep their place until it lands.
+- A resize handle shows a 1 px control border line on hover, on focus and while dragged. At rest it is invisible, so the header stays calm.
+- Artwork is a 24 px thumbnail with 4 px corners, the same picture as the inspector. A track without one shows an empty Surface 2 square, so the rows keep one shape.
+
+### Sort
+
+A click on a header, or `Enter` on it, sorts by that column, then reverses it, then goes back to library order. `Shift` with either adds the column as the secondary sort, which orders the tracks that tie on the first, and cycles it the same way without touching the first. `#` reverses library order, and sorting by it clears any other sort. Empty values go last in both directions. Path and Folder both sort by folder and then by file, which is the library order. Artwork does not sort.
+
+### Density and wrap
+
+Wrap is off by default. Off, every row is 33 px, a value too long for its column ends in an ellipsis and its full text shows in a tooltip. On, a row grows to fit its longest value up to three lines, and anything longer is cut on the third line with an ellipsis. Rows that wrap are measured as they are drawn, so scrolling stays smooth and the scroll bar settles as the table is read.
+
+### Narrow tables
+
+The defaults still drop the way the track table above says. Columns the user picked give way first, the last picked first, as soon as they do not fit at their widths. When any have dropped, a "+N" mono button sits beside the columns button and opens the chooser, where each dropped column is marked "Hidden, too narrow". The columns come back in reverse order as the table widens. Nothing moves above the table, and the header keeps its height.
+
 ## Selection actions
 
 Selection never moves the table. While any track is ticked, the selection actions take the place of the filter pills, in the same slot: the count ("3 selected"), Select all, Add to collection, Rename, Remove from the open collection, and Clear. When the selection clears, the pills come back. Nothing is inserted above the table, so the header and every row stay where they were and the pointer stays on the row it clicked. No bar, chip row or banner may appear above the table and push it down.
