@@ -1,3 +1,4 @@
+pub mod artwork;
 mod collections;
 pub mod command;
 pub mod data_folder;
@@ -53,6 +54,7 @@ struct PreviewTrackMeta {
     track_id: i64,
     title: String,
     artist: Option<String>,
+    artwork: Option<String>,
     db_duration_ms: Option<u64>,
 }
 
@@ -412,6 +414,21 @@ impl Api {
             Request::SkipProposal { track_id, fields } => self
                 .skip_proposal(track_id, &fields)
                 .map(Response::SkipProposal),
+            Request::TrackArtwork { track_id } => {
+                self.track_artwork(track_id).map(Response::TrackArtwork)
+            }
+            Request::AcceptProposedArtwork { track_id } => self
+                .accept_proposed_artwork(track_id)
+                .map(Response::AcceptProposedArtwork),
+            Request::SkipProposedArtwork { track_id } => self
+                .skip_proposed_artwork(track_id)
+                .map(Response::SkipProposedArtwork),
+            Request::SetTrackArtwork {
+                track_id,
+                image_base64,
+            } => self
+                .set_track_artwork(track_id, &image_base64)
+                .map(Response::SetTrackArtwork),
             Request::SetUserTag { track_ids, edits } => self
                 .set_user_tag(&track_ids, &edits)
                 .map(Response::SetUserTag),
@@ -556,6 +573,7 @@ impl Api {
         let shown = shown_file(&row);
         let title = shown.title().to_owned();
         let artist = shown.tag(TagField::Artist).map(str::to_owned);
+        let artwork = row.artwork.clone();
         let db_duration_ms = row.file.audio.map(|audio| audio.duration_ms);
         let status = self
             .mix
@@ -575,6 +593,7 @@ impl Api {
                 track_id,
                 title,
                 artist,
+                artwork,
                 db_duration_ms,
             });
         }
@@ -604,6 +623,7 @@ fn preview_state_from(meta: &Option<PreviewTrackMeta>, status: PreviewStatus) ->
         track_id: matched.map(|entry| entry.track_id),
         title: matched.map(|entry| entry.title.clone()),
         artist: matched.and_then(|entry| entry.artist.clone()),
+        artwork: matched.and_then(|entry| entry.artwork.clone()),
         playing: status.playing,
         position_ms: status.position_ms,
         duration_ms,
@@ -751,6 +771,7 @@ pub(crate) fn library_track(row: &TrackRow) -> LibraryTrack {
             })
             .collect(),
         missing_since: row.missing_since,
+        artwork: row.artwork.clone(),
     }
 }
 

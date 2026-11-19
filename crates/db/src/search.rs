@@ -526,7 +526,7 @@ pub(crate) fn load_tracks_by_ids(
         "SELECT asset.id, asset.track_id, source.folder, asset.path, asset.size_bytes,
                 asset.modified_ns, asset.format, asset.duration_ms, asset.sample_rate,
                 asset.channels, asset.bit_depth, asset.bitrate_kbps, track.favourite,
-                asset.missing_since
+                asset.missing_since, asset.artwork_hash
          FROM asset
          JOIN source ON source.id = asset.source_id
          JOIN track ON track.id = asset.track_id
@@ -564,5 +564,6 @@ pub(crate) fn load_tracks_by_ids(
     }
     crate::collections::populate_track_collections(connection, &mut ordered)?;
     crate::tags::populate_user_tags(connection, &mut ordered)?;
+    crate::artwork::populate_user_artwork(connection, &mut ordered)?;
     Ok(ordered)
 }

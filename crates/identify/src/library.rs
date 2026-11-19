@@ -123,15 +123,21 @@ pub fn run_online_pass(
         if abort.load(Ordering::Acquire) {
             break;
         }
-        let mut database = database.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut library = database.lock().unwrap_or_else(PoisonError::into_inner);
         for identification in &identified {
-            record(&mut database, identification)?;
+            record(&mut library, identification)?;
             report.looked_up += 1;
             report.confident += u64::from(identification.is_confident());
             report.needs_url += u64::from(identification.needs_url());
             report.incomplete += u64::from(!identification.is_complete());
         }
-        drop(database);
+        drop(library);
+        for identification in &identified {
+            if abort.load(Ordering::Acquire) {
+                break;
+            }
+            propose_artwork(database, pipeline, identification)?;
+        }
         total = total.max(report.looked_up);
         progress(report.looked_up, total);
     }
@@ -160,6 +166,7 @@ pub fn identify_track_with_url(
         &mut database.lock().unwrap_or_else(PoisonError::into_inner),
         &identification,
     )?;
+    propose_artwork(database, pipeline, &identification)?;
     Ok(Some(identification))
 }
 
@@ -170,6 +177,50 @@ fn record(database: &mut Database, identification: &Identification) -> Result<()
     if let Some(best) = &identification.best {
         database.store_proposals(identification.track_id, &proposals_from(best))?;
     }
+    Ok(())
+}
+
+/// Stages the best release's front cover for a track that shows no picture yet. A picture
+/// already fetched from the same address is reused, so the tracks of a release fetch it once.
+/// A cover that cannot be fetched or is not a JPEG or PNG is left out; it never fails the pass.
+fn propose_artwork(
+    database: &Mutex<Database>,
+    pipeline: &Pipeline,
+    identification: &Identification,
+) -> Result<(), IdentifyError> {
+    let Some(best) = &identification.best else {
+        return Ok(());
+    };
+    let Some(url) = &best.candidate.artwork_url else {
+        return Ok(());
+    };
+    let track_id = identification.track_id;
+    let (store, fetched) = {
+        let library = database.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(store) = library.artwork_store() else {
+            return Ok(());
+        };
+        if library.track_artwork(track_id)?.is_some() {
+            return Ok(());
+        }
+        (store, library.artwork_fetched_from(url)?)
+    };
+    let artwork = match fetched {
+        Some(artwork) => artwork,
+        None => {
+            let Ok(Some(bytes)) = pipeline.fetch_artwork(&best.candidate.provider, url) else {
+                return Ok(());
+            };
+            match store.put(&bytes) {
+                Ok(artwork) => artwork,
+                Err(_) => return Ok(()),
+            }
+        }
+    };
+    database
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .store_proposed_artwork(track_id, &artwork, &best.candidate.provider, url)?;
     Ok(())
 }
 
@@ -232,6 +283,7 @@ fn candidate_json(candidate: &Candidate) -> Value {
         "recording_id": candidate.recording_id,
         "release_id": candidate.release_id,
         "url": candidate.url,
+        "artwork_url": candidate.artwork_url,
         "fingerprint_score": candidate.fingerprint_score,
         "user_supplied": candidate.user_supplied,
     })

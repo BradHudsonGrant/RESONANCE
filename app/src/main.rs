@@ -11,9 +11,11 @@ use resonance_api::command::{Request, Response};
 use resonance_api::data_folder::default_data_folder;
 use resonance_api::error::ApiError;
 use resonance_db::{Database, FILE_NAME};
+use tauri::http::header::{CACHE_CONTROL, CONTENT_TYPE};
+use tauri::http::{Request as ProtocolRequest, Response as ProtocolResponse, StatusCode};
 use tauri::utils::config::AppDirectoriesOverride;
 use tauri::webview::NewWindowResponse;
-use tauri::{Emitter, State, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, Manager, State, Url, WebviewUrl, WebviewWindowBuilder};
 
 #[derive(Parser)]
 #[command(name = "resonance-app", version, about = "Resonance for the desktop")]
@@ -82,6 +84,29 @@ async fn pick_folder() -> Result<Option<String>, ApiError> {
     .map_err(ApiError::internal)?
 }
 
+/// A stored picture for `artwork://<hash>`, the desktop's way to the same files the local
+/// socket serves at `/artwork/<hash>`.
+fn artwork_response(
+    api: Option<&Api>,
+    request: &ProtocolRequest<Vec<u8>>,
+) -> ProtocolResponse<Vec<u8>> {
+    let hash = request.uri().path().trim_start_matches('/');
+    let found = api
+        .and_then(|api| api.artwork_file(hash))
+        .and_then(|file| Some((file.mime, std::fs::read(&file.path).ok()?)));
+    match found {
+        Some((mime, bytes)) => ProtocolResponse::builder()
+            .header(CONTENT_TYPE, mime)
+            .header(CACHE_CONTROL, "private, max-age=31536000, immutable")
+            .body(bytes)
+            .unwrap_or_default(),
+        None => ProtocolResponse::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Vec::new())
+            .unwrap_or_default(),
+    }
+}
+
 fn local_page(url: &Url) -> bool {
     url.username().is_empty()
         && url.password().is_none()
@@ -111,6 +136,18 @@ fn run(options: Options) -> Result<(), AppError> {
 
     tauri::Builder::default()
         .manage(api)
+        .register_asynchronous_uri_scheme_protocol("artwork", |context, request, responder| {
+            let api = context
+                .app_handle()
+                .state::<Result<Arc<Api>, ApiError>>()
+                .inner()
+                .as_ref()
+                .ok()
+                .map(Arc::clone);
+            tauri::async_runtime::spawn_blocking(move || {
+                responder.respond(artwork_response(api.as_deref(), &request));
+            });
+        })
         .invoke_handler(tauri::generate_handler![
             dispatch,
             pick_audio_file,

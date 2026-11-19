@@ -18,4 +18,8 @@ audio: TrackAudio | null, collections: Array<TrackCollection>,
 /**
  * Unix epoch milliseconds when the file was found missing on disk, if missing.
  */
-missing_since: number | null, };
+missing_since: number | null, 
+/**
+ * The hash of the picture the track shows, loaded from `/artwork/<hash>`.
+ */
+artwork: string | null, };

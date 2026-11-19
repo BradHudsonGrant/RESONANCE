@@ -52,6 +52,7 @@ fn file_tag_write(file: PlannedFile) -> FileTagWrite {
                 to: write.to,
             })
             .collect(),
+        cover: file.target.artwork.is_some(),
         blocked: file.blocked.map(|problem| problem.to_string()),
     }
 }

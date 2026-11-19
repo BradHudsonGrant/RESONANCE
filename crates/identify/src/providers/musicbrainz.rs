@@ -19,6 +19,9 @@ const SEARCH_LIMIT: &str = "10";
 const RELEASE_LIMIT: usize = 10;
 /// MusicBrainz scores search hits from 0 to 100. Below this they rarely share more than a word.
 const MIN_SEARCH_SCORE: i64 = 50;
+/// The Cover Art Archive's front cover of a release, 500 pixels wide: enough for any screen in
+/// the app and small enough to embed in every file of the release.
+const COVER_ART_ARCHIVE: &str = "https://coverartarchive.org/release";
 
 pub struct MusicBrainz;
 
@@ -105,9 +108,22 @@ fn release_candidate(release: &Value) -> Candidate {
         url: release_id
             .as_ref()
             .map(|id| format!("https://musicbrainz.org/release/{id}")),
+        artwork_url: release_id
+            .as_ref()
+            .filter(|_| has_front_cover(release))
+            .map(|id| format!("{COVER_ART_ARCHIVE}/{id}/front-500")),
         release_id,
         ..Candidate::default()
     }
+}
+
+/// Whether the Cover Art Archive holds a front cover for the release, as MusicBrainz reports it.
+fn has_front_cover(release: &Value) -> bool {
+    release
+        .get("cover-art-archive")
+        .and_then(|archive| archive.get("front"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 // Quoted Lucene phrases: inside quotes only a quote and a backslash need escaping.

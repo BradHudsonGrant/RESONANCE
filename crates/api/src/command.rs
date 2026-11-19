@@ -219,6 +219,27 @@ pub enum Request {
         #[serde(default)]
         fields: Vec<TagName>,
     },
+    /// The picture a track shows and the release picture identification proposes for it.
+    TrackArtwork {
+        #[ts(type = "number")]
+        track_id: i64,
+    },
+    /// Makes the proposed picture the track's picture. It reaches the file with the next tag
+    /// write.
+    AcceptProposedArtwork {
+        #[ts(type = "number")]
+        track_id: i64,
+    },
+    SkipProposedArtwork {
+        #[ts(type = "number")]
+        track_id: i64,
+    },
+    /// Makes a JPEG or PNG the user picked the track's picture, sent as base64.
+    SetTrackArtwork {
+        #[ts(type = "number")]
+        track_id: i64,
+        image_base64: String,
+    },
     /// Sets the user's values on one or many tracks. Nothing is written to the files.
     SetUserTag {
         #[ts(type = "Array<number>")]
@@ -328,6 +349,10 @@ pub enum Response {
     AcceptProposedFields(TrackStagingDiff),
     AcceptAllAboveThreshold(AcceptedProposals),
     SkipProposal(TrackStagingDiff),
+    TrackArtwork(TrackArtwork),
+    AcceptProposedArtwork(TrackArtwork),
+    SkipProposedArtwork(TrackArtwork),
+    SetTrackArtwork(TrackArtwork),
     SetUserTag(UserTagReport),
     PreviewTagWrites(Vec<FileTagWrite>),
     ApplyTagWrites(TagWriteReport),
@@ -354,6 +379,8 @@ pub struct FileTagWrite {
     pub track_id: i64,
     pub path: String,
     pub fields: Vec<FieldChange>,
+    /// Whether the write puts the user's picture in as the front cover.
+    pub cover: bool,
     pub blocked: Option<String>,
 }
 
@@ -543,6 +570,26 @@ pub struct TrackStagingDiff {
     #[ts(type = "number")]
     pub track_id: i64,
     pub fields: Vec<StagedField>,
+}
+
+/// A track's picture by hash. The page loads the bytes from `/artwork/<hash>`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct TrackArtwork {
+    #[ts(type = "number")]
+    pub track_id: i64,
+    /// What the track shows: the user's picture, else its file's front cover.
+    pub artwork: Option<String>,
+    /// A release picture waiting for the user's decision.
+    pub proposed: Option<ProposedTrackArtwork>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct ProposedTrackArtwork {
+    pub artwork: String,
+    /// The provider's name as the page shows it.
+    pub provider: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -951,6 +998,8 @@ pub struct LibraryTrack {
     /// Unix epoch milliseconds when the file was found missing on disk, if missing.
     #[ts(type = "number | null")]
     pub missing_since: Option<i64>,
+    /// The hash of the picture the track shows, loaded from `/artwork/<hash>`.
+    pub artwork: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -1038,6 +1087,8 @@ pub struct PreviewState {
     pub track_id: Option<i64>,
     pub title: Option<String>,
     pub artist: Option<String>,
+    /// The hash of the picture the playing track shows.
+    pub artwork: Option<String>,
     pub playing: bool,
     #[ts(type = "number")]
     pub position_ms: u64,

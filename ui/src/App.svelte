@@ -6,6 +6,9 @@
   import type { LibraryCollection } from './lib/ipc/bindings/LibraryCollection';
   import type { LibraryTrack } from './lib/ipc/bindings/LibraryTrack';
   import type { RenameScope } from './lib/ipc/bindings/RenameScope';
+  import type { TrackArtwork } from './lib/ipc/bindings/TrackArtwork';
+  import { pictureBase64 } from './lib/ipc/artwork';
+  import { CoreError } from './lib/ipc/client';
   import { core } from './lib/ipc/core';
   import Inspector from './lib/library/Inspector.svelte';
   import Library from './lib/library/Library.svelte';
@@ -286,6 +289,55 @@
   }
 
   const track = $derived(pages.selectedTrack);
+
+  let trackArtwork = $state<TrackArtwork | null>(null);
+  let artworkError = $state<string | null>(null);
+
+  async function loadArtwork(trackId: number) {
+    try {
+      const loaded = await core.call('track_artwork', { track_id: trackId });
+      if (track?.id === trackId) trackArtwork = loaded;
+    } catch {
+      if (track?.id === trackId) trackArtwork = null;
+    }
+  }
+
+  async function changeArtwork(trackId: number, change: () => Promise<TrackArtwork>) {
+    artworkError = null;
+    try {
+      const changed = await change();
+      if (track?.id === trackId) trackArtwork = changed;
+    } catch (error) {
+      if (track?.id === trackId) {
+        artworkError =
+          error instanceof CoreError ? error.message : 'The cover could not be changed.';
+      }
+    }
+  }
+
+  function pickArtwork(trackId: number, file: File) {
+    void changeArtwork(trackId, async () =>
+      core.call('set_track_artwork', {
+        track_id: trackId,
+        image_base64: await pictureBase64(file),
+      }),
+    );
+  }
+
+  function acceptArtwork(trackId: number) {
+    void changeArtwork(trackId, () => core.call('accept_proposed_artwork', { track_id: trackId }));
+  }
+
+  function skipArtwork(trackId: number) {
+    void changeArtwork(trackId, () => core.call('skip_proposed_artwork', { track_id: trackId }));
+  }
+
+  $effect(() => {
+    const trackId = track?.id;
+    artworkError = null;
+    trackArtwork = null;
+    if (trackId !== undefined) void loadArtwork(trackId);
+  });
   const inspectorDocked = $derived(space === 'Library' && !inspectorHidden);
 
   /** What the stylesheet decided, read only when the user asks for the opposite. */
@@ -355,6 +407,7 @@
       sourcesRevision += 1;
       void pages.refresh();
       void loadCollections();
+      if (track) void loadArtwork(track.id);
     }),
   );
 
@@ -552,6 +605,11 @@
         onaddtocollection={addTracksToCollection}
         onremovefromcollection={removeTracksFromCollection}
         oncreatecollectionandadd={createCollectionAndAdd}
+        artwork={trackArtwork}
+        {artworkError}
+        onpickartwork={pickArtwork}
+        onacceptartwork={acceptArtwork}
+        onskipartwork={skipArtwork}
       />
     </div>
   {/if}
@@ -569,6 +627,7 @@
         trackId={preview.trackId}
         title={preview.title}
         artist={preview.artist}
+        artwork={preview.artwork}
         playing={preview.playing}
         positionMs={preview.positionMs}
         durationMs={preview.durationMs}
@@ -604,6 +663,11 @@
       onaddtocollection={addTracksToCollection}
       onremovefromcollection={removeTracksFromCollection}
       oncreatecollectionandadd={createCollectionAndAdd}
+      artwork={trackArtwork}
+      {artworkError}
+      onpickartwork={pickArtwork}
+      onacceptartwork={acceptArtwork}
+      onskipartwork={skipArtwork}
     />
   </Sheet>
 {/if}

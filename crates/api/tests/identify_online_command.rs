@@ -17,7 +17,7 @@ use resonance_api::error::ErrorCode;
 use resonance_db::Database;
 use resonance_fixtures::signal::Signal;
 use resonance_identify::credentials::{CredentialStore, MemoryCredentialStore};
-use resonance_identify::http::{HttpClient, HttpRequest, HttpResponse, Unreachable};
+use resonance_identify::http::{BytesResponse, HttpClient, HttpRequest, HttpResponse, Unreachable};
 use serde_json::json;
 
 /// Answers MusicBrainz search and one Discogs release; anything else is a 404.
@@ -56,6 +56,18 @@ impl HttpClient for Providers {
         Ok(HttpResponse {
             status: 200,
             body: body.to_string(),
+        })
+    }
+
+    fn fetch_bytes(
+        &self,
+        request: &HttpRequest,
+        _limit: u64,
+    ) -> Result<BytesResponse, Unreachable> {
+        self.asked.lock().unwrap().push(request.url.clone());
+        Ok(BytesResponse {
+            status: 404,
+            body: Vec::new(),
         })
     }
 }

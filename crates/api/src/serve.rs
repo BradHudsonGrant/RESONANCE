@@ -3,8 +3,11 @@
 //! It listens on loopback only, on a port the OS picks, and refuses any connection whose
 //! upgrade request does not carry the token as a bearer credential. A web page cannot set
 //! that header on a WebSocket, so a page in the user's browser cannot reach the core.
+//!
+//! The same port answers `GET /artwork/<hash>` with a stored picture, under the same token, so
+//! the page loads pictures as plain images rather than inside the JSON of a track page.
 
-use std::io;
+use std::io::{self, BufRead, BufReader, Write};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::thread;
@@ -119,12 +122,112 @@ fn sample_telemetry(api: &Api, readings: &watch::Sender<Option<TelemetryFrame>>)
     }
 }
 
+const ARTWORK_REQUEST: &[u8] = b"GET /artwork/";
+/// More than any browser sends for an image request.
+const MAX_REQUEST_HEAD: u64 = 16 * 1024;
+
+/// Whether the connection opens with a picture request rather than a WebSocket upgrade.
+async fn asks_for_artwork(stream: &TcpStream) -> bool {
+    let mut start = [0u8; ARTWORK_REQUEST.len()];
+    for _ in 0..8 {
+        let Ok(read) = stream.peek(&mut start).await else {
+            return false;
+        };
+        if read == 0 || start[..read] != ARTWORK_REQUEST[..read] {
+            return false;
+        }
+        if read == start.len() {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    false
+}
+
+fn respond(stream: &mut std::net::TcpStream, status: &str, extra: &str, body: &[u8]) {
+    let head = format!(
+        "HTTP/1.1 {status}\r\nContent-Length: {}\r\n{extra}Connection: close\r\n\r\n",
+        body.len()
+    );
+    let _ = stream
+        .write_all(head.as_bytes())
+        .and_then(|()| stream.write_all(body));
+}
+
+/// Answers one picture request and closes. A picture never changes under its hash, so the
+/// browser may keep it as long as it likes.
+fn serve_artwork(stream: std::net::TcpStream, api: &Api, expected: &str) {
+    let Ok(mut writer) = stream.try_clone() else {
+        return;
+    };
+    let mut reader = BufReader::new(io::Read::take(stream, MAX_REQUEST_HEAD));
+    let mut request_line = String::new();
+    if reader.read_line(&mut request_line).is_err() {
+        return;
+    }
+    let mut authorised = false;
+    loop {
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) | Err(_) => return,
+            Ok(_) if line.trim_end_matches(['\r', '\n']).is_empty() => break,
+            Ok(_) => {
+                if let Some((name, value)) = line.split_once(':')
+                    && name.trim().eq_ignore_ascii_case(AUTHORIZATION.as_str())
+                {
+                    authorised = same_bytes(value.trim().as_bytes(), expected.as_bytes());
+                }
+            }
+        }
+    }
+    if !authorised {
+        respond(&mut writer, "401 Unauthorized", "", b"");
+        return;
+    }
+    let hash = request_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|target| target.strip_prefix("/artwork/"))
+        .unwrap_or_default();
+    let Some(file) = api.artwork_file(hash) else {
+        respond(&mut writer, "404 Not Found", "", b"");
+        return;
+    };
+    match std::fs::read(&file.path) {
+        Ok(bytes) => respond(
+            &mut writer,
+            "200 OK",
+            &format!(
+                "Content-Type: {}\r\nCache-Control: private, max-age=31536000, immutable\r\n",
+                file.mime
+            ),
+            &bytes,
+        ),
+        Err(_) => respond(&mut writer, "404 Not Found", "", b""),
+    }
+}
+
 async fn serve_connection(
     stream: TcpStream,
     api: Arc<Api>,
     expected: Arc<str>,
     telemetry: watch::Receiver<Option<TelemetryFrame>>,
 ) {
+    if asks_for_artwork(&stream).await {
+        let Ok(stream) = stream.into_std() else {
+            return;
+        };
+        // A client that stops sending must not hold a blocking thread.
+        if stream.set_nonblocking(false).is_err()
+            || stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .is_err()
+        {
+            return;
+        }
+        let _ = tokio::task::spawn_blocking(move || serve_artwork(stream, &api, &expected)).await;
+        return;
+    }
     #[expect(
         clippy::result_large_err,
         reason = "tungstenite fixes the signature of its handshake callback"
