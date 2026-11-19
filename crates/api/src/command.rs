@@ -237,6 +237,34 @@ pub enum Request {
         #[ts(type = "number")]
         operation_id: i64,
     },
+    /// What renaming the files in `scope` with `template` would do. Nothing on disk changes.
+    /// `files` lists at most `limit` of them, problems first.
+    PreviewRename {
+        scope: RenameScope,
+        template: String,
+        limit: u32,
+    },
+    /// Renames the ready files in `scope` as one journaled operation. A large batch runs as an
+    /// Activity job.
+    ApplyRename {
+        scope: RenameScope,
+        template: String,
+    },
+}
+
+/// Which files a rename covers: the selected tracks, or every track a filter or collection
+/// shows. An empty query is the whole library.
+#[derive(Debug, Clone, PartialEq, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum RenameScope {
+    Tracks {
+        #[ts(type = "Array<number>")]
+        track_ids: Vec<i64>,
+    },
+    Query {
+        query: TrackQuery,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -291,6 +319,8 @@ pub enum Response {
     SetUserTag(UserTagReport),
     PreviewTagWrites(Vec<FileTagWrite>),
     ApplyTagWrites(TagWriteReport),
+    PreviewRename(RenamePreview),
+    ApplyRename(RenameReport),
     RecentOperations(Vec<JournalOperation>),
     UndoOperation(UndoReport),
 }
@@ -339,6 +369,66 @@ pub struct TagWriteReport {
 #[ts(export)]
 pub enum OperationKindName {
     WriteTags,
+    RenameFiles,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum RenameStatusName {
+    Unchanged,
+    Ready,
+    Collision,
+    MissingFields,
+    TooLong,
+    FileMissing,
+}
+
+/// One file in a rename preview. `new_name` is `null` when tags are missing or there is no
+/// room for a name; `missing` lists the empty tags the template needs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct RenameFile {
+    #[ts(type = "number")]
+    pub track_id: i64,
+    pub status: RenameStatusName,
+    pub old_name: String,
+    pub new_name: Option<String>,
+    pub missing: Vec<TagName>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct RenamePreview {
+    pub total: u32,
+    pub unchanged: u32,
+    pub ready: u32,
+    pub collision: u32,
+    pub missing_fields: u32,
+    pub too_long: u32,
+    pub file_missing: u32,
+    pub files: Vec<RenameFile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct FailedRename {
+    #[ts(type = "number")]
+    pub track_id: i64,
+    pub path: String,
+    pub reason: String,
+}
+
+/// `queued` is true when the batch went to Activity, and the counts are then zero.
+/// `operation_id` is `null` when no file was renamed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct RenameReport {
+    #[ts(type = "number | null")]
+    pub operation_id: Option<i64>,
+    pub renamed: u32,
+    pub failed: Vec<FailedRename>,
+    pub queued: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]

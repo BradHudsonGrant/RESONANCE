@@ -5,18 +5,21 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OperationKind {
     WriteTags,
+    RenameFiles,
 }
 
 impl OperationKind {
     pub const fn name(self) -> &'static str {
         match self {
             Self::WriteTags => "write_tags",
+            Self::RenameFiles => "rename_files",
         }
     }
 
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
             "write_tags" => Some(Self::WriteTags),
+            "rename_files" => Some(Self::RenameFiles),
             _ => None,
         }
     }
@@ -72,10 +75,9 @@ mod tests {
         ] {
             assert_eq!(OperationState::from_name(state.name()), Some(state));
         }
-        assert_eq!(
-            OperationKind::from_name(OperationKind::WriteTags.name()),
-            Some(OperationKind::WriteTags)
-        );
+        for kind in [OperationKind::WriteTags, OperationKind::RenameFiles] {
+            assert_eq!(OperationKind::from_name(kind.name()), Some(kind));
+        }
         assert_eq!(OperationState::from_name("done"), None);
     }
 

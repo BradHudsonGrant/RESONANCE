@@ -1,6 +1,7 @@
 //! Filename templates such as `{artist} - {title} ({mix})`, and the rules that turn one into a
 //! name every platform accepts.
 
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use crate::library::TagField;
@@ -9,6 +10,11 @@ pub const DEFAULT_TEMPLATE: &str = "{artist} - {title} ({mix})";
 
 /// The longest file name, in bytes, that ext4, APFS and NTFS all accept.
 pub const MAX_NAME_BYTES: usize = 255;
+
+/// Windows software that does not opt into long paths stops at 260 UTF-16 units with the
+/// terminator, and DJ software on Windows is among it. A library moves between platforms, so
+/// every rename keeps to that.
+pub const MAX_PATH_UNITS: usize = 259;
 
 /// Tokens a template can use, each read from one tag.
 pub const TOKENS: [(&str, TagField); 9] = [
@@ -353,6 +359,124 @@ pub fn file_name(stem: &str, extension: &str, max_bytes: usize) -> String {
     format!("{stem}{suffix}")
 }
 
+/// What renaming one file would do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RenameStatus {
+    Unchanged,
+    Ready,
+    /// Another file in the folder has the name already, or another file in the batch takes it.
+    Collision,
+    MissingFields,
+    /// The folder's path leaves too little room for a name.
+    TooLong,
+    /// The file is not where the library last saw it.
+    FileMissing,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamePlan {
+    pub status: RenameStatus,
+    /// Set unless tags are missing or there is no room.
+    pub new_name: Option<String>,
+    pub missing: Vec<TagField>,
+}
+
+/// Names are compared without case, because NTFS, APFS and exFAT ignore it and a library moves
+/// between them and Linux.
+pub fn name_key(name: &str) -> String {
+    name.to_lowercase()
+}
+
+/// True when only the case of the name changes. Such a rename needs a step through another name
+/// on file systems that ignore case.
+pub fn is_case_only(old: &str, new: &str) -> bool {
+    old != new && name_key(old) == name_key(new)
+}
+
+fn split_extension(name: &str) -> (&str, &str) {
+    match name.rsplit_once('.') {
+        Some((stem, extension)) if !stem.is_empty() => (stem, extension),
+        _ => (name, ""),
+    }
+}
+
+/// The name `template` gives the file now called `current_name`, in a folder whose full path is
+/// `folder_units` UTF-16 units long. The extension never changes. Collisions are not known here;
+/// [`NameClaims`] decides them.
+pub fn plan_name<'a>(
+    template: &Template,
+    value: impl Fn(TagField) -> Option<&'a str>,
+    current_name: &str,
+    folder_units: usize,
+) -> NamePlan {
+    let stem = match template.render(value) {
+        Rendered::Stem(stem) => stem,
+        Rendered::Missing(missing) => {
+            return NamePlan {
+                status: RenameStatus::MissingFields,
+                new_name: None,
+                missing,
+            };
+        }
+    };
+    let (_, extension) = split_extension(current_name);
+    let room = MAX_PATH_UNITS.saturating_sub(folder_units + 1);
+    if room < extension.len() + 2 {
+        return NamePlan {
+            status: RenameStatus::TooLong,
+            new_name: None,
+            missing: Vec::new(),
+        };
+    }
+    // A UTF-16 unit is never more than three UTF-8 bytes long, and a byte limit is stricter than
+    // a unit limit, so holding the name to `room` bytes keeps it within both.
+    let new_name = file_name(&stem, extension, room.min(MAX_NAME_BYTES));
+    let status = if new_name == current_name {
+        RenameStatus::Unchanged
+    } else {
+        RenameStatus::Ready
+    };
+    NamePlan {
+        status,
+        new_name: Some(new_name),
+        missing: Vec::new(),
+    }
+}
+
+/// The names taken in each folder a batch renames into. A name another file has, or another
+/// file in the batch has claimed, is never given out again, so a rename never overwrites.
+/// Names files leave behind stay taken until the batch is over.
+#[derive(Debug, Default)]
+pub struct NameClaims {
+    folders: HashMap<String, HashSet<String>>,
+}
+
+impl NameClaims {
+    pub fn knows(&self, folder: &str) -> bool {
+        self.folders.contains_key(folder)
+    }
+
+    /// Records what is in `folder` on disk.
+    pub fn add_folder<'a>(&mut self, folder: &str, names: impl IntoIterator<Item = &'a str>) {
+        self.folders
+            .entry(folder.to_owned())
+            .or_default()
+            .extend(names.into_iter().map(name_key));
+    }
+
+    /// Claims `new_name` for the file now called `current_name`. False when it is taken.
+    pub fn claim(&mut self, folder: &str, current_name: &str, new_name: &str) -> bool {
+        let key = name_key(new_name);
+        if key == name_key(current_name) {
+            return true;
+        }
+        self.folders
+            .entry(folder.to_owned())
+            .or_default()
+            .insert(key)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -558,5 +682,56 @@ mod tests {
     fn the_extension_is_kept_as_given() {
         assert_eq!(file_name("Title", "AIFF", MAX_NAME_BYTES), "Title.AIFF");
         assert_eq!(file_name("Title", "", MAX_NAME_BYTES), "Title");
+    }
+
+    #[test]
+    fn a_plan_keeps_the_extension_and_says_what_changes() {
+        let template = Template::parse(DEFAULT_TEMPLATE).expect("template");
+        let tags = [ARTIST, TITLE];
+        let value = |field| {
+            tags.iter()
+                .find(|(tag, _)| *tag == field)
+                .map(|(_, value)| *value)
+        };
+        let plan = plan_name(&template, value, "01 track.FLAC", 20);
+        assert_eq!(plan.status, RenameStatus::Ready);
+        assert_eq!(plan.new_name.as_deref(), Some("Artist - Title.FLAC"));
+        let same = plan_name(&template, value, "Artist - Title.FLAC", 20);
+        assert_eq!(same.status, RenameStatus::Unchanged);
+        let case = plan_name(&template, value, "artist - title.FLAC", 20);
+        assert_eq!(case.status, RenameStatus::Ready);
+        assert!(is_case_only("artist - title.FLAC", "Artist - Title.FLAC"));
+        let missing = plan_name(&template, |_| None, "a.flac", 20);
+        assert_eq!(missing.status, RenameStatus::MissingFields);
+        assert_eq!(missing.missing, vec![TagField::Artist, TagField::Title]);
+    }
+
+    #[test]
+    fn a_plan_stays_under_the_path_limit() {
+        let template = Template::parse("{title}").expect("template");
+        let long = "x".repeat(300);
+        let plan = plan_name(
+            &template,
+            |_| Some(long.as_str()),
+            "a.wav",
+            MAX_PATH_UNITS - 20,
+        );
+        let name = plan.new_name.expect("name");
+        assert_eq!(name.len(), 19);
+        assert!(name.ends_with(".wav"));
+        let full = plan_name(&template, |_| Some("x"), "a.wav", MAX_PATH_UNITS - 3);
+        assert_eq!(full.status, RenameStatus::TooLong);
+    }
+
+    #[test]
+    fn claims_block_taken_names_without_case() {
+        let mut claims = NameClaims::default();
+        claims.add_folder("d", ["Taken.flac", "old.flac", "other.flac"]);
+        assert!(!claims.claim("d", "old.flac", "taken.FLAC"));
+        assert!(claims.claim("d", "old.flac", "Old.flac"));
+        assert!(claims.claim("d", "old.flac", "New.flac"));
+        assert!(!claims.claim("d", "other.flac", "new.flac"));
+        assert!(!claims.claim("d", "other.flac", "old.flac"));
+        assert!(claims.claim("e", "a.flac", "new.flac"));
     }
 }

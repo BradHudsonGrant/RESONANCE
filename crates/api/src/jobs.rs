@@ -3,8 +3,8 @@ use std::sync::{PoisonError, Weak};
 use std::time::{Duration, Instant};
 
 use resonance_core::jobs::{
-    JOB_KIND_IDENTIFY_LIBRARY, JOB_KIND_IDENTIFY_ONLINE, JOB_KIND_SCAN_SOURCE, Job, JobStatus,
-    JobTier, NewJob,
+    JOB_KIND_IDENTIFY_LIBRARY, JOB_KIND_IDENTIFY_ONLINE, JOB_KIND_RENAME_FILES,
+    JOB_KIND_SCAN_SOURCE, Job, JobStatus, JobTier, NewJob,
 };
 use resonance_jobs::{JobError, JobExecution, JobInterrupt, JobOutcome, JobRunner};
 use resonance_library::identity::{
@@ -89,6 +89,7 @@ pub(crate) fn execute_job(
         JOB_KIND_SCAN_SOURCE => execute_scan_job(exec, &core, watcher),
         JOB_KIND_IDENTIFY_LIBRARY => execute_identify_job(exec, &core),
         JOB_KIND_IDENTIFY_ONLINE => crate::online::execute_identify_online_job(exec, &core),
+        JOB_KIND_RENAME_FILES => crate::renames::execute_rename_job(exec, &core),
         other => JobOutcome::Failed(format!("Unknown job kind: {other}")),
     }
 }

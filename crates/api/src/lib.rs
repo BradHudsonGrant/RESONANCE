@@ -8,6 +8,7 @@ pub mod mix_frame;
 mod online;
 mod providers;
 mod relink;
+mod renames;
 pub mod serve;
 mod sources;
 mod staging;
@@ -424,6 +425,16 @@ impl Api {
             Request::UndoOperation { operation_id } => self
                 .undo_operation(operation_id)
                 .map(Response::UndoOperation),
+            Request::PreviewRename {
+                scope,
+                template,
+                limit,
+            } => self
+                .preview_rename(scope, &template, limit)
+                .map(Response::PreviewRename),
+            Request::ApplyRename { scope, template } => self
+                .apply_rename(scope, &template)
+                .map(Response::ApplyRename),
         }
     }
 
@@ -632,7 +643,7 @@ fn mix_state(status: MixStatus) -> MixState {
     }
 }
 
-fn core_track_query(query: Option<TrackQuery>) -> CoreTrackQuery {
+pub(crate) fn core_track_query(query: Option<TrackQuery>) -> CoreTrackQuery {
     let Some(query) = query else {
         return CoreTrackQuery::default();
     };

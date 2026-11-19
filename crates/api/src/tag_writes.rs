@@ -18,11 +18,12 @@ fn ms(ns: i64) -> i64 {
     ns / 1_000_000
 }
 
-fn journal_operation(operation: StoredOperation) -> JournalOperation {
+pub(crate) fn journal_operation(operation: StoredOperation) -> JournalOperation {
     JournalOperation {
         id: operation.id,
         kind: match operation.kind {
             OperationKind::WriteTags => OperationKindName::WriteTags,
+            OperationKind::RenameFiles => OperationKindName::RenameFiles,
         },
         state: match operation.state {
             OperationState::Pending => OperationStateName::Pending,
@@ -102,6 +103,14 @@ impl Api {
     }
 
     pub(crate) fn undo_operation(&self, operation_id: i64) -> Result<UndoReport, ApiError> {
+        let kind = self
+            .locked_library()
+            .operation(operation_id)
+            .map_err(ApiError::library_unreadable)?
+            .map(|operation| operation.kind);
+        if kind == Some(OperationKind::RenameFiles) {
+            return self.undo_rename(operation_id);
+        }
         let write_tags::UndoReport {
             operation,
             restored,
