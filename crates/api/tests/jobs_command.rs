@@ -293,3 +293,98 @@ fn interrupted_running_scan_job_recovers_and_completes_on_api_startup() {
         other => panic!("expected Tracks, got {other:?}"),
     }
 }
+
+#[test]
+fn a_job_paused_from_activity_waits_until_resumed() {
+    let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("api_jobs_pause_resume");
+    let _ = fs::remove_dir_all(&root);
+    let deck_dir = root.join("Deck");
+    let batch_dir = root.join("Incoming");
+    fs::create_dir_all(&deck_dir).expect("deck dir creates");
+    fs::create_dir_all(&batch_dir).expect("batch dir creates");
+    let deck_track = deck_dir.join("playing_deck.wav");
+    Signal::tone(220.0, 4.0, -6.0, 44_100)
+        .write_wav(&deck_track)
+        .expect("deck wav writes");
+    Signal::tone(440.0, 1.5, -6.0, 44_100)
+        .write_wav(&batch_dir.join("new_cut.wav"))
+        .expect("batch wav writes");
+
+    // Mix playback holds the identity job in the queue, so it can be paused before it starts.
+    let api = Api::new_silent(Database::open_in_memory().expect("db opens"));
+    api.handle(Request::MixLoad {
+        deck: MixDeck::A,
+        path: deck_track.to_string_lossy().into_owned(),
+    })
+    .expect("mix load succeeds");
+    api.handle(Request::MixPlay {
+        deck: MixDeck::A,
+        playing: true,
+    })
+    .expect("mix play succeeds");
+    api.handle(Request::Scan {
+        folder: batch_dir.to_string_lossy().into_owned(),
+    })
+    .expect("scan succeeds");
+    let identify_id = snapshot(&api)
+        .active
+        .iter()
+        .find(|job| job.kind == "identify_library")
+        .expect("identify job waits")
+        .id;
+
+    let Response::PauseJob(paused) = api
+        .handle(Request::PauseJob {
+            job_id: identify_id,
+        })
+        .expect("pause succeeds")
+    else {
+        panic!("expected PauseJob");
+    };
+    let job = paused
+        .active
+        .iter()
+        .find(|job| job.id == identify_id)
+        .expect("still active");
+    assert!(job.paused);
+    assert!(
+        !job.paused_for_mix,
+        "a job the user paused reads as paused by the user"
+    );
+
+    api.handle(Request::MixPlay {
+        deck: MixDeck::A,
+        playing: false,
+    })
+    .expect("mix stop succeeds");
+    thread::sleep(Duration::from_millis(200));
+    let held = snapshot(&api);
+    let job = held
+        .active
+        .iter()
+        .find(|job| job.id == identify_id)
+        .expect("stays queued while paused");
+    assert_eq!(job.status, ActivityJobStatus::Queued);
+
+    let Response::ResumeJob(_) = api
+        .handle(Request::ResumeJob {
+            job_id: identify_id,
+        })
+        .expect("resume succeeds")
+    else {
+        panic!("expected ResumeJob");
+    };
+    wait_until(Duration::from_secs(5), || {
+        snapshot(&api)
+            .recent
+            .iter()
+            .any(|job| job.id == identify_id && job.status == ActivityJobStatus::Completed)
+    });
+
+    let refused = api
+        .handle(Request::PauseJob {
+            job_id: identify_id,
+        })
+        .expect_err("a finished job cannot be paused");
+    assert!(refused.message.contains("cannot be paused"));
+}

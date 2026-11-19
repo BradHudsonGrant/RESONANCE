@@ -302,6 +302,8 @@ impl Api {
                 .map(Response::IdentifyWithUrl),
             Request::JobsSnapshot => self.jobs_snapshot().map(Response::JobsSnapshot),
             Request::CancelJob { job_id } => self.cancel_job(job_id).map(Response::CancelJob),
+            Request::PauseJob { job_id } => self.pause_job(job_id).map(Response::PauseJob),
+            Request::ResumeJob { job_id } => self.resume_job(job_id).map(Response::ResumeJob),
             Request::RetryJob { job_id } => self.retry_job(job_id).map(Response::RetryJob),
             Request::ClearFinishedJobs => {
                 self.clear_finished_jobs().map(Response::ClearFinishedJobs)

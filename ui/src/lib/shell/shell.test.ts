@@ -119,6 +119,7 @@ describe('ActivitySheet', () => {
           total_items: 1_000,
           error_message: null,
           paused_for_mix: false,
+          paused: false,
           created_ms: 1_000,
           started_ms: 1_010,
           finished_ms: null,
@@ -133,8 +134,24 @@ describe('ActivitySheet', () => {
           total_items: 1_000,
           error_message: null,
           paused_for_mix: true,
+          paused: false,
           created_ms: 1_020,
           started_ms: null,
+          finished_ms: null,
+        },
+        {
+          id: 13,
+          kind: 'rename_files',
+          tier: 'metadata' as const,
+          status: 'running' as const,
+          label: 'Rename 1,240 files',
+          done_items: 300,
+          total_items: 1_240,
+          error_message: null,
+          paused_for_mix: false,
+          paused: true,
+          created_ms: 1_030,
+          started_ms: 1_040,
           finished_ms: null,
         },
       ],
@@ -149,6 +166,7 @@ describe('ActivitySheet', () => {
           total_items: null,
           error_message: 'The folder could not be scanned.',
           paused_for_mix: false,
+          paused: false,
           created_ms: 500,
           started_ms: 510,
           finished_ms: 520,
@@ -163,6 +181,7 @@ describe('ActivitySheet', () => {
           total_items: 48,
           error_message: null,
           paused_for_mix: false,
+          paused: false,
           created_ms: 100,
           started_ms: 110,
           finished_ms: 300,
@@ -173,6 +192,8 @@ describe('ActivitySheet', () => {
     const client: ActivityClient = {
       snapshot: vi.fn(async () => snapshot),
       cancel: vi.fn(async () => snapshot),
+      pause: vi.fn(async () => snapshot),
+      resume: vi.fn(async () => snapshot),
       retry: vi.fn(async () => snapshot),
       clearFinished: vi.fn(async () => {
         snapshot = { ...snapshot, recent: [] };
@@ -205,6 +226,16 @@ describe('ActivitySheet', () => {
 
     await fireEvent.click(within(scanCard).getByRole('button', { name: 'Cancel' }));
     expect(client.cancel).toHaveBeenCalledWith(11);
+
+    await fireEvent.click(within(scanCard).getByRole('button', { name: 'Pause Scan Warehouse' }));
+    expect(client.pause).toHaveBeenCalledWith(11);
+
+    const renameCard = within(activeList).getByRole('listitem', { name: 'Rename 1,240 files' });
+    expect(within(renameCard).getByText('Paused')).toBeTruthy();
+    await fireEvent.click(
+      within(renameCard).getByRole('button', { name: 'Resume Rename 1,240 files' }),
+    );
+    expect(client.resume).toHaveBeenCalledWith(13);
 
     const failedCard = within(recentList).getByRole('listitem', { name: 'Scan UnpluggedDrive' });
     expect(within(failedCard).getByText('Failed')).toBeTruthy();

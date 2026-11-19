@@ -123,6 +123,9 @@ fn execute_scan_job(
         exec.abort_flag(),
         |progress| {
             let _ = exec.report_progress(progress.done_files, Some(progress.total_files));
+            // A pause holds the scan between batches. Cancel and shutdown set the abort flag the
+            // scan checks before its next batch, so the result needs no handling here.
+            let _ = exec.wait_if_paused();
             if progress.wrote_changes && progress.done_files < progress.total_files {
                 let now = Instant::now();
                 let should_push = match last_library_push {
@@ -316,7 +319,8 @@ pub(crate) fn job_api_error(error: JobError) -> ApiError {
         JobError::Database(source) => ApiError::library_unreadable(source),
         JobError::NotFound { .. }
         | JobError::NotCancellable { .. }
-        | JobError::NotRetryable { .. } => ApiError::invalid_input(error),
+        | JobError::NotRetryable { .. }
+        | JobError::NotPausable { .. } => ApiError::invalid_input(error),
         JobError::Cancelled | JobError::Shutdown | JobError::Failed(_) => ApiError::internal(error),
     }
 }
@@ -327,6 +331,7 @@ fn ns_to_ms(nanos: i64) -> i64 {
 
 fn to_activity_job(job: Job, mix_live: bool) -> ActivityJob {
     let paused_for_mix = mix_live
+        && !job.paused
         && job.tier.backs_off_for_mix()
         && matches!(job.status, JobStatus::Queued | JobStatus::Running);
     ActivityJob {
@@ -350,6 +355,7 @@ fn to_activity_job(job: Job, mix_live: bool) -> ActivityJob {
         total_items: job.total_items,
         error_message: job.error_message,
         paused_for_mix,
+        paused: job.paused,
         created_ms: ns_to_ms(job.created_ns),
         started_ms: job.started_ns.map(ns_to_ms),
         finished_ms: job.finished_ns.map(ns_to_ms),
@@ -410,6 +416,16 @@ impl Api {
 
     pub(crate) fn cancel_job(&self, job_id: i64) -> Result<ActivitySnapshot, ApiError> {
         self.jobs.cancel(job_id).map_err(job_api_error)?;
+        self.jobs_snapshot()
+    }
+
+    pub(crate) fn pause_job(&self, job_id: i64) -> Result<ActivitySnapshot, ApiError> {
+        self.jobs.pause(job_id).map_err(job_api_error)?;
+        self.jobs_snapshot()
+    }
+
+    pub(crate) fn resume_job(&self, job_id: i64) -> Result<ActivitySnapshot, ApiError> {
+        self.jobs.resume(job_id).map_err(job_api_error)?;
         self.jobs_snapshot()
     }
 

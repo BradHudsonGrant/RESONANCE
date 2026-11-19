@@ -36,7 +36,7 @@ pub use tags::{AcceptReport, StagingQueueEntry, TagLayers, TagWriteTarget};
 
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
-const MIGRATIONS: [&str; 12] = [
+const MIGRATIONS: [&str; 13] = [
     include_str!("../migrations/0001_library.sql"),
     include_str!("../migrations/0002_sources.sql"),
     include_str!("../migrations/0003_identity.sql"),
@@ -49,6 +49,7 @@ const MIGRATIONS: [&str; 12] = [
     include_str!("../migrations/0010_tag_layers.sql"),
     include_str!("../migrations/0011_operations.sql"),
     include_str!("../migrations/0012_operation_renames.sql"),
+    include_str!("../migrations/0013_job_pause.sql"),
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

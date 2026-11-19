@@ -64,6 +64,8 @@
   const activityClient: ActivityClient = {
     snapshot: () => core.call('jobs_snapshot'),
     cancel: (job_id) => core.call('cancel_job', { job_id }),
+    pause: (job_id) => core.call('pause_job', { job_id }),
+    resume: (job_id) => core.call('resume_job', { job_id }),
     retry: (job_id) => core.call('retry_job', { job_id }),
     clearFinished: () => core.call('clear_finished_jobs'),
   };

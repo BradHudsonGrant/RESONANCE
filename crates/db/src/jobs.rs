@@ -5,7 +5,7 @@ use crate::search::now_unix_ns;
 use crate::{Database, DbError};
 
 const JOB_COLUMNS: &str = "id, kind, tier, status, label, payload_json, done_items, total_items,
-     error_message, created_ns, started_ns, finished_ns";
+     error_message, created_ns, started_ns, finished_ns, paused";
 
 fn read_job_row(row: &Row<'_>) -> Result<Job, DbError> {
     let raw_tier: i64 = row.get(2)?;
@@ -31,6 +31,7 @@ fn read_job_row(row: &Row<'_>) -> Result<Job, DbError> {
         created_ns: row.get(9)?,
         started_ns: row.get(10)?,
         finished_ns: row.get(11)?,
+        paused: row.get(12)?,
     })
 }
 
@@ -137,12 +138,12 @@ impl Database {
         let tx = self.connection.transaction()?;
         let sql = if interactive {
             "SELECT id FROM job
-             WHERE status = 'queued' AND tier IN (0, 3)
+             WHERE status = 'queued' AND paused = 0 AND tier IN (0, 3)
              ORDER BY CASE tier WHEN 3 THEN 0 ELSE 1 END, id ASC
              LIMIT 1"
         } else {
             "SELECT id FROM job
-             WHERE status = 'queued' AND tier IN (1, 2)
+             WHERE status = 'queued' AND paused = 0 AND tier IN (1, 2)
              ORDER BY tier ASC, id ASC
              LIMIT 1"
         };
@@ -166,12 +167,13 @@ impl Database {
         Ok(claimed)
     }
 
-    /// True while any `Scan` (`0`) or `OnDemand` (`3`) job is queued or running.
+    /// True while any `Scan` (`0`) or `OnDemand` (`3`) job is queued or running and not paused.
     pub fn has_active_interactive_jobs(&self) -> Result<bool, DbError> {
         let found: Option<i64> = self
             .connection
             .query_row(
-                "SELECT 1 FROM job WHERE status IN ('queued', 'running') AND tier IN (0, 3) LIMIT 1",
+                "SELECT 1 FROM job WHERE status IN ('queued', 'running') AND paused = 0 AND tier IN (0, 3)
+                 LIMIT 1",
                 [],
                 |row| row.get(0),
             )
@@ -179,17 +181,39 @@ impl Database {
         Ok(found.is_some())
     }
 
-    /// True while any job in the background lane (`1` or `2`) is queued.
+    /// True while any job in the background lane (`1` or `2`) is queued and not paused.
     pub fn has_queued_background_jobs(&self) -> Result<bool, DbError> {
         let found: Option<i64> = self
             .connection
             .query_row(
-                "SELECT 1 FROM job WHERE status = 'queued' AND tier IN (1, 2) LIMIT 1",
+                "SELECT 1 FROM job WHERE status = 'queued' AND paused = 0 AND tier IN (1, 2) LIMIT 1",
                 [],
                 |row| row.get(0),
             )
             .optional()?;
         Ok(found.is_some())
+    }
+
+    /// Pauses or resumes a queued or running job. `None` when the job has finished or is gone.
+    pub fn set_job_paused(&mut self, job_id: i64, paused: bool) -> Result<Option<Job>, DbError> {
+        let changed = self.connection.execute(
+            "UPDATE job SET paused = ?2 WHERE id = ?1 AND status IN ('queued', 'running')",
+            params![job_id, paused],
+        )?;
+        if changed == 0 {
+            return Ok(None);
+        }
+        job_by_id_in(&self.connection, job_id)
+    }
+
+    pub fn is_job_paused(&self, job_id: i64) -> Result<bool, DbError> {
+        Ok(self
+            .connection
+            .query_row("SELECT paused FROM job WHERE id = ?1", [job_id], |row| {
+                row.get(0)
+            })
+            .optional()?
+            .unwrap_or(false))
     }
 
     pub fn update_job_progress(
@@ -280,6 +304,7 @@ impl Database {
         let changed = self.connection.execute(
             "UPDATE job
              SET status = 'queued',
+                 paused = 0,
                  done_items = 0,
                  error_message = NULL,
                  started_ns = NULL,

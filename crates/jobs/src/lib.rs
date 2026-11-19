@@ -20,6 +20,7 @@ pub enum JobError {
     NotFound { job_id: i64 },
     NotCancellable { job_id: i64, status: JobStatus },
     NotRetryable { job_id: i64, status: JobStatus },
+    NotPausable { job_id: i64, status: JobStatus },
     Cancelled,
     Shutdown,
     Failed(String),
@@ -38,6 +39,11 @@ impl fmt::Display for JobError {
             Self::NotRetryable { job_id, status } => write!(
                 f,
                 "Job {job_id} is {} and cannot be retried.",
+                status.name()
+            ),
+            Self::NotPausable { job_id, status } => write!(
+                f,
+                "Job {job_id} is {} and cannot be paused or resumed.",
                 status.name()
             ),
             Self::Cancelled => write!(f, "The job was cancelled."),
@@ -189,35 +195,35 @@ impl<'a> JobExecution<'a> {
         Ok(())
     }
 
-    /// Blocks background jobs (`Tier 1` and `Tier 2`) while Mix playback is active or an
-    /// interactive job (`Tier 0` or `Tier 3`) is waiting or running, waking immediately on
-    /// cancellation, shutdown or Mix stop.
+    /// Blocks while the user has paused this job, and blocks background jobs (`Tier 1` and
+    /// `Tier 2`) while Mix playback is active or an interactive job (`Tier 0` or `Tier 3`) is
+    /// waiting or running. Wakes immediately on resume, cancellation, shutdown or Mix stop.
     pub fn wait_if_paused(&self) -> Result<(), JobInterrupt> {
-        self.check_interrupted()?;
-        if !self.job.tier.backs_off_for_mix() {
-            return Ok(());
-        }
-
+        let backs_off = self.job.tier.backs_off_for_mix();
         loop {
             self.check_interrupted()?;
-            let mix_active = self.shared.effective_mix_live();
-            let interactive_busy = {
-                let db = self
-                    .shared
-                    .database
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner);
-                db.has_active_interactive_jobs().unwrap_or(false)
-            };
-            if !mix_active && !interactive_busy {
-                return Ok(());
-            }
-
+            let mix_active = backs_off && self.shared.effective_mix_live();
+            // The pause flag is read with the coordinator held, as `pause` and `resume` write it,
+            // so a resume can never land between the read and the wait.
             let state = self
                 .shared
                 .state
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
+            let (user_paused, interactive_busy) = {
+                let db = self
+                    .shared
+                    .database
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
+                (
+                    db.is_job_paused(self.job.id).unwrap_or(false),
+                    backs_off && db.has_active_interactive_jobs().unwrap_or(false),
+                )
+            };
+            if !user_paused && !mix_active && !interactive_busy {
+                return Ok(());
+            }
             if self.cancelled.load(Ordering::Acquire) {
                 return Err(JobInterrupt::Cancelled);
             }
@@ -460,6 +466,43 @@ impl JobRunner {
             return Ok(settled);
         }
         Ok(existing)
+    }
+
+    /// Pauses a queued or running job. A queued one is not started, and a running one waits at
+    /// its next call to `wait_if_paused`, keeping its progress.
+    pub fn pause(&self, job_id: i64) -> Result<Job, JobError> {
+        self.set_paused(job_id, true)
+    }
+
+    pub fn resume(&self, job_id: i64) -> Result<Job, JobError> {
+        self.set_paused(job_id, false)
+    }
+
+    fn set_paused(&self, job_id: i64, paused: bool) -> Result<Job, JobError> {
+        let updated = {
+            let _state = self
+                .shared
+                .state
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let mut db = self
+                .shared
+                .database
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let existing = db.job_by_id(job_id)?.ok_or(JobError::NotFound { job_id })?;
+            if !existing.status.can_pause() {
+                return Err(JobError::NotPausable {
+                    job_id,
+                    status: existing.status,
+                });
+            }
+            db.set_job_paused(job_id, paused)?
+                .ok_or(JobError::NotFound { job_id })?
+        };
+        self.shared.bump_revision();
+        self.shared.wake.notify_all();
+        Ok(updated)
     }
 
     pub fn retry(&self, job_id: i64) -> Result<Job, JobError> {

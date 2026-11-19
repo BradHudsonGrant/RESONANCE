@@ -15,7 +15,7 @@ Date: 18 November 2026. Status: accepted.
 - A case-only rename goes through a third name (`<new name>.resonance-rename`), because on a case-blind file system a direct rename is no change.
 - Each apply is one `operation` row of kind `rename_files`. Each file it moves is a row in `operation_rename` (operation, asset, old path, new path), written in the same transaction as the asset's new path. The library lock is held while the file is renamed and its path recorded, so a scan the watcher starts never sees the new name before the library knows it, and there is no churn after a rename.
 - Undo renames the files back, newest first. It refuses to start if any file has moved since, so it never undoes a later change.
-- Up to 200 files rename while the sheet waits. A larger batch, such as the whole library, runs as one Activity job with progress and cancel. It pauses while Mix plays, like the other background jobs. A cancelled batch keeps what it renamed as one operation that can be undone.
+- Up to 200 files rename while the sheet waits. A larger batch, such as the whole library, runs as one Activity job with progress, pause and cancel. It also pauses on its own while Mix plays, like the other background jobs. A cancelled batch keeps what it renamed as one operation that can be undone.
 - Nothing is renamed until the user opens the Rename sheet and confirms. Settings holds the template the sheet starts from.
 
 ## Why a table rather than JSON for the inverse

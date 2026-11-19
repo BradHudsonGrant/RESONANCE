@@ -713,7 +713,9 @@ test('the Rename sheet previews names from tags, renames the selection on disk a
       new Promise<{ response: { result: unknown } }>((resolve) => {
         const id = ++next;
         socket.addEventListener('message', (event) => {
-          const reply = JSON.parse(String(event.data));
+          // The core also pushes binary frames, which these calls never wait for.
+          if (typeof event.data !== 'string') return;
+          const reply = JSON.parse(event.data);
           if (reply.id === id) resolve(reply);
         });
         socket.send(JSON.stringify({ id, request: { command, params } }));
@@ -770,5 +772,120 @@ test('the Rename sheet previews names from tags, renames the selection on disk a
     if (existsSync(renamed) && !existsSync(original)) renameSync(renamed, original);
     await search.fill('');
     await search.press('Escape');
+  }
+});
+
+test('a large rename in Activity pauses, holds its place, resumes and finishes', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1586, height: 992 });
+  await page.goto('/');
+  await expect(page.getByRole('grid', { name: 'Tracks' })).toBeVisible({ timeout: 10_000 });
+
+  const batchFolder = join(musicFolder, '..', 'pause-batch');
+  mkdirSync(batchFolder, { recursive: true });
+  const frames = 2_205;
+  for (let index = 0; index < 201; index++) {
+    const wav = Buffer.alloc(44 + frames * 2);
+    wav.write('RIFF', 0, 'ascii');
+    wav.writeUInt32LE(36 + frames * 2, 4);
+    wav.write('WAVEfmt ', 8, 'ascii');
+    wav.writeUInt32LE(16, 16);
+    wav.writeUInt16LE(1, 20);
+    wav.writeUInt16LE(1, 22);
+    wav.writeUInt32LE(44_100, 24);
+    wav.writeUInt32LE(44_100 * 2, 28);
+    wav.writeUInt16LE(2, 32);
+    wav.writeUInt16LE(16, 34);
+    wav.write('data', 36, 'ascii');
+    wav.writeUInt32LE(frames * 2, 40);
+    for (let i = 0; i < frames; i++) {
+      wav.writeInt16LE((((i + 1) * (index + 3) * 97) & 0x3fff) - 0x2000, 44 + i * 2);
+    }
+    writeFileSync(join(batchFolder, `pausebatch ${String(index).padStart(3, '0')}.wav`), wav);
+  }
+
+  const activity = page.getByRole('dialog', { name: 'Activity' });
+  try {
+    // Scan, tag and queue the rename through the core, then pause it at once, the way the
+    // Activity button does.
+    const jobId = await page.evaluate(async (folder) => {
+      const socket = new WebSocket(new URL('/core', location.href));
+      await new Promise((ready) => (socket.onopen = ready));
+      let next = 0;
+      const call = <T>(command: string, params?: unknown) =>
+        new Promise<T>((resolve, reject) => {
+          const id = ++next;
+          socket.addEventListener('message', (event) => {
+            // The core also pushes binary frames, which these calls never wait for.
+            if (typeof event.data !== 'string') return;
+            const reply = JSON.parse(event.data);
+            if (reply.id !== id) return;
+            if (reply.error) reject(new Error(reply.error.message));
+            else resolve(reply.response.result as T);
+          });
+          socket.send(JSON.stringify({ id, request: params ? { command, params } : { command } }));
+        });
+      await call('scan', { folder });
+      const page = await call<{ tracks: Array<{ id: number; title: string }> }>('tracks', {
+        offset: 0,
+        limit: 500,
+        query: { text: 'pausebatch' },
+      });
+      for (const track of page.tracks) {
+        await call('set_user_tag', {
+          track_ids: [track.id],
+          edits: [
+            { field: 'artist', value: 'Batch' },
+            { field: 'title', value: track.title.replace('pausebatch', 'Cut') },
+          ],
+        });
+      }
+      const ids = page.tracks.map((track) => track.id);
+      await call('apply_rename', {
+        scope: { kind: 'tracks', track_ids: ids },
+        template: '{artist} - {title}',
+      });
+      const snapshot = await call<{ active: Array<{ id: number; kind: string }> }>('jobs_snapshot');
+      const job = snapshot.active.find((active) => active.kind === 'rename_files');
+      if (!job) throw new Error('the rename finished before it could be paused');
+      await call('pause_job', { job_id: job.id });
+      socket.close();
+      return job.id;
+    }, batchFolder);
+
+    await page
+      .locator('header')
+      .getByRole('button', { name: /^Activity/ })
+      .click();
+    const card = activity
+      .getByRole('list', { name: 'Active jobs' })
+      .getByRole('listitem', { name: 'Rename 201 files' });
+    await expect(card).toContainText('Paused');
+    await page.waitForTimeout(1_000);
+    await expect(card).toContainText('Paused');
+    expect(jobId).toBeGreaterThan(0);
+
+    await card.getByRole('button', { name: 'Resume Rename 201 files' }).click();
+    await expect(
+      activity
+        .getByRole('list', { name: 'Recent jobs' })
+        .getByRole('listitem', { name: 'Rename 201 files' }),
+    ).toContainText('Completed', { timeout: 20_000 });
+    expect(existsSync(join(batchFolder, 'Batch - Cut 000.wav'))).toBe(true);
+    expect(existsSync(join(batchFolder, 'pausebatch 000.wav'))).toBe(false);
+  } finally {
+    if (await activity.isVisible()) {
+      await activity.getByRole('button', { name: 'Done' }).click();
+    }
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    const settings = page.getByRole('dialog', { name: 'Settings' });
+    const batchCard = settings.getByRole('region', { name: /pause-batch/i });
+    if ((await batchCard.count()) > 0) {
+      await batchCard.getByRole('button', { name: /Remove/ }).click();
+      await expect(batchCard).toHaveCount(0);
+    }
+    await settings.getByRole('button', { name: 'Done' }).click();
+    rmSync(batchFolder, { recursive: true, force: true });
   }
 });

@@ -6,4 +6,8 @@ export type ActivityJob = { id: number, kind: string, tier: ActivityJobTier, sta
 /**
  * True when this job is waiting or paused because a Mix deck is playing.
  */
-paused_for_mix: boolean, created_ms: number, started_ms: number | null, finished_ms: number | null, };
+paused_for_mix: boolean, 
+/**
+ * True when the user paused this job.
+ */
+paused: boolean, created_ms: number, started_ms: number | null, finished_ms: number | null, };
