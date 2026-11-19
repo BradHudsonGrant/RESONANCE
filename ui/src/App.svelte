@@ -8,7 +8,10 @@
   import type { RenameScope } from './lib/ipc/bindings/RenameScope';
   import type { SmartView } from './lib/ipc/bindings/SmartView';
   import type { TrackArtwork } from './lib/ipc/bindings/TrackArtwork';
+  import type { TrackQuery } from './lib/ipc/bindings/TrackQuery';
   import { pictureBase64 } from './lib/ipc/artwork';
+  import BatchTagSheet from './lib/prep/BatchTagSheet.svelte';
+  import type { PrepClient } from './lib/prep/Prep.svelte';
   import { CoreError } from './lib/ipc/client';
   import { core } from './lib/ipc/core';
   import { FilterState } from './lib/library/filters.svelte';
@@ -91,6 +94,25 @@
     retry: (job_id) => core.call('retry_job', { job_id }),
     clearFinished: () => core.call('clear_finished_jobs'),
   };
+  const prepClient: PrepClient = {
+    queue: (query, proposals_only) => core.call('prep_queue', { query, proposals_only }),
+    diff: (track_id) => core.call('staging_diff', { track_id }),
+    artwork: (track_id) => core.call('track_artwork', { track_id }),
+    acceptItems: (track_ids, fields = []) => core.call('accept_prep_items', { track_ids, fields }),
+    skipItems: (track_ids, fields = []) => core.call('skip_prep_items', { track_ids, fields }),
+    acceptAboveThreshold: (min_confidence) =>
+      core.call('accept_all_above_threshold', { min_confidence }),
+    setUserTag: (track_ids, edits) => core.call('set_user_tag', { track_ids, edits }),
+    acceptArtwork: (track_id) => core.call('accept_proposed_artwork', { track_id }),
+    skipArtwork: (track_id) => core.call('skip_proposed_artwork', { track_id }),
+    identifyOnline: (track_ids) => core.call('identify_online', { track_ids }),
+    identifyWithUrl: (track_id, url) => core.call('identify_with_url', { track_id, url }),
+    previewTagWrites: (track_ids) => core.call('preview_tag_writes', { track_ids }),
+    applyTagWrites: (track_ids) => core.call('apply_tag_writes', { track_ids }),
+    previewBatchTag: (track_ids, tool) => core.call('preview_batch_tag', { track_ids, tool }),
+    applyBatchTag: (track_ids, tool) => core.call('apply_batch_tag', { track_ids, tool }),
+    undoOperation: (operation_id) => core.call('undo_operation', { operation_id }),
+  };
 
   let shell: HTMLDivElement;
   let space = $state<SpaceName>('Library');
@@ -116,6 +138,11 @@
   let renameMounted = $state(false);
   let renameScope = $state<RenameScope>({ kind: 'tracks', track_ids: [] });
   let renameLabel = $state('');
+  let batchTagOpen = $state(false);
+  let batchTagMounted = $state(false);
+  let batchTagTrackIds = $state<number[]>([]);
+  let prepBatchQuery = $state<TrackQuery | null>(null);
+  let prepBatchLabel = $state<string | null>(null);
   let relinkTarget = $state<LibraryTrack | null>(null);
   let sourcesRevision = $state(0);
   let mixPlaying = $state(false);
@@ -313,6 +340,19 @@
     renameOpen = true;
   }
 
+  function openBatchTag(trackIds: number[]) {
+    if (trackIds.length === 0) return;
+    batchTagTrackIds = trackIds;
+    batchTagMounted = true;
+    batchTagOpen = true;
+  }
+
+  function sendToPrep(query: TrackQuery, label: string) {
+    prepBatchQuery = { ...query };
+    prepBatchLabel = label;
+    space = 'Prep';
+  }
+
   function previewTrack(item: LibraryTrack) {
     if (item.missing_since != null) return;
     void preview.toggleOrPlayTrack(item.id);
@@ -324,7 +364,7 @@
   }
 
   function toggleAutoPreview() {
-    if (space === 'Library') void preview.toggleAutoPreview(track?.id ?? null);
+    if (space === 'Library' || space === 'Prep') void preview.toggleAutoPreview(track?.id ?? null);
   }
 
   const track = $derived(pages.selectedTrack);
@@ -457,9 +497,13 @@
   );
 
   const commands: Command[] = $derived([
-    space === 'Mix'
-      ? { name: 'Go to the library', shortcut: '1', run: () => (space = 'Library') }
-      : { name: 'Go to Mix', shortcut: '4', run: () => (space = 'Mix') },
+    ...(space !== 'Library'
+      ? [{ name: 'Go to the library', shortcut: '1', run: () => (space = 'Library') }]
+      : []),
+    ...(space !== 'Prep'
+      ? [{ name: 'Go to Prep', shortcut: '2', run: () => (space = 'Prep') }]
+      : []),
+    ...(space !== 'Mix' ? [{ name: 'Go to Mix', shortcut: '4', run: () => (space = 'Mix') }] : []),
     { name: 'Scan a music folder', run: openScan },
     { name: 'Manage library sources', run: openSettings },
     { name: 'Open activity', run: openActivity },
@@ -518,6 +562,7 @@
     '[': toggleSidebar,
     d: toggleDock,
     '1': () => (space = 'Library'),
+    '2': () => (space = 'Prep'),
     '4': () => (space = 'Mix'),
   };
 
@@ -530,7 +575,7 @@
     if (command && key === 'k') {
       event.preventDefault();
       document.getElementById(commandInput)?.focus();
-    } else if (command && (key === '1' || key === '4')) {
+    } else if (command && (key === '1' || key === '2' || key === '4')) {
       event.preventDefault();
       keys[key]?.();
     } else if (
@@ -623,6 +668,25 @@
         {#await import('./lib/mix/Mix.svelte') then { default: Mix }}
           <Mix onplayingchange={(playing) => (mixPlaying = playing)} />
         {/await}
+      {:else if space === 'Prep'}
+        {#await import('./lib/prep/Prep.svelte') then { default: Prep }}
+          <Prep
+            client={prepClient}
+            batchQuery={prepBatchQuery}
+            batchLabel={prepBatchLabel}
+            revision={sourcesRevision}
+            previewTrackId={preview.trackId}
+            previewPlaying={preview.playing}
+            onclearbatch={() => {
+              prepBatchQuery = null;
+              prepBatchLabel = null;
+            }}
+            onopenlibrary={() => (space = 'Library')}
+            onrename={openRename}
+            onpreview={previewTrack}
+            onfocustrack={(item) => void preview.focus(item.id)}
+          />
+        {/await}
       {:else}
         <Library
           {pages}
@@ -634,6 +698,8 @@
           {activeCollection}
           loadFacets={() => core.call('library_facets')}
           {tableLayout}
+          onsendtoprep={sendToPrep}
+          onbatchtag={openBatchTag}
           onopen={showInspector}
           onpreview={previewTrack}
           onplay={playTrack}
@@ -757,6 +823,21 @@
     scopeLabel={renameLabel}
     client={renameClient}
     onrenamed={() => void pages.refresh()}
+  />
+{/if}
+
+{#if batchTagMounted}
+  <BatchTagSheet
+    bind:open={batchTagOpen}
+    trackIds={batchTagTrackIds}
+    sourceTrackId={track?.id ?? batchTagTrackIds[0] ?? null}
+    sourceTrackTitle={track?.title ?? null}
+    scopeLabel="Selected tracks"
+    client={{
+      preview: (ids, tool) => prepClient.previewBatchTag(ids, tool),
+      apply: (ids, tool) => prepClient.applyBatchTag(ids, tool),
+    }}
+    onapplied={() => void pages.refresh()}
   />
 {/if}
 

@@ -17,7 +17,7 @@ pub struct ArtworkFile {
     pub mime: &'static str,
 }
 
-fn artwork_of(library: &Database, track_id: i64) -> Result<TrackArtwork, ApiError> {
+pub(crate) fn artwork_of(library: &Database, track_id: i64) -> Result<TrackArtwork, ApiError> {
     let shown = library
         .track_artwork(track_id)
         .map_err(ApiError::library_unreadable)?;

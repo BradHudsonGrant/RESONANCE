@@ -1230,3 +1230,235 @@ test('a large rename in Activity pauses, holds its place, resumes and finishes',
     rmSync(batchFolder, { recursive: true, force: true });
   }
 });
+
+test('a batch of 50 mixed files goes from untagged to tagged in Prep using the keyboard only', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1586, height: 992 });
+  await page.goto('/');
+  await expect(page.getByRole('grid', { name: 'Tracks' })).toBeVisible({ timeout: 10_000 });
+
+  const prepFolder = join(musicFolder, '..', 'prep-batch-50');
+  const releaseFolder = join(prepFolder, '[VEC001] Vector Recordings - Horizon EP (2024)');
+  mkdirSync(releaseFolder, { recursive: true });
+
+  const frames = 2_205;
+  function makeWav(seed: number): Buffer {
+    const wav = Buffer.alloc(44 + frames * 2);
+    wav.write('RIFF', 0, 'ascii');
+    wav.writeUInt32LE(36 + frames * 2, 4);
+    wav.write('WAVEfmt ', 8, 'ascii');
+    wav.writeUInt32LE(16, 16);
+    wav.writeUInt16LE(1, 20);
+    wav.writeUInt16LE(1, 22);
+    wav.writeUInt32LE(44_100, 24);
+    wav.writeUInt32LE(44_100 * 2, 28);
+    wav.writeUInt16LE(2, 32);
+    wav.writeUInt16LE(16, 34);
+    wav.write('data', 36, 'ascii');
+    wav.writeUInt32LE(frames * 2, 40);
+    for (let i = 0; i < frames; i++) {
+      wav.writeInt16LE((((i + 1) * (seed + 5) * 131) & 0x3fff) - 0x2000, 44 + i * 2);
+    }
+    return wav;
+  }
+
+  function makeAiff(seed: number): Buffer {
+    const dataSize = frames * 2;
+    const soundSize = dataSize + 8;
+    const formSize = soundSize + 38;
+    const aiff = Buffer.alloc(54 + dataSize);
+    aiff.write('FORM', 0, 'ascii');
+    aiff.writeUInt32BE(formSize, 4);
+    aiff.write('AIFFCOMM', 8, 'ascii');
+    aiff.writeUInt32BE(18, 16);
+    aiff.writeUInt16BE(1, 20);
+    aiff.writeUInt32BE(frames, 22);
+    aiff.writeUInt16BE(16, 26);
+    Buffer.from([0x40, 0x0e, 0xac, 0x44, 0, 0, 0, 0, 0, 0]).copy(aiff, 28);
+    aiff.write('SSND', 38, 'ascii');
+    aiff.writeUInt32BE(soundSize, 42);
+    aiff.writeUInt32BE(0, 46);
+    aiff.writeUInt32BE(0, 50);
+    for (let i = 0; i < frames; i++) {
+      aiff.writeInt16BE((((i + 1) * (seed + 17) * 157) & 0x3fff) - 0x2000, 54 + i * 2);
+    }
+    return aiff;
+  }
+
+  for (let index = 1; index <= 40; index++) {
+    const num = String(index).padStart(2, '0');
+    writeFileSync(
+      join(releaseFolder, `${num} - Kaden - Horizon Cut ${num} (Extended Mix).wav`),
+      makeWav(index),
+    );
+  }
+  for (let index = 41; index <= 49; index++) {
+    const num = String(index).padStart(2, '0');
+    writeFileSync(
+      join(releaseFolder, `${num} - Kaden - Horizon Cut ${num} (VIP Mix).aiff`),
+      makeAiff(index),
+    );
+  }
+  // Track 50 has no artist in its filename, so its local confidence is 78% (< 90%) and stays in
+  // the queue after Shift+A for inline keyboard editing.
+  writeFileSync(join(releaseFolder, '50 - Horizon Finale.wav'), makeWav(50));
+
+  try {
+    // Prepare the library so only the 50 new untagged mixed files are pending in Prep.
+    await page.evaluate(
+      async ({ folder, rootMusicFolder }) => {
+        const socket = new WebSocket(new URL('/core', location.href));
+        await new Promise((ready) => (socket.onopen = ready));
+        let next = 0;
+        const call = <T>(command: string, params?: unknown) =>
+          new Promise<T>((resolve, reject) => {
+            const id = ++next;
+            socket.addEventListener('message', (event) => {
+              if (typeof event.data !== 'string') return;
+              const reply = JSON.parse(event.data);
+              if (reply.id !== id) return;
+              if (reply.error) reject(new Error(reply.error.message));
+              else resolve(reply.response.result as T);
+            });
+            socket.send(
+              JSON.stringify({ id, request: params ? { command, params } : { command } }),
+            );
+          });
+        await call('scan', { folder: rootMusicFolder });
+        const dirtyBefore = await call<Array<{ track_id: number }>>('preview_tag_writes', {
+          track_ids: [],
+        });
+        if (dirtyBefore.length > 0) {
+          await call('apply_tag_writes', {
+            track_ids: dirtyBefore.map((d) => d.track_id),
+          });
+        }
+        const before = await call<{ items: Array<{ track: { id: number } }> }>('prep_queue', {
+          proposals_only: true,
+        });
+        if (before.items.length > 0) {
+          await call('skip_prep_items', {
+            track_ids: before.items.map((item) => item.track.id),
+            fields: [],
+          });
+        }
+        await call('scan', { folder });
+        socket.close();
+      },
+      { folder: prepFolder, rootMusicFolder: musicFolder },
+    );
+
+    // Zero mouse clicks from here on: press 2 to open Prep.
+    await page.keyboard.press('2');
+    const prep = page.getByRole('region', { name: 'Prep' });
+    await expect(prep.getByRole('heading', { name: 'Prep', exact: true })).toBeVisible();
+    await expect(prep.getByText('50 pending')).toBeVisible({ timeout: 10_000 });
+    await expect(prep.getByRole('button', { name: /Accept above 90% \(49 tracks/ })).toBeVisible();
+
+    // Verify advancing to the next item with ArrowDown renders inside one 16 ms frame.
+    const advanceMs = await page.evaluate(async () => {
+      const start = performance.now();
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      return performance.now() - start;
+    });
+    expect(advanceMs).toBeLessThan(32);
+
+    // Accept all 49 tracks above the 90% threshold with Shift+A.
+    await page.keyboard.press('Shift+A');
+    await expect(prep.getByText('1 pending')).toBeVisible();
+    await expect(prep.getByText(/49 to write/)).toBeVisible();
+    await expect(prep.getByRole('heading', { name: /50 - Horizon Finale/ })).toBeVisible();
+
+    // Edit the remaining 50th track inline with E, move to Artist with ArrowDown, type Kaden,
+    // save with Enter, and accept its remaining proposed fields with Enter.
+    await page.keyboard.press('e');
+    await expect(prep.getByRole('textbox', { name: 'Edit Title' })).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(prep.getByRole('textbox', { name: 'Edit Artist' })).toBeFocused();
+    await page.keyboard.type('Kaden');
+    await page.keyboard.press('Enter');
+    await expect(prep.getByRole('textbox', { name: 'Edit Artist' })).toHaveCount(0);
+
+    await page.keyboard.press('Enter');
+    await expect(prep.getByRole('heading', { name: 'Nothing waiting in Prep' })).toBeVisible();
+    await expect(prep.getByText(/50 to write/)).toBeVisible();
+
+    // Open Write tags sheet with W and confirm writing all 50 files to disk with Enter.
+    await page.keyboard.press('w');
+    const writeDialog = page.getByRole('dialog', { name: 'Write tags to files' });
+    await expect(writeDialog).toBeVisible();
+    await expect(writeDialog.getByRole('button', { name: 'Write tags to 50 files' })).toBeEnabled();
+    await page.keyboard.press('Enter');
+    await expect(writeDialog).toBeHidden({ timeout: 20_000 });
+    await expect(prep.getByText('Wrote tags to 50 files')).toBeVisible();
+
+    // Verify all 50 mixed files on disk now hold their tags and have zero unwritten changes left.
+    const verified = await page.evaluate(async () => {
+      const socket = new WebSocket(new URL('/core', location.href));
+      await new Promise((ready) => (socket.onopen = ready));
+      let next = 0;
+      const call = <T>(command: string, params?: unknown) =>
+        new Promise<T>((resolve, reject) => {
+          const id = ++next;
+          socket.addEventListener('message', (event) => {
+            if (typeof event.data !== 'string') return;
+            const reply = JSON.parse(event.data);
+            if (reply.id !== id) return;
+            if (reply.error) reject(new Error(reply.error.message));
+            else resolve(reply.response.result as T);
+          });
+          socket.send(JSON.stringify({ id, request: params ? { command, params } : { command } }));
+        });
+      const result = await call<{
+        tracks: Array<{ id: number; title: string; artist: string | null }>;
+      }>('tracks', {
+        offset: 0,
+        limit: 100,
+        query: { text: 'Horizon' },
+      });
+      const pendingWrites = await call<Array<unknown>>('preview_tag_writes', {
+        track_ids: result.tracks.map((track) => track.id),
+      });
+      socket.close();
+      return {
+        count: result.tracks.length,
+        allHaveKaden: result.tracks.every((track) => track.artist === 'Kaden'),
+        pendingWrites: pendingWrites.length,
+      };
+    });
+    expect(verified).toEqual({
+      count: 50,
+      allHaveKaden: true,
+      pendingWrites: 0,
+    });
+
+    // Return to Library with 1.
+    await page.keyboard.press('1');
+    await expect(page.getByRole('grid', { name: 'Tracks' })).toBeVisible();
+  } finally {
+    await page.evaluate(async () => {
+      const socket = new WebSocket(new URL('/core', location.href));
+      await new Promise((ready) => (socket.onopen = ready));
+      let next = 0;
+      const call = <T>(command: string, params?: unknown) =>
+        new Promise<T>((resolve, reject) => {
+          const id = ++next;
+          socket.addEventListener('message', (event) => {
+            if (typeof event.data !== 'string') return;
+            const reply = JSON.parse(event.data);
+            if (reply.id !== id) return;
+            if (reply.error) reject(new Error(reply.error.message));
+            else resolve(reply.response.result as T);
+          });
+          socket.send(JSON.stringify({ id, request: params ? { command, params } : { command } }));
+        });
+      const sources = await call<{ sources: Array<{ id: number; folder: string }> }>('sources');
+      const found = sources.sources.find((s) => s.folder.includes('prep-batch-50'));
+      if (found) await call('remove_source', { source_id: found.id });
+      socket.close();
+    });
+    rmSync(prepFolder, { recursive: true, force: true });
+  }
+});

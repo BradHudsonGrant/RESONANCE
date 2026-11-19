@@ -238,3 +238,111 @@ fn accepting_above_a_threshold_and_skipping_report_what_they_did() {
         other => panic!("expected an accept report, got {other:?}"),
     }
 }
+
+#[test]
+fn prep_queue_and_batch_tools_fix_case_replace_text_and_apply_release_fields() {
+    let mut database = Database::open_in_memory().unwrap();
+    let source = database.source("D:\\Club").unwrap();
+    let file = |path: &str, tags: Vec<(TagField, String)>| ScannedFile {
+        path: path.to_owned(),
+        size_bytes: 1,
+        modified_ns: 0,
+        format: AudioFormat::Wav,
+        audio: None,
+        tags,
+    };
+    database
+        .record_scan(
+            source,
+            &[
+                file(
+                    "[VEC001] Vector Recordings - Horizon EP (2024)/01 - dj kaden - echo chamber (uk vip mix).wav",
+                    vec![],
+                ),
+                file(
+                    "[VEC001] Vector Recordings - Horizon EP (2024)/02 - mc conrad - night drive [www.promo.test].wav",
+                    vec![],
+                ),
+            ],
+        )
+        .unwrap();
+    let api = Api::new_silent(database);
+
+    let Response::PrepQueue(snapshot) = api
+        .handle(request(json!({
+            "command": "prep_queue",
+            "params": { "proposals_only": true }
+        })))
+        .unwrap()
+    else {
+        panic!("expected a prep queue snapshot");
+    };
+    assert_eq!(snapshot.items.len(), 2);
+    assert!(snapshot.items[0].pending_fields >= 6);
+    assert_eq!(
+        snapshot.items[0].release.as_ref().map(|r| r.title.as_str()),
+        Some("Horizon EP")
+    );
+    let ids: Vec<i64> = snapshot.items.iter().map(|item| item.track.id).collect();
+
+    let Response::AcceptPrepItems(accepted) = api
+        .handle(request(json!({
+            "command": "accept_prep_items",
+            "params": { "track_ids": [ids[0]], "fields": [] }
+        })))
+        .unwrap()
+    else {
+        panic!("expected accepted proposals");
+    };
+    assert_eq!(accepted.tracks, 1);
+    assert!(accepted.fields >= 6);
+
+    let Response::ApplyBatchTag(case_report) = api
+        .handle(request(json!({
+            "command": "apply_batch_tag",
+            "params": {
+                "track_ids": [ids[0]],
+                "tool": { "kind": "fix_case", "fields": ["title", "artist", "mix"], "text_case": "title" }
+            }
+        })))
+        .unwrap()
+    else {
+        panic!("expected batch tag report");
+    };
+    assert_eq!(case_report.tracks, 1);
+
+    let Response::ApplyBatchTag(release_report) = api
+        .handle(request(json!({
+            "command": "apply_batch_tag",
+            "params": {
+                "track_ids": [ids[0]],
+                "tool": { "kind": "apply_release_fields", "source_track_id": ids[0], "fields": [] }
+            }
+        })))
+        .unwrap()
+    else {
+        panic!("expected release batch report");
+    };
+    assert_eq!(release_report.tracks, 1, "copied release fields to track 2");
+    assert_eq!(release_report.fields, 4);
+
+    let after_first = diff(&api, ids[0]);
+    fn value_of(d: &TrackStagingDiff, name: TagName) -> Option<&str> {
+        d.fields
+            .iter()
+            .find(|f| f.field == name)
+            .and_then(|f| f.current_value.as_deref())
+    }
+    assert_eq!(value_of(&after_first, TagName::Artist), Some("DJ Kaden"));
+    assert_eq!(value_of(&after_first, TagName::Title), Some("Echo Chamber"));
+    assert_eq!(value_of(&after_first, TagName::Mix), Some("UK VIP Mix"));
+
+    let after_second = diff(&api, ids[1]);
+    assert_eq!(value_of(&after_second, TagName::Album), Some("Horizon EP"));
+    assert_eq!(
+        value_of(&after_second, TagName::Label),
+        Some("Vector Recordings")
+    );
+    assert_eq!(value_of(&after_second, TagName::CatNo), Some("VEC001"));
+    assert_eq!(value_of(&after_second, TagName::Year), Some("2024"));
+}

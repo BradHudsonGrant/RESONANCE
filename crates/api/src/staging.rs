@@ -57,7 +57,7 @@ pub(crate) fn tag_name(field: TagField) -> TagName {
     }
 }
 
-fn staged_field(diff: FieldDiff) -> StagedField {
+pub(crate) fn staged_field(diff: FieldDiff) -> StagedField {
     let changes = diff.changes();
     let proposal = diff.proposal.as_ref();
     StagedField {
@@ -81,7 +81,7 @@ fn staged_field(diff: FieldDiff) -> StagedField {
     }
 }
 
-fn fields_of(names: &[TagName]) -> Vec<TagField> {
+pub(crate) fn fields_of(names: &[TagName]) -> Vec<TagField> {
     names.iter().copied().map(tag_field).collect()
 }
 

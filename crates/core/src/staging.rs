@@ -127,6 +127,11 @@ pub fn normalise_value(field: TagField, raw: &str) -> Result<String, TagValueErr
             .filter(|digits| digits.bytes().all(|byte| byte.is_ascii_digit()))
             .map(str::to_owned)
             .ok_or_else(|| TagValueError::NotAYear(value.to_owned())),
+        TagField::TrackNumber => Ok(value
+            .parse::<u32>()
+            .ok()
+            .filter(|&number| number > 0)
+            .map_or_else(|| value.to_owned(), |number| number.to_string())),
         _ => Ok(value.to_owned()),
     }
 }

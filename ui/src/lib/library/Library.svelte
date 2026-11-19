@@ -35,7 +35,9 @@
     /** Quick filters, token words and smart views, kept by the core. */
     filters?: FilterState;
     /** The hook for sending a filter's tracks to Prep, wired when Prep lands. */
-    onsendtoprep?: (query: TrackQuery) => void;
+    onsendtoprep?: (query: TrackQuery, label: string) => void;
+    /** Opens the batch tag tools sheet for the selected tracks. */
+    onbatchtag?: (trackIds: number[]) => void;
     onopen?: () => void;
     onpreview?: (track: LibraryTrack) => void;
     onplay?: (track: LibraryTrack) => void;
@@ -93,6 +95,7 @@
     tableLayout = new TableLayoutState(),
     filters = new FilterState(),
     onsendtoprep,
+    onbatchtag,
     onopen,
     onpreview,
     onplay,
@@ -345,7 +348,16 @@
               onsave={openSave}
               onclear={clearDrawerFilters}
               onchange={(change) => void filters.change(change)}
-              onsendtoprep={onsendtoprep ? () => onsendtoprep(pages.query) : undefined}
+              onsendtoprep={onsendtoprep
+                ? () =>
+                    onsendtoprep(
+                      pages.query,
+                      summaries
+                        .map((summary) => summary?.label)
+                        .filter(Boolean)
+                        .join(', ') || 'Filtered tracks',
+                    )
+                : undefined}
             />
           {/if}
         </div>
@@ -379,6 +391,11 @@
           >
             Add to collection
           </Button>
+          {#if onbatchtag}
+            <Button size="sm" onclick={() => onbatchtag(table?.checkedTrackIds() ?? [])}>
+              Batch tags
+            </Button>
+          {/if}
           {#if onrename}
             <Button
               size="sm"

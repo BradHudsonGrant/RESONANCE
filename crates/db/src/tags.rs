@@ -151,7 +151,10 @@ fn proposals_of_track(
     Ok(proposals)
 }
 
-fn tag_layers_of(connection: &Connection, track_id: i64) -> Result<Option<TagLayers>, DbError> {
+pub(crate) fn tag_layers_of(
+    connection: &Connection,
+    track_id: i64,
+) -> Result<Option<TagLayers>, DbError> {
     let Some(asset_id) = primary_asset(connection, track_id)? else {
         return Ok(None);
     };
@@ -180,7 +183,7 @@ pub(crate) fn populate_user_tags(
 }
 
 /// Refreshes every asset of the track after its user layer changed.
-fn refresh_track(tx: &Transaction<'_>, track_id: i64) -> Result<(), DbError> {
+pub(crate) fn refresh_track(tx: &Transaction<'_>, track_id: i64) -> Result<(), DbError> {
     let assets: Vec<(i64, String)> = tx
         .prepare_cached("SELECT id, path FROM asset WHERE track_id = ?1")?
         .query_map([track_id], |row| Ok((row.get(0)?, row.get(1)?)))?
@@ -192,7 +195,7 @@ fn refresh_track(tx: &Transaction<'_>, track_id: i64) -> Result<(), DbError> {
     Ok(())
 }
 
-fn write_user_tag(
+pub(crate) fn write_user_tag(
     tx: &Transaction<'_>,
     track_id: i64,
     field: TagField,
@@ -213,14 +216,14 @@ fn write_user_tag(
     Ok(())
 }
 
-fn track_exists(tx: &Transaction<'_>, track_id: i64) -> Result<bool, DbError> {
+pub(crate) fn track_exists(tx: &Transaction<'_>, track_id: i64) -> Result<bool, DbError> {
     Ok(tx
         .prepare_cached("SELECT EXISTS(SELECT 1 FROM track WHERE id = ?1)")?
         .query_row([track_id], |row| row.get(0))?)
 }
 
 /// Copies the proposals for `fields` into the user layer. Returns how many were taken.
-fn accept_in_tx(
+pub(crate) fn accept_in_tx(
     tx: &Transaction<'_>,
     track_id: i64,
     fields: &[TagField],
