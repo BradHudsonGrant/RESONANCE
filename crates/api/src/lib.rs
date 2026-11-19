@@ -25,6 +25,7 @@ use command::{
 use error::ApiError;
 use identity::{run_identify_pass, to_command_report};
 use jobs::{enqueue_identify_if_needed, execute_job, scan_source_job};
+use resonance_core::key::Key;
 use resonance_core::library::{AudioFormat, ScannedFile, TagField};
 use resonance_core::search::{
     FilterPill as CoreFilterPill, SortDirection as CoreSortDirection, TrackQuery as CoreTrackQuery,
@@ -674,6 +675,14 @@ fn shown_file(row: &TrackRow) -> ScannedFile {
     file
 }
 
+pub fn track_key(key: Key) -> TrackKey {
+    TrackKey {
+        camelot: key.camelot(),
+        open_key: key.open_key(),
+        name: key.name().to_owned(),
+    }
+}
+
 pub(crate) fn library_track(row: &TrackRow) -> LibraryTrack {
     let shown = shown_file(row);
     let file = &shown;
@@ -691,10 +700,8 @@ pub(crate) fn library_track(row: &TrackRow) -> LibraryTrack {
         label: tag(TagField::Label),
         comment: tag(TagField::Comment),
         bpm: file.bpm(),
-        key: file.key().map(|key| TrackKey {
-            camelot: key.camelot(),
-            name: key.name().to_owned(),
-        }),
+        key: file.key().map(track_key),
+
         key_tag: tag(TagField::Key),
         format: file.format.name().to_owned(),
         location: file
@@ -820,6 +827,7 @@ mod tests {
             track.key,
             Some(TrackKey {
                 camelot: "11A".to_owned(),
+                open_key: "4m".to_owned(),
                 name: "F#m".to_owned()
             })
         );

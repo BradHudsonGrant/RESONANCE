@@ -56,6 +56,16 @@ impl Key {
         format!("{}{ring}", self.hour)
     }
 
+    /// The Open Key code, such as `1m`, as Traktor shows it. `m` is minor and `d` is major, and
+    /// each number sits seven hours round the wheel from its Camelot code.
+    pub fn open_key(self) -> String {
+        let ring = match self.mode {
+            Mode::Minor => 'm',
+            Mode::Major => 'd',
+        };
+        format!("{}{ring}", (self.hour + 4) % 12 + 1)
+    }
+
     /// The musical name DJ software shows for this key, leaning to flats.
     pub fn name(self) -> &'static str {
         let names = match self.mode {
@@ -272,6 +282,28 @@ mod tests {
         assert_eq!(camelot_of("6d"), "1B");
         assert_eq!(camelot_of("1m"), camelot_of("Am"));
         assert!("13m".parse::<Key>().is_err());
+    }
+
+    #[test]
+    fn every_key_reads_back_as_itself_in_each_notation() {
+        let mut open_keys = std::collections::HashSet::new();
+        for key in Key::all() {
+            assert_eq!(key.camelot().parse::<Key>().unwrap(), key);
+            assert_eq!(key.open_key().parse::<Key>().unwrap(), key);
+            assert_eq!(key.name().parse::<Key>().unwrap(), key);
+            assert!(open_keys.insert(key.open_key()));
+        }
+        assert_eq!(open_keys.len(), 24);
+        let a_minor = "Am".parse::<Key>().unwrap();
+        assert_eq!(
+            (a_minor.camelot(), a_minor.open_key()),
+            ("8A".to_owned(), "1m".to_owned())
+        );
+        let b_major = "B".parse::<Key>().unwrap();
+        assert_eq!(
+            (b_major.camelot(), b_major.open_key()),
+            ("1B".to_owned(), "6d".to_owned())
+        );
     }
 
     #[test]

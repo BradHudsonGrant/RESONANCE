@@ -6,6 +6,8 @@
   import type { LibraryFacets } from '../ipc/bindings/LibraryFacets';
   import type { TrackFormat } from '../ipc/bindings/TrackFormat';
   import type { TrackQuery } from '../ipc/bindings/TrackQuery';
+  import { KEY_WHEEL } from '../ipc/bindings/KeyWheel';
+  import { keyCode, keySecond } from './key-notation.svelte';
   import { countActiveDrawerFilters } from './track-pages.svelte';
 
   interface Props {
@@ -22,34 +24,6 @@
     { id: 'wav', label: 'WAV' },
     { id: 'aiff', label: 'AIFF' },
     { id: 'm4a', label: 'M4A' },
-  ];
-
-  // Every Camelot hour paired with the minor and major keys matching Core's `Key`.
-  const camelotKeys: { code: string; name: string }[] = [
-    { code: '1A', name: 'Abm' },
-    { code: '2A', name: 'Ebm' },
-    { code: '3A', name: 'Bbm' },
-    { code: '4A', name: 'Fm' },
-    { code: '5A', name: 'Cm' },
-    { code: '6A', name: 'Gm' },
-    { code: '7A', name: 'Dm' },
-    { code: '8A', name: 'Am' },
-    { code: '9A', name: 'Em' },
-    { code: '10A', name: 'Bm' },
-    { code: '11A', name: 'F#m' },
-    { code: '12A', name: 'Dbm' },
-    { code: '1B', name: 'B' },
-    { code: '2B', name: 'F#' },
-    { code: '3B', name: 'Db' },
-    { code: '4B', name: 'Ab' },
-    { code: '5B', name: 'Eb' },
-    { code: '6B', name: 'Bb' },
-    { code: '7B', name: 'F' },
-    { code: '8B', name: 'C' },
-    { code: '9B', name: 'G' },
-    { code: '10B', name: 'D' },
-    { code: '11B', name: 'A' },
-    { code: '12B', name: 'E' },
   ];
 
   let { open = $bindable(false), query, facets, onchange, onclear }: Props = $props();
@@ -155,18 +129,20 @@
           <span class="bounds numeric">{selectedKeys.size} selected</span>
         {/if}
       </div>
-      <div class="key-grid" role="group" aria-label="Camelot keys">
-        {#each camelotKeys as item (item.code)}
+      <div class="key-grid" role="group" aria-label="Keys">
+        {#each KEY_WHEEL as item (item.camelot)}
+          {@const code = keyCode(item)}
+          {@const other = keySecond(item)}
           <button
             type="button"
-            class={['key-btn', { pressed: selectedKeys.has(item.code) }]}
-            aria-label="{item.code} ({item.name})"
-            aria-pressed={selectedKeys.has(item.code)}
-            title="{item.code} · {item.name}"
-            onclick={() => toggleKey(item.code)}
+            class={['key-btn', { pressed: selectedKeys.has(item.camelot) }]}
+            aria-label="{code} ({other})"
+            aria-pressed={selectedKeys.has(item.camelot)}
+            title="{code} · {other}"
+            onclick={() => toggleKey(item.camelot)}
           >
-            <span class="key-code numeric">{item.code}</span>
-            <span class="key-name">{item.name}</span>
+            <span class="key-code numeric">{code}</span>
+            <span class="key-name">{other}</span>
           </button>
         {/each}
       </div>

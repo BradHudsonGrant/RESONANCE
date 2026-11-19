@@ -23,7 +23,7 @@ A virtualised table: a 31 px header and 33 px rows, with 1 px lines between rows
 | Waveform | 140 px, 88 px when narrow | `Waveform mode="inline"`                                            | narrows below 740 px, hides below 640 px | #52, peaks from M5        |
 | Artist   | `minmax(120px, 1.3fr)`    | 13 px sans, Text 2                                                  | never                                    | #52                       |
 | BPM      | 58 px                     | 13 px mono, right aligned                                           | never                                    | #52, analysed in M5       |
-| Key      | 52 px                     | 13 px mono                                                          | never                                    | #52, analysed in M5       |
+| Key      | 52 px                     | 13 px mono, in the notation chosen in Settings                      | never                                    | #52, analysed in M5       |
 | Energy   | 54 px                     | `MeterBar`                                                          | hides below 820 px                       | #52, analysed in M5       |
 | Time     | 56 px                     | 13 px mono, right aligned, Text 2                                   | never                                    | #52                       |
 | Actions  | 56 px                     | 24 px favourite button and 24 px more button                        | never                                    | #52 for more, M2 for star |

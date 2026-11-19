@@ -10,6 +10,7 @@
   import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
   import CollectionMenu from './CollectionMenu.svelte';
   import { audioSummary, duration, fileSize, tempo, trackSeed } from './format';
+  import { keyDetail } from './key-notation.svelte';
 
   interface Props {
     track: LibraryTrack | undefined;
@@ -70,7 +71,7 @@
   }
 
   function keyText(item: LibraryTrack): string | null {
-    if (item.key) return `${item.key.camelot} · ${item.key.name}`;
+    if (item.key) return keyDetail(item.key);
     return item.key_tag;
   }
 
