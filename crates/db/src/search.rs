@@ -208,7 +208,8 @@ pub(crate) fn write_tag_values(
     tx.prepare_cached("DELETE FROM asset_tag_value WHERE asset_id = ?1")?
         .execute([asset_id])?;
     let mut add = tx.prepare_cached(
-        "INSERT INTO asset_tag_value (asset_id, field, sort_value) VALUES (?1, ?2, ?3)",
+        "INSERT INTO asset_tag_value (asset_id, field, sort_value, included)
+         SELECT ?1, ?2, ?3, included FROM asset WHERE id = ?1",
     )?;
     for field in generic_tag_fields() {
         let value = tags
@@ -698,8 +699,8 @@ fn sort_terms(
 
 /// The whole library sorted by a generic tag on its own: the tracks that have the tag in the
 /// order of the tag value index, then the ones that do not in asset order. Each half is one walk
-/// along an index. SQLite sorted every row when the halves were one `UNION ALL`, so they are read
-/// one after the other here.
+/// along an index that holds everything it needs. SQLite sorted every row when the halves were
+/// one `UNION ALL`, so they are read one after the other here.
 struct TagSort {
     field: TagField,
     direction: SortDirection,
@@ -724,19 +725,17 @@ impl TagSort {
     fn tagged_sql(&self) -> String {
         let dir = sql_direction(self.direction);
         format!(
-            "SELECT asset_tag_value.asset_id
-             FROM asset_tag_value CROSS JOIN asset ON asset.id = asset_tag_value.asset_id
-             WHERE asset_tag_value.field = ?1 AND asset.included = 1
-             ORDER BY asset_tag_value.sort_value {dir}, asset_tag_value.asset_id {dir}
+            "SELECT asset_id FROM asset_tag_value
+             WHERE field = ?1 AND included = 1
+             ORDER BY sort_value {dir}, asset_id {dir}
              LIMIT ?2 OFFSET ?3"
         )
     }
 
-    // `NOT INDEXED` keeps SQLite on the table's own order, which is the order wanted.
     fn untagged_sql(&self) -> String {
         let dir = sql_direction(self.direction);
         format!(
-            "SELECT asset.id FROM asset NOT INDEXED
+            "SELECT asset.id FROM asset INDEXED BY asset_included_id
              WHERE asset.included = 1 AND NOT EXISTS (
                  SELECT 1 FROM asset_tag_value
                  WHERE asset_tag_value.asset_id = asset.id AND asset_tag_value.field = ?1
@@ -755,9 +754,7 @@ impl TagSort {
         let field = self.field.name();
         let tagged: u32 = connection
             .prepare_cached(
-                "SELECT count(*)
-                 FROM asset_tag_value CROSS JOIN asset ON asset.id = asset_tag_value.asset_id
-                 WHERE asset_tag_value.field = ?1 AND asset.included = 1",
+                "SELECT count(*) FROM asset_tag_value WHERE field = ?1 AND included = 1",
             )?
             .query_row([field], |row| row.get(0))?;
         let wanted = limit.map_or(-1, i64::from);

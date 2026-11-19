@@ -2,9 +2,10 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { DEFAULT_TABLE_LAYOUT } from '../ipc/bindings/DefaultTableLayout';
 import { KEY_WHEEL } from '../ipc/bindings/KeyWheel';
 import SettingsSheet from '../shell/SettingsSheet.svelte';
-import { dataColumns } from './columns';
+import { cellText } from './columns';
 import { fakeTrack } from './fake-library';
 import FilterDrawer from './FilterDrawer.svelte';
 import { keyCode, keyDetail, keyNotation, setKeyNotation } from './key-notation.svelte';
@@ -12,7 +13,7 @@ import { keyCode, keyDetail, keyNotation, setKeyNotation } from './key-notation.
 HTMLElement.prototype.showPopover ??= () => {};
 HTMLElement.prototype.hidePopover ??= () => {};
 
-const keyColumn = dataColumns.find((column) => column.key === 'key')!;
+const keyColumn = DEFAULT_TABLE_LAYOUT.columns.find((column) => column.id === 'key')!;
 
 afterEach(() => {
   setKeyNotation('camelot');
@@ -38,7 +39,7 @@ describe('key notation', () => {
     expect(keyNotation.current).toBe('camelot');
     setKeyNotation('open_key');
     expect(localStorage.getItem('resonance-key-notation')).toBe('open_key');
-    expect(keyColumn.text(fakeTrack(0))).toBe('1m');
+    expect(cellText(keyColumn, fakeTrack(0))).toBe('1m');
   });
 
   it('changes the table, filter drawer and Settings at once when chosen in Settings', async () => {
@@ -58,7 +59,7 @@ describe('key notation', () => {
     await fireEvent.click(screen.getByRole('tab', { name: 'Open Key' }));
 
     expect(keyNotation.current).toBe('open_key');
-    expect(keyColumn.text(fakeTrack(0))).toBe('1m');
+    expect(cellText(keyColumn, fakeTrack(0))).toBe('1m');
     const aMinor = within(keys()).getByRole('button', { name: '1m (Am)' });
     expect(aMinor.getAttribute('aria-pressed')).toBe('true');
 

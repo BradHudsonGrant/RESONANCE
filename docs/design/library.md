@@ -49,7 +49,7 @@ The menu takes focus on its first item, and `ArrowDown`, `ArrowUp`, `Home` and `
 
 ### Order and width
 
-A header can be dragged left or right to move its column, and the other headers part to show where it will land. With a header focused, `Alt+Left` and `Alt+Right` move it one place.
+A header can be dragged left or right to move its column, and a 2 px line in Text shows where it will land. With a header focused, `Alt+Left` and `Alt+Right` move it one place.
 
 Every column has a 6 px resize handle on its right edge, a `separator` in the tab order with its width as its value. Dragging it, or `ArrowLeft` and `ArrowRight` while it has focus (8 px a step, 1 px with `Shift`), sets the width between 40 and 640 px. A double click, or `Enter` on the handle, fits the column to its widest value in view. Title and Artist share the room the other columns leave until the user gives them a width.
 

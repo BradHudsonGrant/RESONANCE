@@ -298,3 +298,31 @@ fn only_tags_some_track_has_are_offered_as_columns() {
         [TagField::TrackNumber]
     );
 }
+
+#[test]
+fn an_ignored_folder_leaves_the_tag_sort_and_comes_back() {
+    let mut db = library();
+    let source = db.source(r"D:\Club").expect("source reads");
+    db.record_scan(
+        source,
+        &[file(
+            "skip/e.flac",
+            5,
+            None,
+            &[(TagField::Title, "Echo"), (TagField::TrackNumber, "1")],
+        )],
+    )
+    .expect("scan records");
+    let tag = sorted(
+        TrackSortField::Tag(TagField::TrackNumber),
+        SortDirection::Asc,
+    );
+    assert_eq!(titles(&db, &tag)[0], "Echo");
+
+    db.set_ignored_folders(&["skip"]).expect("folders save");
+    assert!(!titles(&db, &tag).contains(&"Echo".to_owned()));
+    assert_eq!(titles(&db, &tag).len(), 4);
+
+    db.set_ignored_folders::<&str>(&[]).expect("folders save");
+    assert_eq!(titles(&db, &tag)[0], "Echo");
+}

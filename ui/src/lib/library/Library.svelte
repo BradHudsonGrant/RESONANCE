@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
+
   import Button from '../design/Button.svelte';
   import FilterPill from '../design/FilterPill.svelte';
   import GridDots from '../design/GridDots.svelte';
@@ -12,6 +14,7 @@
   import type { TrackQuery } from '../ipc/bindings/TrackQuery';
   import FilterDrawer from './FilterDrawer.svelte';
   import { trackCount } from './format';
+  import { sameSort, sortQuery, TableLayoutState } from './table-layout.svelte';
   import { countActiveDrawerFilters, hasQueryFilters, type TrackPages } from './track-pages.svelte';
   import TrackTable from './TrackTable.svelte';
 
@@ -23,6 +26,8 @@
     collections?: LibraryCollection[];
     activeCollection?: LibraryCollection | null;
     loadFacets?: () => Promise<LibraryFacets>;
+    /** The table's columns, widths, wrap and sort, kept by the core. */
+    tableLayout?: TableLayoutState;
     onopen?: () => void;
     onpreview?: (track: LibraryTrack) => void;
     onrelink?: (track: LibraryTrack) => void;
@@ -75,6 +80,7 @@
     collections = [],
     activeCollection = null,
     loadFacets,
+    tableLayout = new TableLayoutState(),
     onopen,
     onpreview,
     onrelink,
@@ -89,6 +95,20 @@
   }: Props = $props();
 
   let table: TrackTable | undefined = $state();
+
+  $effect(() => {
+    void tableLayout.load().catch(() => {
+      // The table keeps the default columns until the core can be read.
+    });
+  });
+
+  // The kept sort is the table's, so the query follows it whenever it changes.
+  $effect(() => {
+    const wanted = sortQuery(tableLayout.current);
+    untrack(() => {
+      if (!sameSort(pages.query, wanted)) void pages.setQuery({ ...pages.query, ...wanted });
+    });
+  });
   let checkedCount = $state(0);
   let allChecked = $state(false);
   const selecting = $derived(checkedCount > 0);
@@ -137,6 +157,8 @@
     if (pages.query.collection_id != null) keepContext.collection_id = pages.query.collection_id;
     if (pages.query.sort) keepContext.sort = pages.query.sort;
     if (pages.query.direction) keepContext.direction = pages.query.direction;
+    if (pages.query.then_sort) keepContext.then_sort = pages.query.then_sort;
+    if (pages.query.then_direction) keepContext.then_direction = pages.query.then_direction;
     void pages.setQuery(keepContext);
   }
 
@@ -357,7 +379,7 @@
         {onaddtocollection}
         {onremovefromcollection}
         {oncreatecollectionandadd}
-        onsort={(sort, direction) => void pages.setQuery({ ...pages.query, sort, direction })}
+        layout={tableLayout}
       />
     {/if}
   </div>

@@ -4,6 +4,7 @@ use resonance_core::columns::{
     ColumnGroup, LayoutChange, LibraryColumn, MAX_COLUMN_WIDTH_PX, MIN_COLUMN_WIDTH_PX, SortColumn,
     TableLayout,
 };
+use resonance_core::library::TagField;
 use resonance_core::search::{SortDirection as CoreSortDirection, TrackSortField as CoreField};
 use resonance_db::Database;
 
@@ -84,6 +85,15 @@ fn described(library: &Database, layout: &TableLayout) -> Result<LibraryTableLay
     let tags = library
         .tags_in_library()
         .map_err(ApiError::library_unreadable)?;
+    Ok(describe(layout, tags))
+}
+
+/// The table a new library opens with, which the UI draws before the core has answered.
+pub fn default_table_layout() -> LibraryTableLayout {
+    describe(&TableLayout::default(), Vec::new())
+}
+
+fn describe(layout: &TableLayout, tags: Vec<TagField>) -> LibraryTableLayout {
     let mut offered: Vec<LibraryColumn> = LibraryColumn::fixed().to_vec();
     offered.extend(tags.into_iter().map(LibraryColumn::Tag));
     for shown in &layout.columns {
@@ -112,7 +122,7 @@ fn described(library: &Database, layout: &TableLayout) -> Result<LibraryTableLay
             removable: column != LibraryColumn::Title,
         }
     };
-    Ok(LibraryTableLayout {
+    LibraryTableLayout {
         columns: layout
             .columns
             .iter()
@@ -138,7 +148,7 @@ fn described(library: &Database, layout: &TableLayout) -> Result<LibraryTableLay
             .collect(),
         min_width_px: MIN_COLUMN_WIDTH_PX,
         max_width_px: MAX_COLUMN_WIDTH_PX,
-    })
+    }
 }
 
 pub(crate) fn core_direction(direction: SortDirection) -> CoreSortDirection {

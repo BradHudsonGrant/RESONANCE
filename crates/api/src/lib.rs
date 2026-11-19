@@ -14,6 +14,8 @@ pub mod serve;
 mod sources;
 mod staging;
 mod table_layout;
+
+pub use table_layout::default_table_layout;
 mod tag_writes;
 
 use std::collections::HashMap;

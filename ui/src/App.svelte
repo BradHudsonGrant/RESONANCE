@@ -16,6 +16,7 @@
   import RenameSheet, { type RenameClient } from './lib/library/RenameSheet.svelte';
   import ScanFolder from './lib/library/ScanFolder.svelte';
   import type { SourcesClient } from './lib/library/SourcesSettings.svelte';
+  import { TableLayoutState } from './lib/library/table-layout.svelte';
   import { TrackPages } from './lib/library/track-pages.svelte';
   import ActivitySheet, { type ActivityClient } from './lib/shell/ActivitySheet.svelte';
   import CommandBar, { type Command } from './lib/shell/CommandBar.svelte';
@@ -32,6 +33,10 @@
   const commandInput = 'command-bar';
   const pages = new TrackPages((offset, limit, query) =>
     core.call('tracks', { offset, limit, query }),
+  );
+  const tableLayout = new TableLayoutState(
+    () => core.call('table_layout'),
+    (change) => core.call('change_table_layout', { change }),
   );
   const preview = new PreviewPlayer(core);
   const sourcesClient: SourcesClient = {
@@ -574,6 +579,7 @@
           {collections}
           {activeCollection}
           loadFacets={() => core.call('library_facets')}
+          {tableLayout}
           onopen={showInspector}
           onpreview={previewTrack}
           onrelink={openRelink}

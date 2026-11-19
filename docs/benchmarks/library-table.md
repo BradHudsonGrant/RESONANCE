@@ -258,3 +258,54 @@ After the last jump, every rendered row filled in `30.5`, `26.0`, `0.0`, `41.6` 
 ### M2 conclusion
 
 Every measured search, filter, sort, facet and `50,000`-row deep-page query finished in `0.9` to `23.8 ms` median (`<= 25.4 ms` 95th percentile), inside the `< 50 ms` search budget. Across `6,000` scrolling frames on `100,000` tracks, every pass held a `4.2 ms` median with no frame above `8.6 ms`, inside the `16 ms` ceiling.
+
+## 19 November 2026, columns, sort by any column and wrap
+
+Machine: the same ROG Zephyrus G16, Core Ultra 9 285H, 64 GB RAM, Windows 11 Pro. The library is `just synthetic-library` at 100,000 tracks, which now also gives some tracks a track number, catalogue number, composer, mix and a comment, so sorts have empty values to put last and wrapped rows have text to wrap. The core was a release build of `resonance serve`.
+
+### Sort
+
+Each case asks for 200 rows: one cold call, then 20 warm calls, timed as WebSocket round trips from a Node client. Every call, library order included, carries a floor of about 23 ms from that client's socket; the same page read from the browser took 5.7 ms in M2, and SQLite answers a fixed-column page in under 1 ms. The numbers below are therefore an upper bound.
+
+| Sort | Cold | Median | 95th percentile |
+| --- | --- | --- | --- |
+| Library order (page 0) | 9.6 ms | 25.1 ms | 27.2 ms |
+| Album asc | 26.0 ms | 24.7 ms | 27.6 ms |
+| Genre desc | 4.6 ms | 24.1 ms | 25.4 ms |
+| Catalogue number asc | 26.3 ms | 23.8 ms | 24.8 ms |
+| Catalogue number asc (offset 50,000) | 24.9 ms | 24.2 ms | 26.9 ms |
+| Comment asc | 25.4 ms | 23.8 ms | 27.6 ms |
+| Composer desc | 26.1 ms | 25.3 ms | 26.5 ms |
+| Bitrate desc | 22.9 ms | 23.9 ms | 26.6 ms |
+| Format asc | 22.6 ms | 23.8 ms | 25.4 ms |
+| File size desc | 24.5 ms | 25.3 ms | 27.6 ms |
+| Date modified asc | 22.5 ms | 23.4 ms | 24.1 ms |
+| Date added desc | 23.0 ms | 22.6 ms | 24.4 ms |
+| Path desc | 24.1 ms | 24.8 ms | 27.3 ms |
+| Tag: Track number asc (page 0) | 27.3 ms | 27.4 ms | 29.1 ms |
+| Tag: Track number desc (page 0) | 28.5 ms | 28.7 ms | 30.9 ms |
+| Tag: Track number asc (offset 50,000) | 29.5 ms | 30.0 ms | 34.3 ms |
+| Tag: Track number asc (last page) | 42.3 ms | 41.1 ms | 45.3 ms |
+| Genre asc, then BPM desc | 33.1 ms | 34.7 ms | 37.2 ms |
+| Tag: Track number asc, then Title asc | 197.0 ms | 182.6 ms | 185.9 ms |
+
+The first version of the tag sort looked each asset up to check it was included and took 154 ms for page 0 and 234 ms at row 50,000. Copying the flag into the tag index brought those to 27.4 and 30.0 ms ([ADR 0022](../adr/0022-library-columns-and-sort-paths.md)).
+
+Every fixed column and the generic tag column sort inside 50 ms. A generic tag with a secondary sort sorts every row and takes 183 ms; it is outside the budget's cases and recorded here. The sort indexes add 56 MB to the 100,000-track database, 167 MB against 111 MB without them.
+
+### Scroll
+
+The table's own work per scroll step was timed in Edge at 2,560 by 1,440: setting the scroll position, the page's scroll handler, Svelte's update, the wrapped rows' measuring, and a forced style and layout, inside one timer, over 1,000 even steps of 62 px and 1,000 jumps. The widest set is every column with 14 in view and 12 given way.
+
+| Table | Scroll | Median | 99th percentile | Longest |
+| --- | --- | --- | --- | --- |
+| Default columns | Even steps | 0.4 ms | 3.1 ms | 7.7 ms |
+| Default columns | Jumps | 0.4 ms | 4.3 ms | 5.2 ms |
+| Widest set | Even steps | 0.6 ms | 4.6 ms | 9.1 ms |
+| Widest set | Jumps | 0.6 ms | 6.1 ms | 8.5 ms |
+| Widest set, wrap on | Even steps | 0.6 ms | 6.2 ms | 10.7 ms |
+| Widest set, wrap on | Jumps | 0.6 ms | 7.2 ms | 8.3 ms |
+
+With wrap on, the first rows measured 37 px for one line and 67 px for three.
+
+The frame-interval pass with `measureTableScroll()` was not taken. The laptop's display was not presenting frames during the session, and Edge delivered animation frames about every 250 ms whether the window was headless or not, so frame times would have measured the display, not the table.

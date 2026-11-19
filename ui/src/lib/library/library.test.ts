@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { CoreError } from '../ipc/client';
 import type { TrackQuery } from '../ipc/bindings/TrackQuery';
-import { fakeLibrary, fakeTrack } from './fake-library';
+import { fakeLibrary, fakeTableLayout, fakeTrack } from './fake-library';
 import { audioSummary, trackSeed } from './format';
 import Inspector from './Inspector.svelte';
 import Library from './Library.svelte';
@@ -134,19 +134,25 @@ describe('Library', () => {
       ontogglefavourite,
       onclearsearch,
       loadFacets,
+      tableLayout: fakeTableLayout(),
     });
 
     const bpmBtn = screen.getByRole('button', { name: 'BPM' });
+    const header = () => bpmBtn.closest('[role="columnheader"]')?.getAttribute('aria-sort');
     await fireEvent.click(bpmBtn);
-    expect(queries.at(-1)).toMatchObject({ sort: 'bpm', direction: 'asc' });
-    expect(bpmBtn.closest('[role="columnheader"]')?.getAttribute('aria-sort')).toBe('ascending');
+    await vi.waitFor(() => expect(queries.at(-1)).toMatchObject({ sort: 'bpm', direction: 'asc' }));
+    expect(header()).toBe('ascending');
 
     await fireEvent.click(bpmBtn);
-    expect(queries.at(-1)).toMatchObject({ sort: 'bpm', direction: 'desc' });
-    expect(bpmBtn.closest('[role="columnheader"]')?.getAttribute('aria-sort')).toBe('descending');
+    await vi.waitFor(() =>
+      expect(queries.at(-1)).toMatchObject({ sort: 'bpm', direction: 'desc' }),
+    );
+    expect(header()).toBe('descending');
 
     await fireEvent.click(bpmBtn);
-    expect(queries.at(-1)).toMatchObject({ sort: 'index', direction: 'asc' });
+    await vi.waitFor(() =>
+      expect(queries.at(-1)).toMatchObject({ sort: 'index', direction: 'asc' }),
+    );
 
     await fireEvent.click(screen.getByRole('button', { name: 'Favourite Track 0' }));
     expect(ontogglefavourite).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
@@ -174,7 +180,12 @@ describe('Library', () => {
     await pages.setQuery({ text: 'missing', sort: 'title', direction: 'asc' });
     const onclearsearch = vi.fn();
 
-    render(Library, { pages, onscan: vi.fn(), onclearsearch });
+    render(Library, {
+      pages,
+      onscan: vi.fn(),
+      onclearsearch,
+      tableLayout: fakeTableLayout([{ column: 'title', field: 'title', direction: 'asc' }]),
+    });
 
     expect(screen.getByRole('heading', { name: 'No tracks match' })).toBeTruthy();
     await fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));

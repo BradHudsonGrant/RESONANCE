@@ -87,6 +87,30 @@ pub fn tracks(count: usize) -> Vec<ScannedFile> {
 
         tags.push((TagField::Label, label.to_string()));
 
+        // Tags the table can add as columns, on some tracks and not others, so sorts by them
+        // have empty values to put last and wrapped rows have something to wrap.
+        if i % 5 != 0 {
+            tags.push((TagField::TrackNumber, (i % 12 + 1).to_string()));
+        }
+        if i % 3 != 0 {
+            tags.push((TagField::CatNo, format!("SYN{:04}", i % 4999)));
+        }
+        if i % 2 == 0 {
+            tags.push((TagField::Composer, artist.clone()));
+        }
+        if i % 6 == 0 {
+            tags.push((TagField::Mix, "Extended Mix".to_owned()));
+        }
+        if i % 4 == 0 {
+            tags.push((
+                TagField::Comment,
+                format!(
+                    "Warm-up pick from crate {}, good after a long breakdown",
+                    i % 40
+                ),
+            ));
+        }
+
         tracks.push(ScannedFile {
             path,
             size_bytes,

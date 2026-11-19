@@ -8,14 +8,26 @@ ALTER TABLE asset ADD COLUMN tag_mix TEXT COLLATE NOCASE;
 
 -- Tags without a column of their own, one row per tag a file has, so sorting by one walks an
 -- index instead of reading `file_tag`. `sort_value` pads a leading number so 9 sorts before 10.
+-- `included` copies the asset's, so a sort never looks the asset up: on 100,000 rows those
+-- lookups took 200 ms.
 CREATE TABLE asset_tag_value (
     asset_id INTEGER NOT NULL REFERENCES asset (id) ON DELETE CASCADE,
     field TEXT NOT NULL,
     sort_value TEXT NOT NULL COLLATE NOCASE,
+    included INTEGER NOT NULL DEFAULT 1 CHECK (included IN (0, 1)),
     PRIMARY KEY (asset_id, field)
 ) WITHOUT ROWID;
 
-CREATE INDEX asset_tag_value_sort ON asset_tag_value (field, sort_value, asset_id);
+CREATE INDEX asset_tag_value_sort ON asset_tag_value (field, sort_value, asset_id) WHERE included = 1;
+
+CREATE TRIGGER asset_tag_value_included AFTER UPDATE OF included ON asset
+WHEN new.included IS NOT old.included
+BEGIN
+    UPDATE asset_tag_value SET included = new.included WHERE asset_id = new.id;
+END;
+
+-- The tracks without a tag, in asset order, read from an index instead of the wide table.
+CREATE INDEX asset_included_id ON asset (id) WHERE included = 1;
 
 -- Every column that can be empty sorts its empty values last in both directions, which needs an
 -- index each way. A column that is never empty reads its one index backwards.
