@@ -31,6 +31,8 @@ pub(crate) fn tag_field(name: TagName) -> TagField {
         TagName::Key => TagField::Key,
         TagName::TrackNumber => TagField::TrackNumber,
         TagName::Comment => TagField::Comment,
+        TagName::Composer => TagField::Composer,
+        TagName::Remixer => TagField::Remixer,
     }
 }
 
@@ -50,6 +52,8 @@ pub(crate) fn tag_name(field: TagField) -> TagName {
         TagField::Key => TagName::Key,
         TagField::TrackNumber => TagName::TrackNumber,
         TagField::Comment => TagName::Comment,
+        TagField::Composer => TagName::Composer,
+        TagField::Remixer => TagName::Remixer,
     }
 }
 

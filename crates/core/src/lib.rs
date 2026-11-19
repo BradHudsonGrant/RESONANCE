@@ -1,5 +1,6 @@
 pub mod artwork;
 pub mod collections;
+pub mod columns;
 pub mod identify;
 pub mod identity;
 pub mod jobs;

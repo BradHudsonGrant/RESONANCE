@@ -7,6 +7,7 @@ mod operations;
 mod renames;
 mod search;
 mod sources;
+mod table_layout;
 mod tags;
 
 use std::collections::HashMap;
@@ -38,7 +39,7 @@ pub use tags::{AcceptReport, StagingQueueEntry, TagLayers, TagWriteTarget};
 
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
-const MIGRATIONS: [&str; 14] = [
+const MIGRATIONS: [&str; 15] = [
     include_str!("../migrations/0001_library.sql"),
     include_str!("../migrations/0002_sources.sql"),
     include_str!("../migrations/0003_identity.sql"),
@@ -53,6 +54,7 @@ const MIGRATIONS: [&str; 14] = [
     include_str!("../migrations/0012_operation_renames.sql"),
     include_str!("../migrations/0013_job_pause.sql"),
     include_str!("../migrations/0014_artwork.sql"),
+    include_str!("../migrations/0015_table_columns.sql"),
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -145,6 +147,8 @@ pub struct TrackRow {
     pub user_tags: Vec<(TagField, String)>,
     /// The hash of the picture the track shows: the user's, else its file's front cover.
     pub artwork: Option<String>,
+    /// When the track first came into the library, in Unix nanoseconds.
+    pub added_ns: i64,
 }
 
 /// The connection that writes. Readers open their own.
@@ -166,6 +170,9 @@ fn migrate(connection: &mut Connection) -> Result<(), DbError> {
         transaction.execute_batch(migration)?;
         if index == 3 {
             search::backfill_v4_metadata(&transaction)?;
+        }
+        if index == 14 {
+            search::backfill_v15_columns(&transaction)?;
         }
         transaction.pragma_update(None, "user_version", index as u32 + 1)?;
         transaction.commit()?;
@@ -270,16 +277,17 @@ impl Database {
                 "INSERT INTO asset (track_id, source_id, path, size_bytes, modified_ns, format,
                      duration_ms, sample_rate, channels, bit_depth, bitrate_kbps, included,
                      sort_title, sort_artist, tag_album, tag_genre, tag_label, tag_key, sort_key,
-                     tag_bpm, tag_year)
+                     tag_bpm, tag_year, tag_catno, tag_comment, tag_composer, tag_remixer, tag_mix)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                         ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+                         ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
             )?;
             let mut update_asset = transaction.prepare(
                 "UPDATE asset SET size_bytes = ?2, modified_ns = ?3, format = ?4, duration_ms = ?5,
                      sample_rate = ?6, channels = ?7, bit_depth = ?8, bitrate_kbps = ?9,
                      included = ?10, missing_since = NULL, sort_title = ?11, sort_artist = ?12,
                      tag_album = ?13, tag_genre = ?14, tag_label = ?15, tag_key = ?16,
-                     sort_key = ?17, tag_bpm = ?18, tag_year = ?19
+                     sort_key = ?17, tag_bpm = ?18, tag_year = ?19, tag_catno = ?20,
+                     tag_comment = ?21, tag_composer = ?22, tag_remixer = ?23, tag_mix = ?24
                  WHERE id = ?1",
             )?;
             let mut clear_tags = transaction.prepare("DELETE FROM file_tag WHERE asset_id = ?1")?;
@@ -312,10 +320,8 @@ impl Database {
                     None => Vec::new(),
                 };
                 let shown = (!user.is_empty()).then(|| effective_tags(&file.tags, &user));
-                let meta = search::AssetSearchMeta::from_path_and_tags(
-                    &file.path,
-                    shown.as_deref().unwrap_or(&file.tags),
-                );
+                let shown_tags = shown.as_deref().unwrap_or(&file.tags);
+                let meta = search::AssetSearchMeta::from_path_and_tags(&file.path, shown_tags);
                 let asset = match known {
                     Some(asset) => {
                         update_asset.execute(params![
@@ -338,6 +344,11 @@ impl Database {
                             meta.sort_key,
                             meta.tag_bpm,
                             meta.tag_year,
+                            meta.catno,
+                            meta.comment,
+                            meta.composer,
+                            meta.remixer,
+                            meta.mix,
                         ])?;
                         clear_tags.execute([asset])?;
                         del_fts.execute([asset])?;
@@ -369,6 +380,11 @@ impl Database {
                             meta.sort_key,
                             meta.tag_bpm,
                             meta.tag_year,
+                            meta.catno,
+                            meta.comment,
+                            meta.composer,
+                            meta.remixer,
+                            meta.mix,
                         ])?;
                         transaction.last_insert_rowid()
                     }
@@ -376,6 +392,7 @@ impl Database {
                 for (field, value) in &file.tags {
                     add_tag.execute(params![asset, field.name(), value])?;
                 }
+                search::write_tag_values(&transaction, asset, shown_tags)?;
                 add_fts.execute(params![
                     asset,
                     meta.title,
@@ -484,7 +501,7 @@ impl Database {
 const TRACKS_IN_ORDER: &str = "SELECT asset.id, asset.track_id, source.folder, asset.path,
          asset.size_bytes, asset.modified_ns, asset.format, asset.duration_ms, asset.sample_rate,
          asset.channels, asset.bit_depth, asset.bitrate_kbps, track.favourite, asset.missing_since,
-         asset.artwork_hash
+         asset.artwork_hash, track.added_ns
      FROM source
      CROSS JOIN asset ON asset.source_id = source.id
      JOIN track ON track.id = asset.track_id
@@ -519,6 +536,7 @@ pub(crate) fn track_row(row: &Row<'_>) -> Result<(i64, TrackRow), DbError> {
     let favourite_raw: i64 = row.get(12)?;
     let missing_since: Option<i64> = row.get(13)?;
     let artwork: Option<String> = row.get(14)?;
+    let added_ns: i64 = row.get(15)?;
     let track = TrackRow {
         track_id: row.get(1)?,
         source_folder: row.get(2)?,
@@ -535,6 +553,7 @@ pub(crate) fn track_row(row: &Row<'_>) -> Result<(i64, TrackRow), DbError> {
         missing_since,
         user_tags: Vec::new(),
         artwork,
+        added_ns,
     };
     Ok((row.get(0)?, track))
 }
@@ -959,5 +978,61 @@ mod tests {
             .expect("job exists");
         assert_eq!(reset.status, JobStatus::Queued);
         assert_eq!(reset.started_ns, None);
+    }
+
+    #[test]
+    fn migrating_from_v14_fills_the_table_columns_from_what_tracks_show() {
+        let mut v14 = Connection::open_in_memory().expect("a database opens");
+        v14.pragma_update(None, "foreign_keys", true)
+            .expect("foreign keys enable");
+        for migration in &MIGRATIONS[..14] {
+            v14.execute_batch(migration).expect("prior migration runs");
+        }
+        v14.pragma_update(None, "user_version", 14u32)
+            .expect("version 14 stamps");
+        v14.execute_batch(
+            "INSERT INTO source (folder) VALUES ('club');
+             INSERT INTO track DEFAULT VALUES;
+             INSERT INTO asset (track_id, source_id, path, size_bytes, modified_ns, format, sort_title)
+                 VALUES (1, 1, 'a.flac', 100, 1000, 'flac', 'a');
+             INSERT INTO file_tag (asset_id, field, value) VALUES
+                 (1, 'catno', ' LBL001 '), (1, 'mix', 'Dub'), (1, 'track_number', '7'),
+                 (1, 'comment', 'Warm-up');
+             INSERT INTO user_tag (track_id, field, value, updated_ns) VALUES (1, 'mix', 'Extended', 1);",
+        )
+        .expect("rows insert");
+
+        migrate(&mut v14).expect("v14 migrates to v15");
+
+        let row: (String, String, String) = v14
+            .query_row(
+                "SELECT tag_catno, tag_mix, tag_comment FROM asset WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("columns read");
+        assert_eq!(
+            row,
+            (
+                "LBL001".to_owned(),
+                "Extended".to_owned(),
+                "Warm-up".to_owned()
+            )
+        );
+        let value: String = v14
+            .query_row(
+                "SELECT sort_value FROM asset_tag_value WHERE asset_id = 1 AND field = 'track_number'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("tag value reads");
+        assert_eq!(value, "000000000007");
+
+        v14.execute("DELETE FROM asset WHERE id = 1", [])
+            .expect("asset deletes");
+        let left: i64 = v14
+            .query_row("SELECT count(*) FROM asset_tag_value", [], |row| row.get(0))
+            .expect("count reads");
+        assert_eq!(left, 0);
     }
 }
