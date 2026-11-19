@@ -3827,6 +3827,8 @@ dependencies = [
  "resonance-db",
  "resonance-fixtures",
  "rusty-chromaprint",
+ "serde",
+ "serde_json",
  "symphonia",
 ]
 

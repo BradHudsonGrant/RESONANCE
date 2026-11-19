@@ -4,7 +4,8 @@
 
 use std::collections::HashSet;
 
-use resonance_core::library::TagField;
+use resonance_core::identity::ContentHash;
+use resonance_core::library::{AudioFormat, TagField};
 use resonance_core::staging::{
     Proposal, ProposalStatus, StoredProposal, changing_proposals, effective_tags,
     fields_to_accept_above, staging_diff,
@@ -12,7 +13,22 @@ use resonance_core::staging::{
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use crate::search::{now_unix_ns, sync_asset_metadata_in_tx};
-use crate::{Database, DbError, TrackRow, tag_field};
+use crate::{Database, DbError, FileStamp, TrackRow, tag_field};
+
+/// A file whose tags are about to be written, as the library last saw it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagWriteTarget {
+    pub track_id: i64,
+    pub asset_id: i64,
+    pub source_folder: String,
+    pub path: String,
+    pub format: AudioFormat,
+    pub stamp: FileStamp,
+    pub missing: bool,
+    pub file: Vec<(TagField, String)>,
+    /// The user's values not yet in the file.
+    pub unwritten: Vec<(TagField, String)>,
+}
 
 /// A track's three layers, as staging compares them.
 #[derive(Debug, Clone, PartialEq)]
@@ -225,7 +241,148 @@ fn accept_in_tx(
     Ok(accepted)
 }
 
+fn write_target_of(
+    connection: &Connection,
+    asset_id: i64,
+) -> Result<Option<TagWriteTarget>, DbError> {
+    let row = connection
+        .prepare_cached(
+            "SELECT asset.track_id, source.folder, asset.path, asset.format, asset.size_bytes,
+                 asset.modified_ns, asset.missing_since IS NOT NULL
+             FROM asset JOIN source ON source.id = asset.source_id
+             WHERE asset.id = ?1",
+        )?
+        .query_row([asset_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, u64>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, bool>(6)?,
+            ))
+        })
+        .optional()?;
+    let Some((track_id, source_folder, path, format, size_bytes, modified_ns, missing)) = row
+    else {
+        return Ok(None);
+    };
+    let format = AudioFormat::from_name(&format).ok_or(DbError::UnknownName {
+        column: "asset.format",
+        name: format,
+    })?;
+    Ok(Some(TagWriteTarget {
+        track_id,
+        asset_id,
+        source_folder,
+        path,
+        format,
+        stamp: FileStamp {
+            size_bytes,
+            modified_ns,
+        },
+        missing,
+        file: file_tags_of_asset(connection, asset_id)?,
+        unwritten: read_tags(
+            connection,
+            "SELECT field, value FROM user_tag WHERE track_id = ?1 AND dirty_on_disk = 1",
+            track_id,
+        )?,
+    }))
+}
+
 impl Database {
+    /// The tracks among `track_ids`, or among all tracks when it is empty, that hold a user value
+    /// not yet written to their file, in track order.
+    pub fn tracks_with_unwritten_tags(&self, track_ids: &[i64]) -> Result<Vec<i64>, DbError> {
+        let mut statement = self.connection.prepare_cached(
+            "SELECT DISTINCT track_id FROM user_tag WHERE dirty_on_disk = 1 ORDER BY track_id",
+        )?;
+        let unwritten: Vec<i64> = statement
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        if track_ids.is_empty() {
+            return Ok(unwritten);
+        }
+        let wanted: HashSet<i64> = track_ids.iter().copied().collect();
+        Ok(unwritten
+            .into_iter()
+            .filter(|track_id| wanted.contains(track_id))
+            .collect())
+    }
+
+    /// The track's primary file and the user values it does not hold yet.
+    pub fn tag_write_target(&self, track_id: i64) -> Result<Option<TagWriteTarget>, DbError> {
+        match primary_asset(&self.connection, track_id)? {
+            Some(asset_id) => write_target_of(&self.connection, asset_id),
+            None => Ok(None),
+        }
+    }
+
+    pub fn tag_write_target_of_asset(
+        &self,
+        asset_id: i64,
+    ) -> Result<Option<TagWriteTarget>, DbError> {
+        write_target_of(&self.connection, asset_id)
+    }
+
+    /// Stores what a file holds after its tags were rewritten: its new size, time and byte hash
+    /// (the audio hash is unchanged), its tags, and which user values it now carries. A user
+    /// value the file holds is written; one it does not, after an undo for instance, is not.
+    pub fn record_rewritten_file(
+        &mut self,
+        asset_id: i64,
+        stamp: FileStamp,
+        byte_hash: &ContentHash,
+        tags: &[(TagField, String)],
+    ) -> Result<(), DbError> {
+        let transaction = self.connection.transaction()?;
+        let (track_id, path): (i64, String) = transaction.query_row(
+            "SELECT track_id, path FROM asset WHERE id = ?1",
+            [asset_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        transaction.execute(
+            "UPDATE asset SET size_bytes = ?2, modified_ns = ?3, identity_size_bytes = ?2,
+                 identity_modified_ns = ?3, byte_hash = ?4
+             WHERE id = ?1",
+            params![
+                asset_id,
+                stamp.size_bytes,
+                stamp.modified_ns,
+                byte_hash.as_bytes().as_slice()
+            ],
+        )?;
+        transaction.execute("DELETE FROM file_tag WHERE asset_id = ?1", [asset_id])?;
+        for (field, value) in tags {
+            transaction
+                .prepare_cached(
+                    "INSERT INTO file_tag (asset_id, field, value) VALUES (?1, ?2, ?3)",
+                )?
+                .execute(params![asset_id, field.name(), value])?;
+        }
+        for (field, value) in user_tags_of_track(&transaction, track_id)? {
+            if !field.is_written_to_files() {
+                continue;
+            }
+            let in_file = tags
+                .iter()
+                .find(|(held, _)| *held == field)
+                .map(|(_, value)| value.as_str());
+            let written =
+                in_file == Some(value.as_str()) || (value.is_empty() && in_file.is_none());
+            transaction
+                .prepare_cached(
+                    "UPDATE user_tag SET dirty_on_disk = ?3 WHERE track_id = ?1 AND field = ?2",
+                )?
+                .execute(params![track_id, field.name(), !written])?;
+        }
+        sync_asset_metadata_in_tx(&transaction, asset_id, &path, tags, true)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     /// The track's file, user and proposed values, or `None` for a track with no file.
     pub fn tag_layers(&self, track_id: i64) -> Result<Option<TagLayers>, DbError> {
         tag_layers_of(&self.connection, track_id)
