@@ -11,6 +11,7 @@ mod relink;
 pub mod serve;
 mod sources;
 mod staging;
+mod tag_writes;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -411,6 +412,18 @@ impl Api {
             Request::SetUserTag { track_ids, edits } => self
                 .set_user_tag(&track_ids, &edits)
                 .map(Response::SetUserTag),
+            Request::PreviewTagWrites { track_ids } => self
+                .preview_tag_writes(&track_ids)
+                .map(Response::PreviewTagWrites),
+            Request::ApplyTagWrites { track_ids } => self
+                .apply_tag_writes(&track_ids)
+                .map(Response::ApplyTagWrites),
+            Request::RecentOperations { limit } => self
+                .recent_operations(limit)
+                .map(Response::RecentOperations),
+            Request::UndoOperation { operation_id } => self
+                .undo_operation(operation_id)
+                .map(Response::UndoOperation),
         }
     }
 

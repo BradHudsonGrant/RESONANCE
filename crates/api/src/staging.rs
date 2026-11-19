@@ -34,7 +34,7 @@ pub(crate) fn tag_field(name: TagName) -> TagField {
     }
 }
 
-fn tag_name(field: TagField) -> TagName {
+pub(crate) fn tag_name(field: TagField) -> TagName {
     match field {
         TagField::Title => TagName::Title,
         TagField::Artist => TagName::Artist,
@@ -98,14 +98,14 @@ fn diff_of(library: &Database, track_id: i64) -> Result<TrackStagingDiff, ApiErr
 }
 
 impl Api {
-    fn locked_library(&self) -> MutexGuard<'_, Database> {
+    pub(crate) fn locked_library(&self) -> MutexGuard<'_, Database> {
         self.core
             .library
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn library_edited(&self) {
+    pub(crate) fn library_edited(&self) {
         self.core
             .watch_revisions
             .send_modify(|revision| *revision += 1);

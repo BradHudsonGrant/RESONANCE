@@ -263,10 +263,84 @@ pub fn fields_to_accept_above(diff: &[FieldDiff], min_confidence: f64) -> Vec<Ta
         .collect()
 }
 
+/// One field of a file that writing the user's values would change. `None` is no value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldWrite {
+    pub field: TagField,
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
+/// What writing `unwritten` user values into a file holding `file` would change, field by
+/// field. An empty user value removes the file's value. Fields with no frame in any format are
+/// left out, and so is a value the file already holds.
+pub fn tag_writes(
+    file: &[(TagField, String)],
+    unwritten: &[(TagField, String)],
+) -> Vec<FieldWrite> {
+    let mut writes: Vec<FieldWrite> = unwritten
+        .iter()
+        .filter(|(field, _)| field.is_written_to_files())
+        .map(|(field, value)| FieldWrite {
+            field: *field,
+            from: file
+                .iter()
+                .find(|(held, _)| held == field)
+                .map(|(_, value)| value.clone()),
+            to: (!value.is_empty()).then(|| value.clone()),
+        })
+        .filter(|write| write.from != write.to)
+        .collect();
+    writes.sort_by_key(|write| write.field);
+    writes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::identify::Candidate;
+
+    #[test]
+    fn tag_writes_skip_library_only_fields_and_values_already_in_the_file() {
+        let file = tags(&[(TagField::Title, "Old"), (TagField::Genre, "House")]);
+        let unwritten = tags(&[
+            (TagField::Title, "New"),
+            (TagField::Genre, "House"),
+            (TagField::Mix, "Extended Mix"),
+            (TagField::Label, ""),
+            (TagField::Comment, ""),
+            (TagField::Bpm, "124"),
+        ]);
+        assert_eq!(
+            tag_writes(&file, &unwritten),
+            vec![
+                FieldWrite {
+                    field: TagField::Title,
+                    from: Some("Old".to_owned()),
+                    to: Some("New".to_owned()),
+                },
+                FieldWrite {
+                    field: TagField::Bpm,
+                    from: None,
+                    to: Some("124".to_owned()),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn an_empty_user_value_removes_the_file_value() {
+        let file = tags(&[(TagField::Comment, "Ripped by someone")]);
+        let unwritten = tags(&[(TagField::Comment, "")]);
+        assert_eq!(
+            tag_writes(&file, &unwritten),
+            vec![FieldWrite {
+                field: TagField::Comment,
+                from: Some("Ripped by someone".to_owned()),
+                to: None,
+            }]
+        );
+    }
 
     fn tags(pairs: &[(TagField, &str)]) -> Vec<(TagField, String)> {
         pairs

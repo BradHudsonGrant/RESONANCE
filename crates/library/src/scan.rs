@@ -202,7 +202,7 @@ pub(crate) fn stored_path(root: &Path, path: &Path) -> Option<String> {
     Some(parts?.join("/"))
 }
 
-fn stamp(metadata: &Metadata) -> io::Result<FileStamp> {
+pub(crate) fn stamp(metadata: &Metadata) -> io::Result<FileStamp> {
     let modified = metadata.modified()?;
     let nanoseconds = match modified.duration_since(UNIX_EPOCH) {
         Ok(after) => i64::try_from(after.as_nanos()),

@@ -15,7 +15,7 @@ In the stack table, a row marked Fixed is settled. A row marked Default is a rec
 | Audio output | `cpal` `0.18`; on Windows, `wasapi` `0.27` for exclusive and low-latency shared streams | Settled ([ADR 0010](adr/0010-audio-engine-spike.md), [ADR 0015](adr/0015-wasapi-exclusive-output.md)) |
 | Decoding | `symphonia` `0.6.1` (`gapless` and `verify` enabled, with `"alac"` and `"id3v2"`), with an FFmpeg binary for conversion and repair | Settled ([ADR 0004](adr/0004-identity-model.md)) |
 | Time-stretch | Signalsmith Stretch when keylock is on, plain resampling when it is off | Default |
-| Tags | `lofty` `0.25.5` | Settled ([ADR 0007](adr/0007-scan-and-first-schema.md)) |
+| Tags | `lofty` `0.25.5`; ID3v2.3 for MP3, WAV and AIFF, Vorbis comments for FLAC, MP4 atoms for M4A | Settled ([ADR 0007](adr/0007-scan-and-first-schema.md), [ADR 0019](adr/0019-writing-tags-into-files.md)) |
 | Identity & fingerprint | `blake3` `1.8.7` (`Apache-2.0`), `rusty-chromaprint` `0.3.0` (`MIT`) and AcoustID | Settled ([ADR 0004](adr/0004-identity-model.md)) |
 | Metadata lookups | `ureq` `3.5.2` with `rustls` and the OS certificate store; AcoustID, MusicBrainz, Discogs and pasted Bandcamp pages | Settled ([ADR 0017](adr/0017-identification-providers-over-ureq.md)) |
 | Filesystem watching | `notify` `8.2.2` with quiet-window coalescing | Settled ([ADR 0013](adr/0013-filesystem-watching-with-notify.md)) |
@@ -85,7 +85,7 @@ The tables that matter:
 - `analysis_run` (audio hash, analyser, version, parameter hash, status) and one result table per kind: beat grid, key, loudness, energy curve, phrases, embedding. Each has a confidence. Parallel tables hold user corrections.
 - `cue` and `loop`, stored in track time.
 - `collection`, `collection_item`, `smart_collection`, `set`, `set_item` (with play window and transition).
-- `job` for the queue. `operation` for the journal: steps, inverse steps, state.
+- `job` for the queue. `operation` for the journal: steps, inverse steps, state ([ADR 0019](adr/0019-writing-tags-into-files.md)).
 - `external_library` and `pending_external_change`.
 - `session`, `session_event` (the control log) and `transition_score`.
 

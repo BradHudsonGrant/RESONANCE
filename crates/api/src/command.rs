@@ -215,6 +215,28 @@ pub enum Request {
         track_ids: Vec<i64>,
         edits: Vec<UserTagEdit>,
     },
+    /// What writing the user's values into the files would change, for `track_ids` or for every
+    /// track with unwritten values when it is empty. Nothing on disk changes.
+    PreviewTagWrites {
+        #[serde(default)]
+        #[ts(type = "Array<number>")]
+        track_ids: Vec<i64>,
+    },
+    /// Writes what `PreviewTagWrites` lists into the files as one journaled operation.
+    ApplyTagWrites {
+        #[serde(default)]
+        #[ts(type = "Array<number>")]
+        track_ids: Vec<i64>,
+    },
+    /// The journal of changes to files, newest first.
+    RecentOperations {
+        limit: u32,
+    },
+    /// Puts back what an applied operation changed.
+    UndoOperation {
+        #[ts(type = "number")]
+        operation_id: i64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -267,6 +289,91 @@ pub enum Response {
     AcceptAllAboveThreshold(AcceptedProposals),
     SkipProposal(TrackStagingDiff),
     SetUserTag(UserTagReport),
+    PreviewTagWrites(Vec<FileTagWrite>),
+    ApplyTagWrites(TagWriteReport),
+    RecentOperations(Vec<JournalOperation>),
+    UndoOperation(UndoReport),
+}
+
+/// One field a tag write changes. `null` is no value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct FieldChange {
+    pub field: TagName,
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
+/// One file a tag write would change. `blocked` says why it cannot be written as things stand.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct FileTagWrite {
+    #[ts(type = "number")]
+    pub track_id: i64,
+    pub path: String,
+    pub fields: Vec<FieldChange>,
+    pub blocked: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct FailedTagWrite {
+    #[ts(type = "number")]
+    pub track_id: i64,
+    pub path: String,
+    pub reason: String,
+}
+
+/// `operation_id` is `null` when no file was written.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct TagWriteReport {
+    #[ts(type = "number | null")]
+    pub operation_id: Option<i64>,
+    pub written: u32,
+    pub failed: Vec<FailedTagWrite>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum OperationKindName {
+    WriteTags,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum OperationStateName {
+    Pending,
+    Applied,
+    Failed,
+    Undone,
+}
+
+/// One change to files in the journal. Only an `applied` one can be undone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct JournalOperation {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub kind: OperationKindName,
+    pub state: OperationStateName,
+    pub summary: String,
+    pub can_undo: bool,
+    #[ts(type = "number")]
+    pub created_ms: i64,
+    #[ts(type = "number | null")]
+    pub applied_ms: Option<i64>,
+    #[ts(type = "number | null")]
+    pub undone_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct UndoReport {
+    pub operation: JournalOperation,
+    pub restored: u32,
 }
 
 /// A tag field, as staging and tag edits name it.

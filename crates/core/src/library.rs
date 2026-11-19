@@ -104,6 +104,11 @@ impl TagField {
     pub fn from_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|field| field.name() == name)
     }
+
+    /// No tag format has a common frame for the mix or subgenre, so those stay in the library.
+    pub fn is_written_to_files(self) -> bool {
+        !matches!(self, Self::Mix | Self::Subgenre)
+    }
 }
 
 /// What the file's header says about its audio.
