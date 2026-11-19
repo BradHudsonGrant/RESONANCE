@@ -100,7 +100,7 @@ Accept:
 ## M3 Identify and tag, v0.4.0
 
 - [x] The identification pipeline with free providers ([#108](https://github.com/BradHudsonGrant/RESONANCE/issues/108)). Evidence: merged in [#124](https://github.com/BradHudsonGrant/RESONANCE/pull/124); `crates/identify` runs the six steps over AcoustID, MusicBrainz, Discogs and pasted Bandcamp pages through `ureq` ([ADR 0017](adr/0017-identification-providers-over-ureq.md)), with a limiter per provider and a 30-day `provider_cache`; fixture tests cover every step, early stop, missing-key skips, pacing, cache hits and radio edit against extended mix, and live checks against MusicBrainz and Discogs pass.
-- [ ] Staging with per-field diff
+- [x] Staging with per-field diff ([#109](https://github.com/BradHudsonGrant/RESONANCE/issues/109)). Evidence: merged in [#125](https://github.com/BradHudsonGrant/RESONANCE/pull/125); `proposed_tag` and `user_tag` with the user's value over the file's ([ADR 0018](adr/0018-tag-layers-and-precedence.md)), so an edit or accepted proposal reaches sort, filters and search at once; tests cover accept into the user layer, user values surviving a full re-run, and threshold accept skipping user-held and low-confidence fields; the staging diff opens in 19.86 ms at worst over 100,000 tracks ([staging.md](benchmarks/staging.md)).
 - [ ] Writing tags
 - [ ] Filename templates
 - [ ] Artwork

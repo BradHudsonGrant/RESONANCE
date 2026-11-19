@@ -139,6 +139,25 @@ impl Key {
         (1..=12).contains(&hour).then_some(Key { hour, mode })
     }
 
+    /// Open Key, as Traktor writes it: `1m` is A minor and `1d` is C major, Camelot 8A and 8B.
+    fn from_open_key(text: &str) -> Option<Key> {
+        let ring = text.chars().last()?;
+        let mode = match ring {
+            'm' | 'M' => Mode::Minor,
+            'd' | 'D' => Mode::Major,
+            _ => return None,
+        };
+        let digits = &text[..text.len() - ring.len_utf8()];
+        if digits.is_empty() || digits.len() > 2 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        let number: u8 = digits.parse().ok()?;
+        (1..=12).contains(&number).then_some(Key {
+            hour: (number + 6) % 12 + 1,
+            mode,
+        })
+    }
+
     fn from_name(text: &str) -> Option<Key> {
         let mut chars = text.chars();
         let semitone: i8 = match chars.next()?.to_ascii_uppercase() {
@@ -208,6 +227,7 @@ impl FromStr for Key {
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         let text = input.trim();
         Key::from_camelot(text)
+            .or_else(|| Key::from_open_key(text))
             .or_else(|| Key::from_name(text))
             .ok_or_else(|| KeyParseError {
                 input: input.to_owned(),
@@ -241,6 +261,17 @@ mod tests {
         assert_eq!(camelot_of("08A"), "8A");
         assert_eq!(camelot_of("12b"), "12B");
         assert_eq!(camelot_of(" 1A "), "1A");
+    }
+
+    #[test]
+    fn open_key_codes_parse_to_the_same_key_as_their_camelot_code() {
+        assert_eq!(camelot_of("1m"), "8A");
+        assert_eq!(camelot_of("1d"), "8B");
+        assert_eq!(camelot_of("2m"), "9A");
+        assert_eq!(camelot_of("12m"), "7A");
+        assert_eq!(camelot_of("6d"), "1B");
+        assert_eq!(camelot_of("1m"), camelot_of("Am"));
+        assert!("13m".parse::<Key>().is_err());
     }
 
     #[test]

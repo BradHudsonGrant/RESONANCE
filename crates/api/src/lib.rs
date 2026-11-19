@@ -10,6 +10,7 @@ mod providers;
 mod relink;
 pub mod serve;
 mod sources;
+mod staging;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -24,11 +25,12 @@ use command::{
 use error::ApiError;
 use identity::{run_identify_pass, to_command_report};
 use jobs::{enqueue_identify_if_needed, execute_job, scan_source_job};
-use resonance_core::library::{AudioFormat, TagField};
+use resonance_core::library::{AudioFormat, ScannedFile, TagField};
 use resonance_core::search::{
     FilterPill as CoreFilterPill, SortDirection as CoreSortDirection, TrackQuery as CoreTrackQuery,
     TrackSortField as CoreTrackSortField,
 };
+use resonance_core::staging::effective_tags;
 use resonance_db::{Database, TrackRow};
 use resonance_engine::{DeckId, Mix, MixStatus, PreviewStatus};
 use resonance_identify::credentials::CredentialStore;
@@ -390,6 +392,24 @@ impl Api {
             Request::ClearProviderKey { provider } => self
                 .clear_provider_key(provider)
                 .map(Response::ClearProviderKey),
+            Request::StagingQueue { offset, limit } => self
+                .staging_queue(offset, limit)
+                .map(Response::StagingQueue),
+            Request::StagingDiff { track_id } => {
+                self.staging_diff(track_id).map(Response::StagingDiff)
+            }
+            Request::AcceptProposedFields { track_id, fields } => self
+                .accept_proposed_fields(track_id, &fields)
+                .map(Response::AcceptProposedFields),
+            Request::AcceptAllAboveThreshold { min_confidence } => self
+                .accept_all_above_threshold(min_confidence)
+                .map(Response::AcceptAllAboveThreshold),
+            Request::SkipProposal { track_id, fields } => self
+                .skip_proposal(track_id, &fields)
+                .map(Response::SkipProposal),
+            Request::SetUserTag { track_ids, edits } => self
+                .set_user_tag(&track_ids, &edits)
+                .map(Response::SetUserTag),
         }
     }
 
@@ -506,8 +526,9 @@ impl Api {
             )));
         };
         let path = resonance_library::identity::full_asset_path(&row.source_folder, &row.file.path);
-        let title = row.file.title().to_owned();
-        let artist = row.file.tag(TagField::Artist).map(str::to_owned);
+        let shown = shown_file(&row);
+        let title = shown.title().to_owned();
+        let artist = shown.tag(TagField::Artist).map(str::to_owned);
         let db_duration_ms = row.file.audio.map(|audio| audio.duration_ms);
         let status = self
             .mix
@@ -644,8 +665,18 @@ fn core_track_query(query: Option<TrackQuery>) -> CoreTrackQuery {
     }
 }
 
+/// The track's file with the user's values in place of the file's tags.
+fn shown_file(row: &TrackRow) -> ScannedFile {
+    let mut file = row.file.clone();
+    if !row.user_tags.is_empty() {
+        file.tags = effective_tags(&row.file.tags, &row.user_tags);
+    }
+    file
+}
+
 pub(crate) fn library_track(row: &TrackRow) -> LibraryTrack {
-    let file = &row.file;
+    let shown = shown_file(row);
+    let file = &shown;
     let tag = |field| file.tag(field).map(str::to_owned);
     LibraryTrack {
         id: row.track_id,

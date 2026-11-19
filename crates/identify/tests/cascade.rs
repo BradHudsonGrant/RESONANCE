@@ -15,6 +15,7 @@ use resonance_core::identify::{
 };
 use resonance_core::library::{AudioFacts, AudioFormat, ScannedFile, TagField};
 use resonance_core::providers::ProviderKey;
+use resonance_core::staging::{ProposalStatus, staging_diff};
 use resonance_db::{Database, IdentificationInput};
 use resonance_identify::credentials::{CredentialStore, MemoryCredentialStore};
 use resonance_identify::http::{HttpClient, HttpRequest, HttpResponse, Unreachable};
@@ -633,4 +634,97 @@ fn the_online_pass_puts_the_selection_first_and_resumes_after_a_stop() {
             .unwrap()
             .online
     );
+}
+
+#[test]
+fn user_values_survive_a_full_rerun_and_conflicting_proposals_show_as_locked() {
+    let fixture = Fixture::default()
+        .route(
+            "https://musicbrainz.org/ws/2/recording",
+            json!({ "recordings": [] }),
+        )
+        .route(
+            "https://api.discogs.com/database/search",
+            json!({ "results": [{ "id": 111 }] }),
+        )
+        .route("https://api.discogs.com/releases/111", discogs_release());
+    // Without an AcoustID key every run is incomplete, so the next pass runs all six steps
+    // again for the track.
+    let (_, pipeline, database) = setup(fixture, &[ProviderKey::Discogs]);
+    let track = {
+        let mut database = database.lock().unwrap();
+        let source = database.source("library").unwrap();
+        let mut file = scanned(1);
+        file.path = "Some Artist - Night Drive.flac".to_owned();
+        file.audio = file.audio.map(|audio| AudioFacts {
+            duration_ms: 412_000,
+            ..audio
+        });
+        file.tags = vec![
+            (TagField::Artist, "Some Artist".to_owned()),
+            (TagField::Title, "Night Drive".to_owned()),
+        ];
+        database.record_scan(source, &[file]).unwrap();
+        database.tracks().unwrap()[0].track_id
+    };
+
+    let first = run_online_pass(&database, &pipeline, &[], &never(), |_, _| {}).unwrap();
+    assert_eq!(first.looked_up, 1);
+    assert_eq!(first.incomplete, 1);
+    {
+        let mut database = database.lock().unwrap();
+        let layers = database.tag_layers(track).unwrap().unwrap();
+        let mut proposed: Vec<_> = layers
+            .proposals
+            .iter()
+            .map(|stored| (stored.proposal.field, stored.proposal.value.as_str()))
+            .collect();
+        proposed.sort();
+        assert_eq!(
+            proposed,
+            [
+                (TagField::Album, "Night Drive"),
+                (TagField::Year, "2019"),
+                (TagField::Label, "Some Label"),
+                (TagField::Mix, "Extended Mix"),
+                (TagField::CatNo, "DEF023"),
+            ]
+        );
+        database
+            .set_user_tags(
+                &[track],
+                &[(TagField::Label, Some("Typed Label".to_owned()))],
+            )
+            .unwrap();
+        database.accept_proposals(track, &[TagField::Mix]).unwrap();
+    }
+
+    let second = run_online_pass(&database, &pipeline, &[], &never(), |_, _| {}).unwrap();
+
+    assert_eq!(second.looked_up, 1);
+    let mut database = database.lock().unwrap();
+    let layers = database.tag_layers(track).unwrap().unwrap();
+    assert_eq!(
+        layers.user,
+        [
+            (TagField::Label, "Typed Label".to_owned()),
+            (TagField::Mix, "Extended Mix".to_owned()),
+        ]
+    );
+    let diff = staging_diff(&layers.file, &layers.user, &layers.proposals);
+    let label = diff
+        .iter()
+        .find(|entry| entry.field == TagField::Label)
+        .unwrap();
+    assert!(label.locked_by_user);
+    assert_eq!(label.current_value.as_deref(), Some("Typed Label"));
+    assert_eq!(
+        label.proposal.as_ref().map(|stored| stored.status),
+        Some(ProposalStatus::Pending)
+    );
+
+    let accepted = database.accept_above_threshold(STOP_THRESHOLD).unwrap();
+    assert_eq!(accepted.fields, 3, "album, year and catalogue number");
+    let user = database.tag_layers(track).unwrap().unwrap().user;
+    assert!(user.contains(&(TagField::Label, "Typed Label".to_owned())));
 }

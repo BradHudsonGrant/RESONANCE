@@ -45,7 +45,7 @@ impl AudioFormat {
     }
 }
 
-/// A tag the library reads from a file.
+/// A tag a track can carry, in a file or in the library's own layers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum TagField {
     Title,
@@ -59,10 +59,13 @@ pub enum TagField {
     Key,
     Label,
     Comment,
+    Mix,
+    Subgenre,
+    CatNo,
 }
 
 impl TagField {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 14] = [
         Self::Title,
         Self::Artist,
         Self::Album,
@@ -74,6 +77,9 @@ impl TagField {
         Self::Key,
         Self::Label,
         Self::Comment,
+        Self::Mix,
+        Self::Subgenre,
+        Self::CatNo,
     ];
 
     pub fn name(self) -> &'static str {
@@ -89,6 +95,9 @@ impl TagField {
             Self::Key => "key",
             Self::Label => "label",
             Self::Comment => "comment",
+            Self::Mix => "mix",
+            Self::Subgenre => "subgenre",
+            Self::CatNo => "catno",
         }
     }
 
