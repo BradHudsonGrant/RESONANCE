@@ -180,6 +180,7 @@
       <button
         type="button"
         class={['chip', { recommended: isRecommended }]}
+        aria-label={isRecommended ? `${filter.label}, recommended` : undefined}
         onclick={() => onadd(filter.term)}
         oncontextmenu={(event) => {
           event.preventDefault();
@@ -192,9 +193,7 @@
         }}
         onkeydown={(event) => onChipKey(event, filter)}
       >
-        {#if isRecommended}<span class="dot" aria-hidden="true"></span>{/if}
         {filter.label}
-        {#if isRecommended}<span class="visually-hidden">, recommended</span>{/if}
       </button>
     </Tooltip>
   {/each}
@@ -214,10 +213,10 @@
     display: inline-flex;
     flex: 0 0 auto;
     align-items: center;
-    height: var(--control-height-xs);
+    height: var(--control-height-sm);
     border: var(--border-width) solid var(--color-border-control);
     border-radius: var(--radius-sm);
-    background: var(--color-surface);
+    background: var(--color-surface-2);
   }
 
   .token-label,
@@ -233,12 +232,13 @@
 
   .token-label {
     display: inline-flex;
-    align-items: baseline;
-    gap: var(--space-1-5);
-    max-width: 18rem;
+    align-items: center;
+    gap: var(--space-2);
+    max-width: 20rem;
     height: 100%;
-    padding: 0 var(--space-1) 0 var(--space-2);
-    font-size: var(--text-xs);
+    padding: 0 var(--space-2-5);
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
   }
 
   .token-text {
@@ -249,31 +249,32 @@
 
   .token-count {
     color: var(--color-text-2);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-regular);
   }
 
   .token-remove {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 20px;
+    width: 24px;
     height: 100%;
+    border-left: var(--border-width) solid var(--color-border);
     color: var(--color-text-2);
   }
 
   .token-remove:hover,
   .token-label:hover {
+    background: var(--color-raised);
     color: var(--color-text);
-  }
-
-  .token-label:hover,
-  .token-remove:hover {
-    background: var(--color-surface-2);
   }
 
   .rule {
     flex: 0 0 auto;
     width: var(--border-width);
     height: var(--space-3-5);
+    margin: 0 var(--space-1);
     background: var(--color-border);
   }
 
@@ -281,45 +282,48 @@
     display: inline-flex;
     flex: 0 0 auto;
     align-items: center;
-    gap: var(--space-1-5);
-    height: var(--control-height-xs);
-    padding: 0 var(--space-2);
+    height: var(--control-height-sm);
+    padding: 0 var(--space-3);
+    border: var(--border-width) solid var(--color-border);
     border-radius: var(--radius-sm);
+    background: var(--color-surface);
     color: var(--color-text-2);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
+    line-height: var(--leading-compact);
     white-space: nowrap;
+    transition:
+      background-color var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out);
   }
 
   .chip:hover {
-    background: var(--color-surface-2);
+    border-color: var(--color-border-control);
+    background: var(--color-raised);
     color: var(--color-text);
-  }
-
-  .dot {
-    width: 4px;
-    height: 4px;
-    border-radius: 50%;
-    background: var(--color-muted);
   }
 
   .clear {
     flex: 0 0 auto;
-    padding: 0 var(--space-1);
+    height: var(--control-height-sm);
+    padding: 0 var(--space-2);
+    border-radius: var(--radius-sm);
     color: var(--color-text-2);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     white-space: nowrap;
   }
 
   .clear:hover {
+    background: var(--color-surface-2);
     color: var(--color-text);
   }
 
   @media (forced-colors: active) {
-    .token {
+    .token,
+    .chip {
       border-color: CanvasText;
     }
 
-    .dot,
     .rule {
       background: CanvasText;
     }

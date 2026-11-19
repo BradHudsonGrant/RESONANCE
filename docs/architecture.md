@@ -154,7 +154,7 @@ These are requirements. Measure them on the development laptop in M0, record the
 | Library table, 100,000 rows, fast scroll | Median frame at the display's refresh rate, no frame over 16 ms |
 | Mix view: two scrolling waveforms, meters, coach strip | Median frame at the display's refresh rate, 99th percentile within two display intervals, no frame over 16 ms |
 | Text search | Under 50 ms |
-| Sort the library table by any column, 100,000 rows | Under 50 ms |
+| Sort or filter the library table on any column, 100,000 rows | Under 50 ms |
 | Staging diff for one track | Under 50 ms |
 | Auto-preview, from a key press to the next track's first frame at the output, warm cache | Under 150 ms |
 | UI thread | Never blocked for more than 16 ms |

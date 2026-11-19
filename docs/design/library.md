@@ -114,8 +114,8 @@ Every filter added counts once in the library database, for recommendations. Not
 The bar is the pills row. It keeps the pills' height and slot, does not wrap, and scrolls sideways when it is too long, so nothing above the table ever moves. From left to right:
 
 - The pills.
-- The active filters as removable tokens: the filter's words in 12 px sans, the number of tracks it matches in mono Text 2, and a 20 px remove button. Clicking a token opens its menu: Edit in the drawer, Pin to quick filters (or Unpin), Save as smart view, Remove. After the tokens, the number of tracks all of them match and a Clear button.
-- The pinned filters, then up to five recommended ones, as quiet 24 px chips. A chip adds its filter. Recommended chips carry a small dot, and their tooltip says why they show. A pinned or recommended filter that is active shows as a token and not as a chip.
+- The active filters as removable 26 px tokens on Surface 2 with a 1 px control border: the filter's words in 12 px sans, the number of tracks it matches in mono Text 2, and a 24 px remove button separated by a 1 px hairline. Clicking a token opens its menu: Edit in the drawer, Pin to quick filters (or Unpin), Save as smart view, Remove. After the tokens, a Clear filters button when more than one filter is active.
+- The pinned filters, then up to five recommended ones, as 26 px chips on Surface with a 1 px border and 12 px horizontal padding, spaced 10 px apart with no decorative dots or badges. A chip adds its filter, and its tooltip says whether it is pinned or recommended. A pinned or recommended filter that is active shows as a token and not as a chip.
 
 Right-clicking a chip, or `Shift+F10` on it, opens its menu: Move left, Move right, Pin (on a recommended one) and Remove. `Alt+Left` and `Alt+Right` move a focused chip one place. Moving a recommended chip pins it. Removing a recommended one stops it coming back.
 

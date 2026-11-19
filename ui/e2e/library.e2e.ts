@@ -253,7 +253,12 @@ test('instant search, filter drawer, favourites and column sorting filter the re
 
   await page.getByRole('button', { name: 'Filters' }).click();
   const drawer = page.getByRole('dialog', { name: 'Filters' });
-  await drawer.getByRole('checkbox', { name: 'FLAC' }).check();
+  await drawer.getByRole('button', { name: 'Add a condition' }).click();
+  await drawer.getByRole('combobox', { name: 'Column' }).selectOption('format');
+  await drawer
+    .getByRole('group', { name: 'Format values' })
+    .getByRole('button', { name: 'FLAC' })
+    .click();
   await expect(page.getByText('1 track', { exact: true })).toBeVisible();
   await expect(table.getByText('Ada Marsh - Second Wind')).toBeVisible();
   await drawer.getByRole('button', { name: 'Clear' }).click();
@@ -268,7 +273,9 @@ test('instant search, filter drawer, favourites and column sorting filter the re
   await page.reload();
   await expect(page.getByText('6 tracks', { exact: true })).toBeVisible({ timeout: 10_000 });
   await page.getByRole('button', { name: 'Filters' }).click();
-  const keys = drawer.getByRole('group', { name: 'Keys' });
+  await drawer.getByRole('button', { name: 'Add a condition' }).click();
+  await drawer.getByRole('combobox', { name: 'Column' }).selectOption('key');
+  const keys = drawer.getByRole('group', { name: 'Key values' });
   await keys.getByRole('button', { name: '1m (Am)' }).click();
   await expect(keys.getByRole('button', { name: '1m (Am)' })).toHaveAttribute(
     'aria-pressed',
@@ -385,6 +392,124 @@ test('columns are chosen, moved, sized, wrapped and sorted from the keyboard, an
   await expect
     .poll(() => titleCell.evaluate((cell) => getComputedStyle(cell).whiteSpace))
     .toBe('nowrap');
+});
+
+test('missing-tag, header and command-bar filters, pinning and recommendation toggles filter without moving the table', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1586, height: 992 });
+  await page.goto('/');
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible({ timeout: 10_000 });
+
+  const table = page.getByRole('grid', { name: 'Tracks' });
+  const header = table.locator('.head [role="row"]');
+  const firstRow = table.locator('.rows [role="row"]').first();
+  const bar = page.getByRole('toolbar', { name: 'Track filters' });
+  const search = page.getByRole('combobox', { name: 'Commands' });
+  const drawer = page.getByRole('dialog', { name: 'Filters' });
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+
+  const headerBox = await header.boundingBox();
+  const rowBox = await firstRow.boundingBox();
+
+  const setFirstLightGenre = (value: string | null) =>
+    page.evaluate(async (genre) => {
+      const socket = new WebSocket(new URL('/core', location.href));
+      await new Promise((ready) => (socket.onopen = ready));
+      let next = 0;
+      const call = (command: string, params: unknown) =>
+        new Promise<{ response: { result: unknown } }>((resolve) => {
+          const id = ++next;
+          socket.addEventListener('message', (event) => {
+            if (typeof event.data !== 'string') return;
+            const reply = JSON.parse(event.data);
+            if (reply.id === id) resolve(reply);
+          });
+          socket.send(JSON.stringify({ id, request: { command, params } }));
+        });
+      const result = await call('tracks', { offset: 0, limit: 5, query: { text: 'First Light' } });
+      const ids = (result.response.result as { tracks: Array<{ id: number }> }).tracks.map(
+        (track) => track.id,
+      );
+      await call('set_user_tag', {
+        track_ids: ids,
+        edits: [{ field: 'genre', value: genre }],
+      });
+      socket.close();
+    }, value);
+
+  await setFirstLightGenre('House');
+  try {
+    // 1. "missing genre" from the filter builder narrows the library and shows a token with its count.
+    await page.getByRole('button', { name: 'Filters' }).click();
+    await drawer.getByRole('button', { name: 'Add a condition' }).click();
+    await drawer.getByRole('combobox', { name: 'Column' }).selectOption('genre');
+    await drawer.getByRole('combobox', { name: 'Condition' }).selectOption('missing');
+    await drawer.getByRole('button', { name: 'Done' }).click();
+    await expect(drawer).toBeHidden();
+
+    await expect(page.getByText('5 tracks', { exact: true })).toBeVisible();
+    await expect(table.getByText('Ada Marsh - First Light')).toHaveCount(0);
+    const noGenreToken = bar.getByRole('group', { name: 'Filter: No genre' });
+    await expect(noGenreToken).toContainText('5');
+    expect(await header.boundingBox()).toEqual(headerBox);
+    expect(await firstRow.boundingBox()).toEqual(rowBox);
+
+    // 2. Pin the filter from its token, remove the token, and verify the pinned chip stays when recommendations are off.
+    await noGenreToken.getByRole('button', { name: /^No genre/ }).click();
+    await page.getByRole('menuitem', { name: 'Pin to quick filters' }).click();
+    await noGenreToken.getByRole('button', { name: 'Remove filter No genre' }).click();
+    await expect(page.getByText('6 tracks', { exact: true })).toBeVisible();
+
+    const pinnedChip = bar.getByRole('button', { name: 'No genre', exact: true });
+    await expect(pinnedChip).toBeVisible();
+    await expect(bar.getByRole('button', { name: /^No artwork.*recommended$/ })).toBeVisible();
+
+    // 3. Turning recommendations off hides recommended chips while keeping pinned ones.
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await settings.getByRole('checkbox', { name: 'Recommend quick filters' }).uncheck();
+    await settings.getByRole('button', { name: 'Done' }).click();
+    await expect(settings).toBeHidden();
+
+    await expect(bar.getByRole('button', { name: /^No artwork.*recommended$/ })).toHaveCount(0);
+    await expect(pinnedChip).toBeVisible();
+
+    // Unpin the pinned chip from its context menu and turn recommendations back on.
+    await pinnedChip.click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Remove' }).click();
+    await expect(pinnedChip).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await settings.getByRole('checkbox', { name: 'Recommend quick filters' }).check();
+    await settings.getByRole('button', { name: 'Done' }).click();
+    await expect(bar.getByRole('button', { name: /^No genre.*recommended$/ })).toBeVisible();
+
+    // 4. Right-clicking a column header opens the builder on that column.
+    await table.getByRole('columnheader', { name: 'Title' }).click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Filter by Title…' }).click();
+    await expect(drawer).toBeVisible();
+    await expect(drawer.getByRole('combobox', { name: 'Column' })).toHaveValue('title');
+    await drawer.getByRole('textbox', { name: 'Title value' }).fill('First Light');
+    await drawer.getByRole('button', { name: 'Done' }).click();
+
+    await expect(page.getByText('1 track', { exact: true })).toBeVisible();
+    await expect(table.getByText('Ada Marsh - First Light')).toBeVisible();
+    await bar.getByRole('button', { name: /^Remove filter Title contains .First Light.$/ }).click();
+    await expect(page.getByText('6 tracks', { exact: true })).toBeVisible();
+
+    // 5. Typing a / filter in the CommandBar parses in the core and applies on Enter.
+    await search.fill('/format flac');
+    await expect(page.getByRole('option', { name: 'Filter: Format is FLAC' })).toBeVisible();
+    await search.press('Enter');
+    await expect(page.getByText('1 track', { exact: true })).toBeVisible();
+    await expect(table.getByText('Ada Marsh - Second Wind')).toBeVisible();
+    expect(await header.boundingBox()).toEqual(headerBox);
+    expect(await firstRow.boundingBox()).toEqual(rowBox);
+    await bar.getByRole('button', { name: 'Remove filter Format is FLAC' }).click();
+    await expect(page.getByText('6 tracks', { exact: true })).toBeVisible();
+  } finally {
+    await setFirstLightGenre(null);
+  }
 });
 
 test('manual collections create, assign via multi-select, inspect, persist and delete safely', async ({

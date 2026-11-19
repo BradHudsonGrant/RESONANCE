@@ -38,10 +38,10 @@ fn filters_on_the_synthetic_library() {
 
     let cases: &[&[&str]] = &[
         &["genre contains house"],
-        &["artist is Kai Vega"],
+        &["artist is Vela Hollow"],
         &["genre not techno"],
-        &["artist starts with ka"],
-        &["label is any of Anjunadeep, Toolroom"],
+        &["artist starts with ve"],
+        &["label is any of Neon Pulse, Static Bloom"],
         &["missing genre"],
         &["has label"],
         &["no artwork"],

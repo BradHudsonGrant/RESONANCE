@@ -513,13 +513,17 @@
 <style>
   .drawer-content {
     display: grid;
-    gap: var(--space-3-5);
+    gap: var(--space-4);
   }
 
-  .term,
+  .term {
+    display: grid;
+    gap: var(--space-3);
+  }
+
   .condition {
     display: grid;
-    gap: var(--space-2);
+    gap: var(--space-2-5);
   }
 
   .condition-head {
@@ -612,7 +616,7 @@
   .choices {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-1);
+    gap: var(--space-2);
   }
 
   .choices.keys {
@@ -621,13 +625,17 @@
   }
 
   .choice {
-    min-width: 3rem;
-    padding: var(--space-1) var(--space-2);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 3.25rem;
+    min-height: var(--control-height-sm);
+    padding: 0 var(--space-2-5);
     border: var(--border-width) solid var(--color-border-control);
     border-radius: var(--radius-sm);
     background: var(--color-surface);
     color: var(--color-text-2);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     cursor: pointer;
     transition:
       background-color var(--duration-fast) var(--ease-out),

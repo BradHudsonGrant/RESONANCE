@@ -507,14 +507,18 @@
 <style>
   .library {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
     height: 100%;
+    min-width: 0;
     min-height: 0;
   }
 
   .header {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--space-4);
+    min-width: 0;
     padding: var(--space-4) var(--space-5) var(--space-3);
   }
 
@@ -635,7 +639,7 @@
     display: flex;
     flex-wrap: nowrap;
     align-items: center;
-    gap: var(--space-2);
+    gap: var(--space-2-5);
     height: var(--control-height-sm);
     overflow-x: auto;
     overflow-y: hidden;
@@ -651,13 +655,13 @@
   }
 
   .pills > :global(.filter-pill + .filter-pill) {
-    margin-left: var(--space-4);
+    margin-left: var(--space-3-5);
   }
 
   .bar-rule {
     width: var(--border-width);
     height: var(--space-3-5);
-    margin: 0 var(--space-2);
+    margin: 0 var(--space-1-5);
     background: var(--color-border);
   }
 
