@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { flushSync, untrack } from 'svelte';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   import Icon from '../design/Icon.svelte';
@@ -59,6 +59,8 @@
     /** How many tracks are ticked, for the selection actions that Library shows above. */
     checkedCount?: number;
     allChecked?: boolean;
+    /** Slices initial row mounting across short tasks during cold start. */
+    progressiveStartup?: boolean;
   }
 
   let {
@@ -83,11 +85,14 @@
     onfiltercolumn,
     checkedCount = $bindable(0),
     allChecked = $bindable(false),
+    progressiveStartup = false,
   }: Props = $props();
 
   // Rows drawn beyond the edges of the view, so a fast scroll does not open a gap.
   const OVERSCAN = 8;
   const INITIAL_ROWS = 8;
+  const STARTUP_ROW_SLICE = 4;
+  const STARTUP_OVERSCAN_STEP = 2;
 
   const id = $props.id();
   const checkedIds = new SvelteSet<number>();
@@ -100,6 +105,7 @@
   let viewportHeight = $state(0);
   let headHeight = $state(0);
   let overscan = $state(0);
+  let rowCap = $state(untrack(() => (progressiveStartup ? 0 : Infinity)));
 
   let menuOpen = $state(false);
   let menuAnchor = $state<HTMLElement | null>(null);
@@ -165,7 +171,16 @@
     void heightsVersion;
     return wrap ? heights.total : pages.total * rowHeight;
   });
-  const shown = $derived(
+  const visibleRowsWanted = $derived(
+    Math.max(
+      0,
+      Math.min(
+        pages.total - first,
+        viewportHeight > 0 ? Math.ceil(rowsHeight / rowHeight) : INITIAL_ROWS,
+      ),
+    ),
+  );
+  const unclippedShown = $derived(
     Math.max(
       0,
       Math.min(
@@ -174,41 +189,148 @@
       ),
     ),
   );
+  const shown = $derived(Math.min(unclippedShown, rowCap));
   const rowsInView = $derived(Math.max(1, Math.floor(rowsHeight / rowHeight)));
 
+  let filledOnce = false;
+  let startupRampDone = !untrack(() => progressiveStartup);
+  let observedViewportHeight = 0;
+  let observedViewportWidth = 0;
+  let observedHeadHeight = 0;
+  let rowHeightRead = false;
+
+  function applyMeasuredSizes(): boolean {
+    if (!viewport || !head) return false;
+    const nextVh = observedViewportHeight || viewport.clientHeight;
+    const nextVw = observedViewportWidth || viewport.clientWidth;
+    const nextHh = observedHeadHeight || head.offsetHeight;
+    let changed = false;
+    if (nextVh > 0 && (nextVh !== viewportHeight || nextVw !== viewportWidth)) {
+      viewportHeight = nextVh;
+      viewportWidth = nextVw;
+      changed = true;
+    }
+    if (nextHh > 0 && nextHh !== headHeight) {
+      headHeight = nextHh;
+      changed = true;
+    }
+    if (!rowHeightRead && nextVh > 0) {
+      rowHeightRead = true;
+      const height = parseFloat(getComputedStyle(viewport).getPropertyValue('--row-height'));
+      if (height > 0 && height !== rowHeight) {
+        rowHeight = height;
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
   // Reading sizes inside ResizeObserver waits until Blink has laid out the table, so mounting it
-  // forces no synchronous style or layout pass.
+  // forces no synchronous style or layout pass. While the startup ramp is slicing rows across
+  // tasks, ResizeObserver records the dimensions without mutating reactive state inside
+  // BeginMainFrame's NotifyResizeObservers pass.
   $effect(() => {
     if (!viewport || !head) return;
-    let rowHeightRead = false;
+    let resizeTimer = 0;
     const sized = new ResizeObserver((entries) => {
       for (const entry of entries) {
         if (entry.target === viewport) {
-          viewportHeight = entry.contentRect.height;
-          viewportWidth = entry.contentRect.width;
+          observedViewportHeight = entry.contentRect.height;
+          observedViewportWidth = entry.contentRect.width;
         } else if (entry.target === head) {
-          headHeight = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
+          observedHeadHeight = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
         }
       }
-      if (!rowHeightRead && viewport) {
-        rowHeightRead = true;
-        const height = parseFloat(getComputedStyle(viewport).getPropertyValue('--row-height'));
-        if (height > 0) rowHeight = height;
-      }
+      if (!startupRampDone) return;
+      if (resizeTimer) return;
+      resizeTimer = window.setTimeout(() => {
+        resizeTimer = 0;
+        applyMeasuredSizes();
+      }, 0);
     });
     sized.observe(viewport);
     sized.observe(head);
-    return () => sized.disconnect();
+    return () => {
+      clearTimeout(resizeTimer);
+      sized.disconnect();
+    };
   });
 
-  $effect(() => pages.want(first, first + shown));
+  $effect(() => pages.want(first, first + unclippedShown));
 
-  // The cold-start budget runs from launch to this mark, and the off-screen overscan rows fill
-  // in the next task once the visible slice is ready.
-  let filledOnce = false;
+  // During cold start, rows mount and lay out in small slices of 4 rows per task so no single
+  // task or frame pays to build and shape the whole table at once.
+  $effect(() => {
+    if (!progressiveStartup || !viewport || !head || startupRampDone) return;
+    let timer = 0;
+    const step = () => {
+      if (!viewport || !head) return;
+      if (viewportHeight === 0) {
+        let measured = false;
+        flushSync(() => {
+          measured = applyMeasuredSizes();
+        });
+        if (measured) {
+          void viewport.offsetHeight;
+          timer = window.setTimeout(step, 0);
+          return;
+        }
+      }
+      if (rowCap < visibleRowsWanted) {
+        const nextCap = Math.min(visibleRowsWanted, rowCap + STARTUP_ROW_SLICE);
+        flushSync(() => {
+          rowCap = nextCap;
+        });
+        void viewport.offsetHeight;
+        if (
+          !filledOnce &&
+          viewportHeight > 0 &&
+          rowCap >= visibleRowsWanted &&
+          pages.track(first)
+        ) {
+          filledOnce = true;
+          performance.mark('tracks-filled');
+        }
+        timer = window.setTimeout(step, 0);
+        return;
+      }
+      if (!filledOnce && viewportHeight > 0 && visibleRowsWanted > 0 && pages.track(first)) {
+        filledOnce = true;
+        performance.mark('tracks-filled');
+      }
+      if (overscan < OVERSCAN) {
+        const nextOverscan = Math.min(OVERSCAN, overscan + STARTUP_OVERSCAN_STEP);
+        flushSync(() => {
+          rowCap = Infinity;
+          overscan = nextOverscan;
+        });
+        void viewport.offsetHeight;
+        if (nextOverscan < OVERSCAN) {
+          timer = window.setTimeout(step, 0);
+          return;
+        }
+      } else if (rowCap !== Infinity) {
+        flushSync(() => {
+          rowCap = Infinity;
+        });
+      }
+      startupRampDone = true;
+    };
+    timer = window.setTimeout(step, 0);
+    return () => clearTimeout(timer);
+  });
+
+  // Fallback for non-progressive mounts (such as unit tests or re-entering Library space).
   let overscanTimer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => {
-    if (filledOnce || viewportHeight === 0 || shown === 0 || !pages.track(first)) return;
+    if (
+      progressiveStartup ||
+      filledOnce ||
+      viewportHeight === 0 ||
+      shown === 0 ||
+      !pages.track(first)
+    )
+      return;
     filledOnce = true;
     performance.mark('tracks-filled');
     overscanTimer = setTimeout(() => {
@@ -1175,44 +1297,50 @@
   </div>
 </div>
 
-<ColumnMenu
-  open={columnMenuOpen}
-  anchor={columnMenuAnchor}
-  layout={layout.current}
-  hidden={fit.hidden.map((column) => column.id)}
-  filterColumn={columnMenuFilter}
-  onfilter={(column) => {
-    columnMenuOpen = false;
-    onfiltercolumn?.(column);
-  }}
-  onchange={(change) => void changeLayout(change)}
-  onclose={closeColumnMenu}
-/>
+{#if columnMenuOpen}
+  <ColumnMenu
+    open={columnMenuOpen}
+    anchor={columnMenuAnchor}
+    layout={layout.current}
+    hidden={fit.hidden.map((column) => column.id)}
+    filterColumn={columnMenuFilter}
+    onfilter={(column) => {
+      columnMenuOpen = false;
+      onfiltercolumn?.(column);
+    }}
+    onchange={(change) => void changeLayout(change)}
+    onclose={closeColumnMenu}
+  />
+{/if}
 
-<FilterMenu
-  open={cellMenuOpen}
-  anchor={cellMenuAnchor}
-  label="Filter by this cell"
-  items={cellMenuItems}
-  returnFocus={gridEl ?? null}
-  onclose={() => (cellMenuOpen = false)}
-/>
+{#if cellMenuOpen}
+  <FilterMenu
+    open={cellMenuOpen}
+    anchor={cellMenuAnchor}
+    label="Filter by this cell"
+    items={cellMenuItems}
+    returnFocus={gridEl ?? null}
+    onclose={() => (cellMenuOpen = false)}
+  />
+{/if}
 
-<CollectionMenu
-  open={menuOpen && resolvedMenuTracks.length > 0}
-  anchorEl={menuAnchor}
-  label={menuLabel}
-  {collections}
-  selectedTracks={resolvedMenuTracks}
-  {activeCollection}
-  showFavourite={menuShowFavourite}
-  onToggleFavourite={ontogglefavourite}
-  onRelink={onrelink}
-  onAdd={onaddtocollection}
-  onRemove={removeTracksFromCollection}
-  onCreateAndAdd={oncreatecollectionandadd}
-  onClose={closeMenu}
-/>
+{#if menuOpen && resolvedMenuTracks.length > 0}
+  <CollectionMenu
+    open={menuOpen && resolvedMenuTracks.length > 0}
+    anchorEl={menuAnchor}
+    label={menuLabel}
+    {collections}
+    selectedTracks={resolvedMenuTracks}
+    {activeCollection}
+    showFavourite={menuShowFavourite}
+    onToggleFavourite={ontogglefavourite}
+    onRelink={onrelink}
+    onAdd={onaddtocollection}
+    onRemove={removeTracksFromCollection}
+    onCreateAndAdd={oncreatecollectionandadd}
+    onClose={closeMenu}
+  />
+{/if}
 
 <style>
   .table {

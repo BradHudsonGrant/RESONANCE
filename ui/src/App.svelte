@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { flushSync } from 'svelte';
   import { invoke, isTauri } from '@tauri-apps/api/core';
 
   import Sheet from './lib/design/Sheet.svelte';
@@ -457,19 +458,30 @@
 
   $effect(() => () => preview.destroy());
 
-  // The library frame mounts and lays out first. The sidebar with its wave, the docks and the
-  // player mount in a task after that frame presents, which keeps the first mount and first
-  // layout smaller and opens the wave's WebGL2 context once the GPU process is less busy.
-  let regionsMounted = $state(false);
+  // Each shell region mounts and lays out in its own short task so no single startup task or
+  // frame pays to build and shape the whole shell at once.
+  let shellStage = $state(0);
   $effect(() => {
     let timer = 0;
-    const frame = requestAnimationFrame(() => {
-      timer = window.setTimeout(() => (regionsMounted = true));
-    });
-    return () => {
-      cancelAnimationFrame(frame);
-      clearTimeout(timer);
+    const advance = () => {
+      const next = shellStage + 1;
+      flushSync(() => {
+        shellStage = next;
+      });
+      void shell?.offsetHeight;
+      if (next === 4) {
+        void loadCollections();
+        void refreshActivity();
+      } else if (next === 5) {
+        void preview.refresh();
+        void preview.loadSettings();
+      }
+      if (next < 7) {
+        timer = window.setTimeout(advance, 0);
+      }
     };
+    timer = window.setTimeout(advance, 0);
+    return () => clearTimeout(timer);
   });
 
   let previousSpace: SpaceName = 'Library';
@@ -598,10 +610,6 @@
   }
 
   pages.load();
-  void loadCollections();
-  void preview.refresh();
-  void preview.loadSettings();
-  void refreshActivity();
 </script>
 
 <svelte:window {onkeydown} />
@@ -614,16 +622,18 @@
   data-inspector={inspectorDocked ? undefined : 'hidden'}
 >
   <div class="topbar">
-    <TopBar
-      onsettings={openSettings}
-      onactivity={openActivity}
-      activeJobCount={activitySnapshot.active.length}
-      {activityOpen}
-    />
+    {#if shellStage >= 1}
+      <TopBar
+        onsettings={openSettings}
+        onactivity={openActivity}
+        activeJobCount={activitySnapshot.active.length}
+        {activityOpen}
+      />
+    {/if}
   </div>
 
   <div class="sidebar">
-    {#if regionsMounted}
+    {#if shellStage >= 7}
       <Sidebar
         activeSpace={space}
         trackCount={pages.state.kind === 'ready' ? pages.libraryTotal : null}
@@ -651,74 +661,80 @@
   </div>
 
   <div class="workspace">
-    <CommandBar
-      {commands}
-      inputId={commandInput}
-      search={searchText}
-      parseFilter={(text) => filters.parse(text)}
-      onsearch={setSearch}
-      onfilter={(filter) => {
-        space = 'Library';
-        filters.remember(filter);
-        filters.add(pages, filter.term);
-      }}
-    />
+    {#if shellStage >= 2}
+      <CommandBar
+        {commands}
+        inputId={commandInput}
+        search={searchText}
+        parseFilter={(text) => filters.parse(text)}
+        onsearch={setSearch}
+        onfilter={(filter) => {
+          space = 'Library';
+          filters.remember(filter);
+          filters.add(pages, filter.term);
+        }}
+      />
+    {:else}
+      <div></div>
+    {/if}
     <main class="workspace-content">
-      {#if space === 'Mix'}
-        {#await import('./lib/mix/Mix.svelte') then { default: Mix }}
-          <Mix onplayingchange={(playing) => (mixPlaying = playing)} />
-        {/await}
-      {:else if space === 'Prep'}
-        {#await import('./lib/prep/Prep.svelte') then { default: Prep }}
-          <Prep
-            client={prepClient}
-            batchQuery={prepBatchQuery}
-            batchLabel={prepBatchLabel}
-            revision={sourcesRevision}
+      {#if shellStage >= 3}
+        {#if space === 'Mix'}
+          {#await import('./lib/mix/Mix.svelte') then { default: Mix }}
+            <Mix onplayingchange={(playing) => (mixPlaying = playing)} />
+          {/await}
+        {:else if space === 'Prep'}
+          {#await import('./lib/prep/Prep.svelte') then { default: Prep }}
+            <Prep
+              client={prepClient}
+              batchQuery={prepBatchQuery}
+              batchLabel={prepBatchLabel}
+              revision={sourcesRevision}
+              previewTrackId={preview.trackId}
+              previewPlaying={preview.playing}
+              onclearbatch={() => {
+                prepBatchQuery = null;
+                prepBatchLabel = null;
+              }}
+              onopenlibrary={() => (space = 'Library')}
+              onrename={openRename}
+              onpreview={previewTrack}
+              onfocustrack={(item) => void preview.focus(item.id)}
+            />
+          {/await}
+        {:else}
+          <Library
+            {pages}
+            {filters}
+            bind:selected={pages.selected}
             previewTrackId={preview.trackId}
             previewPlaying={preview.playing}
-            onclearbatch={() => {
-              prepBatchQuery = null;
-              prepBatchLabel = null;
-            }}
-            onopenlibrary={() => (space = 'Library')}
-            onrename={openRename}
+            {collections}
+            {activeCollection}
+            loadFacets={() => core.call('library_facets')}
+            {tableLayout}
+            onsendtoprep={sendToPrep}
+            onbatchtag={openBatchTag}
+            onopen={showInspector}
             onpreview={previewTrack}
+            onplay={playTrack}
             onfocustrack={(item) => void preview.focus(item.id)}
+            onrelink={openRelink}
+            onrename={openRename}
+            onscan={openScan}
+            ontogglefavourite={toggleFavourite}
+            onclearsearch={clearSearch}
+            onclearcollection={() => selectCollection(null)}
+            onaddtocollection={addTracksToCollection}
+            onremovefromcollection={removeTracksFromCollection}
+            oncreatecollectionandadd={createCollectionAndAdd}
           />
-        {/await}
-      {:else}
-        <Library
-          {pages}
-          {filters}
-          bind:selected={pages.selected}
-          previewTrackId={preview.trackId}
-          previewPlaying={preview.playing}
-          {collections}
-          {activeCollection}
-          loadFacets={() => core.call('library_facets')}
-          {tableLayout}
-          onsendtoprep={sendToPrep}
-          onbatchtag={openBatchTag}
-          onopen={showInspector}
-          onpreview={previewTrack}
-          onplay={playTrack}
-          onfocustrack={(item) => void preview.focus(item.id)}
-          onrelink={openRelink}
-          onrename={openRename}
-          onscan={openScan}
-          ontogglefavourite={toggleFavourite}
-          onclearsearch={clearSearch}
-          onclearcollection={() => selectCollection(null)}
-          onaddtocollection={addTracksToCollection}
-          onremovefromcollection={removeTracksFromCollection}
-          oncreatecollectionandadd={createCollectionAndAdd}
-        />
+        {/if}
       {/if}
     </main>
   </div>
 
-  {#if inspectorDocked && regionsMounted}
+  {#if inspectorDocked && shellStage >= 4}
     <div class="inspector-dock">
       <Inspector
         {track}
@@ -743,13 +759,15 @@
   {/if}
 
   <!-- The Mix spike has its own decks and transport until the real decks arrive in M7. -->
-  {#if space !== 'Mix' && regionsMounted}
+  {#if space !== 'Mix' && shellStage >= 5}
     <div class="dock">
       <TransitionDock
         onCollapse={(collapsed) => (dockChoice = collapsed ? 'collapsed' : 'expanded')}
       />
     </div>
+  {/if}
 
+  {#if space !== 'Mix' && shellStage >= 6}
     <div class="player">
       <PlayerBar
         trackId={preview.trackId}

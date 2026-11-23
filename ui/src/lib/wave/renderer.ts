@@ -154,8 +154,8 @@ export class WaveRenderer {
   foreground: Rgb = [1, 1, 1];
 
   /** Null when the browser has no WebGL2, so the caller can leave the space empty. */
-  static on(canvas: HTMLCanvasElement): WaveRenderer | null {
-    const gl = canvas.getContext('webgl2', CONTEXT_OPTIONS);
+  static on(canvas: HTMLCanvasElement | OffscreenCanvas): WaveRenderer | null {
+    const gl = canvas.getContext('webgl2', CONTEXT_OPTIONS) as WebGL2RenderingContext | null;
     if (!gl) return null;
     const { program, shaders } = startProgram(gl);
     finishProgram(gl, program, shaders);
@@ -275,8 +275,6 @@ export interface WaveThumbOptions {
 
 const MAX_CACHED_THUMBS = 256;
 const thumbCache = new Map<string, HTMLCanvasElement>();
-let sharedCanvas: HTMLCanvasElement | null = null;
-let sharedRenderer: WaveRenderer | null | undefined;
 const thumbSettings: WaveSettings = {
   ...presetSettings('still'),
   density: 'thumb',
@@ -383,14 +381,6 @@ function drawCanvas2dFallback(
   }
 }
 
-function getSharedRenderer(): { canvas: HTMLCanvasElement; renderer: WaveRenderer } | null {
-  if (sharedRenderer === undefined) {
-    sharedCanvas = document.createElement('canvas');
-    sharedRenderer = WaveRenderer.on(sharedCanvas);
-  }
-  return sharedRenderer && sharedCanvas ? { canvas: sharedCanvas, renderer: sharedRenderer } : null;
-}
-
 export function thumbCacheKey(options: WaveThumbOptions): string {
   const bandsKey = options.bands
     ? [
@@ -406,7 +396,7 @@ export function thumbCacheKey(options: WaveThumbOptions): string {
   return `${options.seed}|${bandsKey}|${options.width}x${options.height}@${options.dpr}|${bg}|${fg}`;
 }
 
-/** Draws a track's dot-wave thumbnail through one shared renderer and a bitmap cache. */
+/** Draws a track's dot-wave thumbnail through a bitmap cache without opening a WebGL context on the UI thread. */
 export function drawWaveThumb(target: HTMLCanvasElement, options: WaveThumbOptions): string {
   const width = Math.max(1, Math.round(options.width));
   const height = Math.max(1, Math.round(options.height));
@@ -422,25 +412,14 @@ export function drawWaveThumb(target: HTMLCanvasElement, options: WaveThumbOptio
     cached.width = width;
     cached.height = height;
     const surface = trackSurface(options.seed, options.bands);
-    const shared = getSharedRenderer();
-    const cachedCtx = cached.getContext('2d');
-    if (shared && cachedCtx) {
-      shared.renderer.background = options.background;
-      shared.renderer.foreground = options.foreground;
-      shared.renderer.resize(width, height, options.dpr);
-      shared.renderer.useDensity(thumbSettings.density);
-      shared.renderer.draw(surface, thumbSettings);
-      cachedCtx.drawImage(shared.canvas, 0, 0);
-    } else {
-      drawCanvas2dFallback(
-        cached,
-        surface,
-        thumbSettings,
-        options.dpr,
-        options.background,
-        options.foreground,
-      );
-    }
+    drawCanvas2dFallback(
+      cached,
+      surface,
+      thumbSettings,
+      options.dpr,
+      options.background,
+      options.foreground,
+    );
     if (thumbCache.size >= MAX_CACHED_THUMBS) {
       const oldest = thumbCache.keys().next().value;
       if (oldest !== undefined) thumbCache.delete(oldest);
