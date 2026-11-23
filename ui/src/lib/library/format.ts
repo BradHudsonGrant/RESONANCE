@@ -20,12 +20,15 @@ export function fileSize(bytes: number): string {
   return `${(bytes / 1_000_000).toFixed(1)} MB`;
 }
 
+const integerFormat = new Intl.NumberFormat('en-GB');
+const tenthFormat = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 1 });
+
 export function sampleRate(hertz: number): string {
-  return `${(hertz / 1000).toLocaleString('en-GB', { maximumFractionDigits: 1 })} kHz`;
+  return `${tenthFormat.format(hertz / 1000)} kHz`;
 }
 
 export function trackCount(total: number): string {
-  return total === 1 ? '1 track' : `${total.toLocaleString('en-GB')} tracks`;
+  return total === 1 ? '1 track' : `${integerFormat.format(total)} tracks`;
 }
 
 /** Format line for the inspector header, such as `WAV · 44.1 kHz · 24-bit`. */

@@ -25,29 +25,24 @@
 
   const pixelDimension = $derived(size === 'sm' ? 36 : size === 'lg' ? 96 : 60);
 
-  function tone(element: HTMLElement, name: string): Rgb {
-    element.style.forcedColorAdjust = 'none';
-    element.style.color = `var(${name})`;
-    const [r = 0, g = 0, b = 0] = (getComputedStyle(element).color.match(/[\d.]+/g) ?? []).map(
-      Number,
-    );
-    element.style.color = '';
-    element.style.forcedColorAdjust = '';
+  function parseRgb(value: string): Rgb {
+    const [r = 0, g = 0, b = 0] = (value.match(/[\d.]+/g) ?? []).map(Number);
     return [r / 255, g / 255, b / 255];
   }
 
   function paint() {
     if (!canvas || !frame) return;
     const dpr = Math.min(devicePixelRatio || 1, 2);
-    const dim = Math.max(1, Math.round((frame.clientWidth || pixelDimension) * dpr));
+    const dim = Math.max(1, Math.round(pixelDimension * dpr));
+    const computed = getComputedStyle(frame);
     lastCacheKey = drawWaveThumb(canvas, {
       seed,
       bands,
       width: dim,
       height: dim,
       dpr,
-      background: tone(canvas, '--color-surface-2'),
-      foreground: tone(canvas, '--color-text'),
+      background: parseRgb(computed.backgroundColor),
+      foreground: parseRgb(computed.color),
     });
   }
 
@@ -61,9 +56,7 @@
 
   onMount(() => {
     mounted = true;
-    const stopThemes = onThemeChange(paint);
-    paint();
-    return stopThemes;
+    return onThemeChange(paint);
   });
 </script>
 
@@ -95,6 +88,8 @@
     border: var(--border-width) solid var(--color-border);
     border-radius: var(--radius-md);
     background: var(--color-surface-2);
+    color: var(--color-text);
+    forced-color-adjust: none;
   }
 
   .size-sm {

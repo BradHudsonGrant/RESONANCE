@@ -104,3 +104,28 @@ The change cut the longest startup task by about 10 ms, so it is kept. The budge
 - Launched against a fresh data folder, the window showed the empty library state (`No tracks yet`).
 - Scanning `fixtures-local` through the scan form reported `50 files: 50 added, 0 changed, 0 unchanged.` and filled the track grid with all 50 tracks (`50 tracks`, `aria-rowcount=51`).
 - Closing and reopening the installed app kept all 50 tracks in the grid (`aria-rowcount=51`).
+
+## 22 November 2026, M3 startup UI-thread trace
+
+Machine and method as on 15 and 18 November: the release `resonance-app.exe` in benchmark mode against the 100,000-track synthetic library, five `--trace-startup=toplevel` launches after one warmup launch (128.6 ms, left out), longest `RunTask` on `CrRendererMain`.
+
+Before the change, five `toplevel` traces recorded longest main-thread tasks of **32.0, 22.2, 22.8, 22.5 and 22.9 ms**. A detailed trace with the V8 CPU profiler showed four startup tasks over 16 ms:
+
+- **28.7 ms**: Blink's second frame (`21.1 ms` layout across 819 dirty layout objects) after `App.svelte` mounted the sidebar, inspector, transition dock and player in the same frame window as `TrackTable` adding 16 overscan rows.
+- **28.3 ms**: `mount(App)` creating the top bar, command bar and library shell (including closed filter and save-view sheets) and starting nine IPC reads in one timer task, followed by **25.9 ms** when the first track page resolved (8.5 ms of it initialising V8's `en-GB` number formatter on the first `trackCount` call).
+- **25.1 ms**: WebView2's `AutofillAgent` form scan forcing the document's first style and layout pass (`5.9 ms` style and `18.0 ms` layout) before the first `BeginMainFrame`, followed by **18.7 ms** in `BeginMainFrame` where `TrackTable`'s `ResizeObserver` synchronously set `viewportHeight`, mounted 15 more rows and forced a second layout pass (`9.9 ms` inside `NotifyResizeObservers`).
+- **17.9 ms**: `WaveRenderer.prepare` calling `canvas.getContext('webgl2')` on the main thread while waiting on the GPU process, plus `Thumb` opening a synchronous WebGL2 context and reading `clientWidth` when the player bar mounted.
+
+One change: `main.ts` warms `en-GB` number formatting in its own early task, `App.svelte` mounts and flushes layout for one shell region per task (`TopBar`, `CommandBar`, `Library`, `Inspector`, `TransitionDock`, `PlayerBar`, `Sidebar`), `Library.svelte` and `TrackTable.svelte` defer closed sheets and menus until opened, `TrackTable.svelte` records `ResizeObserver` sizes without mutating state inside `NotifyResizeObservers` and mounts initial and overscan rows in four-row tasks, `Thumb` renders its 38 by 16 dot grid on a cached 2D canvas without reading `clientWidth`, and `Wave.svelte` transfers the sidebar canvas to an `OffscreenCanvas` worker after the first frame establishes the GPU channel.
+
+| Startup `toplevel` trace | Before  | After   |
+| ------------------------ | ------- | ------- |
+| 1                        | 32.0 ms | 12.5 ms |
+| 2                        | 22.2 ms | 11.7 ms |
+| 3                        | 22.8 ms | 11.6 ms |
+| 4                        | 22.5 ms | 11.2 ms |
+| 5                        | 22.9 ms | 11.4 ms |
+
+### Conclusion
+
+All five startup `toplevel` runs are under the 16 ms UI-thread budget (**11.2–12.5 ms**, median **11.6 ms**, down from **22.2–32.0 ms**). This closes [#55](https://github.com/BradHudsonGrant/RESONANCE/issues/55).

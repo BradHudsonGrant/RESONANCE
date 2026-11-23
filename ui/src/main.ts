@@ -3,6 +3,10 @@ import './lib/design/theme';
 
 import { mount } from 'svelte';
 
+setTimeout(() => {
+  (1000).toLocaleString('en-GB');
+});
+
 const target = document.getElementById('app');
 if (!target) throw new Error('index.html has no #app element');
 

@@ -112,6 +112,7 @@
   }: Props = $props();
 
   let table: TrackTable | undefined = $state();
+  const progressiveStartup = untrack(() => pages.state.kind !== 'ready');
 
   $effect(() => {
     void tableLayout.load().catch(() => {
@@ -132,6 +133,7 @@
 
   let m5Gate = $state<'analysed' | 'unanalysed' | null>(null);
   let drawerOpen = $state(false);
+  let drawerMounted = $state(false);
   let facets = $state<LibraryFacets | null>(null);
 
   const activeFilter = $derived<FilterId>(m5Gate ?? pages.query.pill ?? 'all');
@@ -161,16 +163,25 @@
   const summaries = $derived(terms.map((term) => filters.summaryFor(term)));
   let startColumn = $state<string | null>(null);
   let saveOpen = $state(false);
+  let saveMounted = $state(false);
   let saveName = $state('');
   let saveError = $state<string | null>(null);
 
   $effect(() => {
-    void filters.load().catch(() => {
-      // The bar shows no quick filters until the core can be read.
-    });
-    void filters.loadFields().catch(() => {
-      // The header and cell menus offer no filters until the core can be read.
-    });
+    const readFilters = () => {
+      void filters.load().catch(() => {
+        // The bar shows no quick filters until the core can be read.
+      });
+      void filters.loadFields().catch(() => {
+        // The header and cell menus offer no filters until the core can be read.
+      });
+    };
+    if (!progressiveStartup) {
+      readFilters();
+      return;
+    }
+    const timer = window.setTimeout(readFilters, 0);
+    return () => clearTimeout(timer);
   });
 
   $effect(() => {
@@ -204,6 +215,7 @@
       .join(', ')
       .slice(0, 60);
     saveError = null;
+    saveMounted = true;
     saveOpen = true;
   }
 
@@ -237,6 +249,7 @@
   const hasFiltersInView = $derived(hasQueryFilters(pages.query));
 
   function openDrawer() {
+    drawerMounted = true;
     void filters.loadFields().then(() => (drawerOpen = true));
     if (!loadFacets) return;
     void loadFacets()
@@ -469,6 +482,7 @@
         bind:checkedCount
         bind:allChecked
         {pages}
+        {progressiveStartup}
         bind:selected
         {previewTrackId}
         {previewPlaying}
@@ -492,34 +506,38 @@
   </div>
 </section>
 
-<FilterDrawer
-  bind:open={drawerOpen}
-  query={pages.query}
-  fields={filters.fields}
-  {facets}
-  {startColumn}
-  onchange={(next) => void pages.setQuery(next)}
-  onadded={(added) => {
-    startColumn = null;
-    for (const term of added) void filters.recordUse(term);
-  }}
-  onclear={clearDrawerFilters}
-/>
+{#if drawerMounted}
+  <FilterDrawer
+    bind:open={drawerOpen}
+    query={pages.query}
+    fields={filters.fields}
+    {facets}
+    {startColumn}
+    onchange={(next) => void pages.setQuery(next)}
+    onadded={(added) => {
+      startColumn = null;
+      for (const term of added) void filters.recordUse(term);
+    }}
+    onclear={clearDrawerFilters}
+  />
+{/if}
 
-<Sheet bind:open={saveOpen} title="Save as smart view">
-  <form id="save-view" class="save-form" onsubmit={save}>
-    <label class="save-label" for="save-view-name">Name</label>
-    <input id="save-view-name" class="save-input" type="text" bind:value={saveName} />
-    <p class="save-note">
-      The view keeps the filters, search and pill, so new tracks that match show in it.
-    </p>
-    {#if saveError}<p class="save-error" role="alert">{saveError}</p>{/if}
-  </form>
-  {#snippet actions()}
-    <Button onclick={() => (saveOpen = false)}>Cancel</Button>
-    <Button variant="primary" type="submit" form="save-view">Save view</Button>
-  {/snippet}
-</Sheet>
+{#if saveMounted}
+  <Sheet bind:open={saveOpen} title="Save as smart view">
+    <form id="save-view" class="save-form" onsubmit={save}>
+      <label class="save-label" for="save-view-name">Name</label>
+      <input id="save-view-name" class="save-input" type="text" bind:value={saveName} />
+      <p class="save-note">
+        The view keeps the filters, search and pill, so new tracks that match show in it.
+      </p>
+      {#if saveError}<p class="save-error" role="alert">{saveError}</p>{/if}
+    </form>
+    {#snippet actions()}
+      <Button onclick={() => (saveOpen = false)}>Cancel</Button>
+      <Button variant="primary" type="submit" form="save-view">Save view</Button>
+    {/snippet}
+  </Sheet>
+{/if}
 
 <style>
   .library {
