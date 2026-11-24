@@ -148,7 +148,7 @@ const GENERIC_MIX_NAMES: [&str; 8] = [
 
 /// Most Bandcamp pages a track's names are allowed to point at, so an unmatched track costs a
 /// few page reads at most.
-pub const MAX_GUESSED_BANDCAMP_PAGES: usize = 8;
+pub const MAX_GUESSED_BANDCAMP_PAGES: usize = 10;
 
 /// Bandcamp track pages the file's names point at. Bandcamp builds a seller's address from
 /// their name and a track's address from its title, so a self-released edit sold there can be
@@ -171,13 +171,18 @@ pub fn guessed_bandcamp_pages(known: &super::KnownTags) -> Vec<ReleaseUrl> {
         bandcamp_slug(&full_title),
         bandcamp_slug(&format!("{artist} - {full_title}")),
     ];
-    let mut pages = Vec::new();
-    for seller in sellers.into_iter().flatten() {
-        let host: String = seller
+    // Sellers already matched for this artist come first: an artist who sells under another
+    // name, such as a label account, is found that way once one of their tracks is matched.
+    let named = sellers.into_iter().flatten().map(|seller| {
+        seller
             .chars()
             .filter(char::is_ascii_alphanumeric)
             .flat_map(|c| c.to_lowercase())
-            .collect();
+            .collect::<String>()
+    });
+    let hosts = known.bandcamp_sellers.iter().cloned().chain(named);
+    let mut pages = Vec::new();
+    for host in hosts {
         if host.len() < 3 {
             continue;
         }
@@ -224,6 +229,16 @@ fn bandcamp_slug(text: &str) -> String {
         }
     }
     slug
+}
+
+/// The seller part of a Bandcamp address: `kitsounds` in `https://kitsounds.bandcamp.com/track/x`.
+pub fn bandcamp_seller(url: &str) -> Option<&str> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let host = rest.split('/').next()?;
+    host.strip_suffix(".bandcamp.com")
+        .filter(|seller| !seller.is_empty() && !seller.contains('.'))
 }
 
 fn parse_leading_u64(segment: &str) -> Option<u64> {
@@ -370,6 +385,22 @@ mod tests {
             |page| matches!(page, ReleaseUrl::Bandcamp(url) if url.starts_with("https://adamarsh."))
         ));
         assert!(guessed_bandcamp_pages(&super::super::KnownTags::default()).is_empty());
+
+        let learned = super::super::KnownTags {
+            bandcamp_sellers: vec!["kitsounds".to_owned()],
+            ..known.clone()
+        };
+        assert_eq!(
+            guessed_bandcamp_pages(&learned)[0],
+            ReleaseUrl::Bandcamp(
+                "https://kitsounds.bandcamp.com/track/blue-hour-kit-rowe-edit".to_owned()
+            )
+        );
+        assert_eq!(
+            bandcamp_seller("https://kitsounds.bandcamp.com/album/x"),
+            Some("kitsounds")
+        );
+        assert_eq!(bandcamp_seller("https://www.discogs.com/release/1"), None);
     }
 
     #[test]

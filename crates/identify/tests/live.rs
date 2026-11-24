@@ -33,6 +33,7 @@ fn input(artist: &str, title: &str, duration_ms: u64) -> IdentificationInput {
         fingerprint: None,
         fingerprint_duration_s: None,
         file_isrc: None,
+        bandcamp_sellers: Vec::new(),
         tags: vec![
             (TagField::Artist, artist.to_owned()),
             (TagField::Title, title.to_owned()),

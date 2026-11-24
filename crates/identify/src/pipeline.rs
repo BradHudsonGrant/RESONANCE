@@ -281,7 +281,14 @@ impl Pipeline {
         let mut states: Vec<TrackState> = inputs
             .iter()
             .map(|input| TrackState {
-                identification: identify_locally(input),
+                identification: {
+                    let mut local = identify_locally(input);
+                    local
+                        .known
+                        .bandcamp_sellers
+                        .clone_from(&input.bandcamp_sellers);
+                    local
+                },
                 duration_ms: input.duration_ms,
                 fingerprint: input
                     .fingerprint

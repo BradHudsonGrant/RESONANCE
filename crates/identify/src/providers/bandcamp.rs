@@ -2,8 +2,8 @@
 //! JSON-LD published for search engines is read; no search scraping.
 
 use resonance_core::identify::{
-    Candidate, ReleaseKind, ReleaseUrl, find_catno, is_placeholder_artist, split_artist_from_title,
-    split_mix, strip_promo_and_catno,
+    Candidate, ReleaseKind, ReleaseUrl, clean_release_title, find_catno, is_placeholder_artist,
+    split_artist_from_title, split_mix, strip_promo_and_catno,
 };
 use resonance_core::providers::ProviderKey;
 use serde_json::Value;
@@ -120,6 +120,9 @@ fn candidates(data: &Value, url: &str) -> Vec<Candidate> {
             let item_art = image_url(item).or_else(|| base.artwork_url.clone());
             let item_art_provider = item_art.as_ref().map(|_| ID.to_owned());
             let (item_genre, item_subgenre) = keywords_genres(item);
+            let album = album
+                .as_deref()
+                .map(|name| clean_release_title(name, artist.as_deref(), catno.as_deref()));
             Some(Candidate {
                 artist,
                 title: Some(title),
@@ -269,7 +272,7 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].title.as_deref(), Some("Tune"));
         assert_eq!(found[0].mix.as_deref(), Some("Dub"));
-        assert_eq!(found[0].album.as_deref(), Some("The EP [CAT009]"));
+        assert_eq!(found[0].album.as_deref(), Some("The EP"));
         assert_eq!(found[0].catno.as_deref(), Some("CAT009"));
         assert_eq!(found[0].genre.as_deref(), Some("House"));
         assert_eq!(found[0].subgenre.as_deref(), Some("Deep House, Tech House"));

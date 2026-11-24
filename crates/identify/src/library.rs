@@ -6,7 +6,8 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
 
-use resonance_core::identify::{RankedCandidate, ReleaseUrl};
+use resonance_core::identify::{RankedCandidate, ReleaseUrl, bandcamp_seller};
+use resonance_core::library::TagField;
 use resonance_core::prep::local_proposals;
 use resonance_core::staging::proposals_from;
 use resonance_db::{
@@ -275,6 +276,14 @@ fn run_pass_inner(
             continue;
         }
 
+        let mut batch = batch;
+        let sellers = database
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .bandcamp_pages_by_artist()?;
+        for input in &mut batch {
+            input.bandcamp_sellers = sellers_for(&input.tags, &sellers);
+        }
         let identified = pipeline.identify(&batch, abort);
         if abort.load(Ordering::Acquire) {
             break;
@@ -317,6 +326,27 @@ fn run_pass_inner(
     report.network_requests = end.network - start.network;
     report.cached_answers = end.cached - start.cached;
     Ok(report)
+}
+
+/// The Bandcamp sellers this file's artist was matched to before, most recent order kept.
+fn sellers_for(tags: &[(TagField, String)], pages: &[(String, String)]) -> Vec<String> {
+    let Some(artist) = tags
+        .iter()
+        .find(|(field, _)| *field == TagField::Artist)
+        .map(|(_, value)| value.trim().to_lowercase())
+    else {
+        return Vec::new();
+    };
+    let mut sellers: Vec<String> = Vec::new();
+    for (known, url) in pages {
+        if *known == artist
+            && let Some(seller) = bandcamp_seller(url)
+            && !sellers.iter().any(|held| held == seller)
+        {
+            sellers.push(seller.to_owned());
+        }
+    }
+    sellers
 }
 
 /// Step 6 for one track, stored over any earlier result.
@@ -446,6 +476,7 @@ pub fn use_reviewed_candidate_artwork(
             db.clear_pending_proposed_artwork(track_id)?;
         } else {
             db.store_proposed_artwork(track_id, &artwork, &fetcher_provider, &url)?;
+            db.reopen_proposed_artwork(track_id)?;
         }
     }
     Ok(Some(artwork.hash))
@@ -642,5 +673,31 @@ fn fetch_or_load_artwork(
             Ok(None)
         }
         Err(ArtworkError::Io(_)) => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sellers_come_from_earlier_bandcamp_matches_by_the_same_artist() {
+        let pages = [
+            (
+                "ada marsh".to_owned(),
+                "https://kitsounds.bandcamp.com/track/one".to_owned(),
+            ),
+            (
+                "ada marsh".to_owned(),
+                "https://kitsounds.bandcamp.com/track/two".to_owned(),
+            ),
+            (
+                "someone else".to_owned(),
+                "https://other.bandcamp.com/track/x".to_owned(),
+            ),
+        ];
+        let tags = [(TagField::Artist, " Ada Marsh ".to_owned())];
+        assert_eq!(sellers_for(&tags, &pages), ["kitsounds"]);
+        assert!(sellers_for(&[], &pages).is_empty());
     }
 }

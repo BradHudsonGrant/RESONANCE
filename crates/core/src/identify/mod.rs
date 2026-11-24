@@ -14,7 +14,7 @@ pub use fuse::{
     replaces_best, retain_viable_candidates, should_expand_candidates,
 };
 pub use parse::{
-    artist_search_terms, clean_text, extract_isrc, find_catno, fold_latin,
+    artist_search_terms, clean_release_title, clean_text, extract_isrc, find_catno, fold_latin,
     is_generic_distributor_label, is_placeholder_artist, normalise_catno_tag, normalise_label,
     normalise_tags, normalise_tokens, parse_path, search_fallback_text, search_title_clean,
     similarity, split_artist_from_title, split_featured, split_mix, strip_promo_and_catno,
@@ -24,7 +24,7 @@ pub use score::{
     mix_search_hint, rank, score, score_confidence,
 };
 pub use url::{
-    MAX_GUESSED_BANDCAMP_PAGES, ReleaseUrl, UrlRejected, extract_release_urls,
+    MAX_GUESSED_BANDCAMP_PAGES, ReleaseUrl, UrlRejected, bandcamp_seller, extract_release_urls,
     guessed_bandcamp_pages, parse_release_url,
 };
 
@@ -200,6 +200,8 @@ pub struct KnownTags {
     pub isrc: Option<String>,
     pub embedded_urls: Vec<ReleaseUrl>,
     pub artist_inferred_from_title: bool,
+    /// Bandcamp sellers other tracks by this artist were matched to, tried before guessing.
+    pub bandcamp_sellers: Vec<String>,
 }
 
 impl KnownTags {

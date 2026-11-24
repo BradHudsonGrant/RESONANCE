@@ -1279,9 +1279,56 @@ fn parse_year(text: &str) -> Option<u16> {
     (1900..=2100).contains(&year).then_some(year)
 }
 
+/// A release title as a file's Album tag should hold it. Sellers often title a release
+/// "Artist - Name EP - CAT001" or "Name EP [CAT001]" so it reads well in a shop list; the artist
+/// and catalogue number have their own tags, so both come off when they match.
+pub fn clean_release_title(title: &str, artist: Option<&str>, catno: Option<&str>) -> String {
+    let mut name = title.trim().to_owned();
+    if let Some(catno) = catno.map(str::trim).filter(|catno| !catno.is_empty()) {
+        let lower = name.to_lowercase();
+        let wanted = catno.to_lowercase();
+        for suffix in [
+            format!(" - {wanted}"),
+            format!(" [{wanted}]"),
+            format!(" ({wanted})"),
+        ] {
+            if lower.ends_with(&suffix) {
+                name.truncate(name.len() - suffix.len());
+                break;
+            }
+        }
+    }
+    if let Some(artist) = artist.map(str::trim).filter(|artist| !artist.is_empty()) {
+        let prefix = format!("{} - ", artist.to_lowercase());
+        if name.to_lowercase().starts_with(&prefix) && name.len() > prefix.len() {
+            name = name[prefix.len()..].to_owned();
+        }
+    }
+    name.trim().to_owned()
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_seller_release_title_loses_the_artist_and_catalogue_number() {
+        assert_eq!(
+            clean_release_title(
+                "Ada Marsh - Blue Hour EP - KIT004",
+                Some("Ada Marsh"),
+                Some("KIT004")
+            ),
+            "Blue Hour EP"
+        );
+        assert_eq!(
+            clean_release_title("The EP [CAT009]", None, Some("CAT009")),
+            "The EP"
+        );
+        assert_eq!(
+            clean_release_title("Ada Marsh - Live", Some("Someone"), None),
+            "Ada Marsh - Live"
+        );
+    }
     use crate::identify::ReleaseUrl;
 
     fn tags(pairs: &[(TagField, &str)]) -> Vec<(TagField, String)> {

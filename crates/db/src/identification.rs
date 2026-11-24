@@ -22,6 +22,8 @@ pub struct IdentificationInput {
     pub fingerprint_duration_s: Option<u32>,
     pub file_isrc: Option<String>,
     pub tags: Vec<(TagField, String)>,
+    /// Bandcamp sellers other tracks by the same artist were matched to.
+    pub bandcamp_sellers: Vec<String>,
 }
 
 /// Lazy audio identity loaded only when a track runs preview verification or AudD.
@@ -164,6 +166,7 @@ fn hydrate_inputs(
             fingerprint_duration_s: row.fingerprint_duration_s,
             file_isrc: row.file_isrc,
             tags: tags_by_asset.remove(&row.asset_id).unwrap_or_default(),
+            bandcamp_sellers: Vec::new(),
         })
         .collect())
 }
@@ -176,6 +179,19 @@ type IdentificationWriteRef<'a> = (
 );
 
 impl Database {
+    /// The Bandcamp page each artist's matched tracks came from, keyed by the artist in lower
+    /// case as the files name them.
+    pub fn bandcamp_pages_by_artist(&self) -> Result<Vec<(String, String)>, DbError> {
+        let mut statement = self.connection.prepare_cached(
+            "SELECT DISTINCT lower(json_extract(known_json, '$.artist')), json_extract(best_json, '$.url')
+             FROM track_identification
+             WHERE json_extract(best_json, '$.url') LIKE '%.bandcamp.com/%'
+               AND json_extract(known_json, '$.artist') IS NOT NULL",
+        )?;
+        let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// Up to `limit` tracks after `after_track_id` that still need `pass`, in track order.
     pub fn identification_inputs(
         &self,

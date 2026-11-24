@@ -75,7 +75,10 @@ impl Database {
             facts.pending.insert(id?);
         }
         let mut online = self.connection.prepare_cached(
-            "SELECT track_id, best_json IS NOT NULL FROM track_identification WHERE online = 1",
+            // A search that ran but had a provider fail is stored as not complete, so the next
+            // pass retries it. It has still been searched, and the stage says so.
+            "SELECT track_id, best_json IS NOT NULL FROM track_identification
+             WHERE online = 1 OR steps_json LIKE '%\"step\":\"text_search\"%'",
         )?;
         for row in online.query_map([], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, bool>(1)?))
