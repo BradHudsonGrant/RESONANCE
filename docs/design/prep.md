@@ -16,32 +16,34 @@ The tabs across the top split the view into stages, each with a count.
 
 The rule that places a track in a stage lives in `crates/core/src/prep.rs` (`PrepStage`). Prep opens on the first tab with work in it: To review, then Not searched, then No match. After that the tab stays where the user puts it.
 
-The filter beside the tabs narrows any tab to tracks missing one tag. A selection sent from Library shows as a button that clears it.
+**Find tracks** narrows any tab by name, and the filter beside it narrows to tracks missing one tag. A selection sent from Library shows as a button that clears it.
 
 ## Finding matches
 
-**Find matches** searches every track in the current tab, or only the ticked tracks when any are ticked. The button names how many tracks it will search. While a search runs, the button gives way to its progress and a link to Activity, and the rest of Prep stays usable.
+**Find matches** searches every track in the current tab, or only the ticked tracks when any are ticked. The button names how many tracks it will search. While a search runs, a strip under the toolbar shows how many tracks are done, the rows being searched say Searching, and the rest of Prep stays usable. When it ends, the strip says how many tracks are ready to review and how many found nothing.
+
+A track the catalogues do not know, such as an edit sold only on Bandcamp, is looked up on the Bandcamp page its names point at: the remixer or the name in the mix, then the artist, with the title as Bandcamp writes it in the address.
 
 The checkboxes are for working on many tracks at once. Moving between tabs keeps the ticks. Changing the filter or the Library selection clears them.
 
 ## The list
 
-Each row shows the cover (the suggested one if there is one), title, artist and where the track stands: the match confidence and whether the audio or only the names matched, the number of changes waiting, or Not searched, No match or Done. Saving or skipping a track moves it out of To review, and the next track takes its place.
+Each row shows the cover (the suggested one if there is one), title and artist, then Genre, Label and Year, then where the track stands: the match confidence and whether the audio or only the names matched, the number of changes waiting, or Not searched, No match or Done. An empty column shows a dash, and a missing artist, title or cover is named under the artist. Clicking a column header sorts by it, A to Z, then Z to A, then back to Prep's order. As the list narrows, Label goes first, then Genre and Year, and the missing tags move into the line under the artist. Saving or skipping a track moves it out of To review, and the next track takes its place.
 
 ## Review
 
 The review pane answers one question first: is this the right release?
 
-- **In the file** and **Suggested** sit side by side, each with its cover, title, artist and release.
+- The cover sits at the top, larger than anything else, beside the title, artist and release.
 - Under them, the confidence and the evidence in plain words: whether the audio fingerprint matches, how the length compares and which providers agree. A match on names alone says to listen before saving.
-- **Changes** lists every field the match would change, current value then suggested value, each with a checkbox. All are ticked to start. Mix and subgenre are marked Library because they are kept in the library rather than the file. Fields the user typed are never offered and are listed as kept.
+- **Tags** lists every tag a file can hold, the file's value beside the suggested one, with Missing where the file has none. Each suggestion has its own **Accept**, and **Accept all** takes every one. The mix is part of the title, as stores and DJ software write it, so a remix or edit never leaves the title. A suggestion that differs from the file only in letter case is not offered. Fields the user typed are never offered and are listed as kept.
 - **Matches** lists every release the search found, numbered. Choosing another one, or pressing its number, updates the changes. When there are several covers, the artwork row shows each one to choose from.
 - **Not the right release?** takes a pasted release page and looks the track up from it.
 - **Search details** shows what each provider returned, and links to provider settings when a key is missing.
 
 A track that has not been searched offers **Find a match**. A track with no match offers **Search again** and the link box.
 
-The footer holds the actions. **Save N changes** writes the ticked changes and sets the unticked ones aside, so the track leaves To review. **Skip** sets every suggestion aside. **Edit tags**, **Write edits** (when library edits are waiting for the file) and **Rename file** apply to the ticked tracks, or to this track when none are ticked. After a save, **Undo** restores the files. Activity keeps the history.
+The footer holds the actions. **Accept N changes** writes every suggestion, so the track leaves To review. **Skip** sets every suggestion aside. **Edit tags**, **Write edits** (when library edits are waiting for the file) and **Rename file** apply to the ticked tracks, or to this track when none are ticked. After a save, **Undo** restores the files. Activity keeps the history.
 
 If a file has changed or cannot be written, Prep lists it with the reason and keeps its suggestions waiting.
 
@@ -54,7 +56,7 @@ If a file has changed or cannot be written, Prep lists it with the reason and ke
 | `Shift+↑` or `Shift+↓` | Tick tracks while moving                                              |
 | `X`                    | Tick or untick this track                                             |
 | `Ctrl+A`               | Tick or untick every track in the tab                                 |
-| `Enter`                | Save the ticked changes, or search a track that has not been searched |
+| `Enter`                | Accept every suggestion, or search a track that has not been searched |
 | `S`                    | Skip this track's suggestions                                         |
 | `1` to `9`             | Choose that match                                                     |
 | `F`                    | Find matches for the ticked tracks, or this track                     |
@@ -66,4 +68,4 @@ If a file has changed or cannot be written, Prep lists it with the reason and ke
 
 ## Layout
 
-The list takes just under half the workspace and the review pane the rest. At 800 px of workspace or less the list takes the full width, a track opens its review, and Back to tracks or Escape returns to the list. Below 440 px of review width the comparison stacks and the changes show only the suggested value. The shell supplies the dark, light and Windows high-contrast themes.
+The list and the review pane share the workspace equally. At 800 px of workspace or less the list takes the full width, a track opens its review, and Back to tracks or Escape returns to the list. Below 520 px of review width the cover stacks above the title and the tags show only the suggested value. The shell supplies the dark, light and Windows high-contrast themes.

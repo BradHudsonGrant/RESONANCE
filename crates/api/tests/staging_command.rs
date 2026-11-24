@@ -334,8 +334,11 @@ fn prep_queue_and_batch_tools_fix_case_replace_text_and_apply_release_fields() {
             .and_then(|f| f.current_value.as_deref())
     }
     assert_eq!(value_of(&after_first, TagName::Artist), Some("DJ Kaden"));
-    assert_eq!(value_of(&after_first, TagName::Title), Some("Echo Chamber"));
-    assert_eq!(value_of(&after_first, TagName::Mix), Some("UK VIP Mix"));
+    assert_eq!(
+        value_of(&after_first, TagName::Title),
+        Some("Echo Chamber (UK VIP Mix)")
+    );
+    assert_eq!(value_of(&after_first, TagName::Mix), None);
 
     let after_second = diff(&api, ids[1]);
     assert_eq!(value_of(&after_second, TagName::Album), Some("Horizon EP"));

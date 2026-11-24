@@ -5,7 +5,7 @@
 use crate::identify::{normalise_tags, parse_path};
 use crate::library::TagField;
 use crate::staging::{
-    Proposal, ProposalStatus, StoredProposal, changing_proposals, normalise_value,
+    Proposal, ProposalStatus, StoredProposal, changing_proposals, normalise_value, title_with_mix,
 };
 
 /// The release-level fields copied across an album, EP or folder by "Apply to release".
@@ -411,11 +411,18 @@ pub fn local_proposals(file_tags: &[(TagField, String)], path: &str) -> Vec<Prop
 
     let tag_year = from_tags.year.map(|y| y.to_string());
     let path_year = from_path.year.map(|y| y.to_string());
+    let tag_title = from_tags
+        .title
+        .as_deref()
+        .map(|title| title_with_mix(title, from_tags.mix.as_deref()));
+    let path_title = from_path
+        .title
+        .as_deref()
+        .map(|title| title_with_mix(title, from_path.mix.as_deref()));
 
     let tag_candidates = [
         (TagField::Artist, from_tags.artist.as_deref()),
-        (TagField::Title, from_tags.title.as_deref()),
-        (TagField::Mix, from_tags.mix.as_deref()),
+        (TagField::Title, tag_title.as_deref()),
         (TagField::Album, from_tags.album.as_deref()),
         (TagField::Label, from_tags.label.as_deref()),
         (TagField::CatNo, from_tags.catno.as_deref()),
@@ -425,8 +432,7 @@ pub fn local_proposals(file_tags: &[(TagField, String)], path: &str) -> Vec<Prop
 
     let path_candidates = [
         (TagField::Artist, from_path.artist.as_deref()),
-        (TagField::Title, from_path.title.as_deref()),
-        (TagField::Mix, from_path.mix.as_deref()),
+        (TagField::Title, path_title.as_deref()),
         (TagField::Album, from_path.album.as_deref()),
         (TagField::Label, from_path.label.as_deref()),
         (TagField::CatNo, from_path.catno.as_deref()),
@@ -691,13 +697,9 @@ mod tests {
         assert!(
             untagged
                 .iter()
-                .any(|p| p.field == TagField::Title && p.value == "Echo Chamber")
+                .any(|p| p.field == TagField::Title && p.value == "Echo Chamber (Extended Mix)")
         );
-        assert!(
-            untagged
-                .iter()
-                .any(|p| p.field == TagField::Mix && p.value == "Extended Mix")
-        );
+        assert!(untagged.iter().all(|p| p.field != TagField::Mix));
         assert!(
             untagged
                 .iter()
@@ -727,6 +729,18 @@ mod tests {
             "Some Artist - Night Drive.flac",
         );
         assert!(already_clean.is_empty());
+
+        let edit_in_title = local_proposals(
+            &[
+                (TagField::Artist, "Some Artist".to_owned()),
+                (TagField::Title, "Night Drive (Late Edit)".to_owned()),
+            ],
+            "Some Artist - Night Drive (Late Edit).mp3",
+        );
+        assert!(
+            edit_in_title.is_empty(),
+            "the edit stays in the title: {edit_in_title:?}"
+        );
 
         let inferred = local_proposals(
             &[(TagField::Title, "Ada Marsh - Blue Hour".to_owned())],

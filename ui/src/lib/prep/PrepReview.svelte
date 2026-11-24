@@ -10,7 +10,7 @@
   import type { TagName } from '../ipc/bindings/TagName';
   import MatchEvidenceHeader, { formatProviderName } from './MatchEvidenceHeader.svelte';
   import {
-    LIBRARY_ONLY_FIELDS,
+    fileFields,
     MISSING_LABELS,
     basisSentence,
     candidateTitle,
@@ -345,14 +345,10 @@
               {/if}
             </td>
           </tr>
-          {#each item.fields as field (field.field)}
+          {#each fileFields(item) as field (field.field)}
             {@const offered = isSuggested(field)}
             <tr class:suggested={offered}>
-              <th scope="row"
-                >{MISSING_LABELS[field.field]}{#if LIBRARY_ONLY_FIELDS.has(field.field)}<small
-                    title="Kept in the library, not the file">Library</small
-                  >{/if}</th
-              >
+              <th scope="row">{MISSING_LABELS[field.field]}</th>
               <td class:old={offered} title={field.current_value ?? ''}>
                 {#if field.current_value}{field.current_value}{:else}<span class="missing"
                     >Missing</span
@@ -658,11 +654,6 @@
   .tags tbody th {
     font-weight: var(--weight-regular);
     color: var(--color-text-2);
-  }
-  .tags tbody th small {
-    margin-left: var(--space-2);
-    font-size: var(--text-xs);
-    color: var(--color-muted);
   }
   .tags tr.suggested {
     background: var(--color-surface);

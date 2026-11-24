@@ -153,17 +153,34 @@ pub fn effective_tags(
     tags
 }
 
-/// One proposal per field the best candidate fills, in stored form.
+/// The title as a file carries it: the mix in brackets after the name, the way stores and DJ
+/// software show it. Common tag formats have no frame for the mix, so a title without it would
+/// lose the remix or edit from the file.
+pub fn title_with_mix(title: &str, mix: Option<&str>) -> String {
+    let title = title.trim();
+    let Some(mix) = mix.map(str::trim).filter(|mix| !mix.is_empty()) else {
+        return title.to_owned();
+    };
+    if title.to_lowercase().contains(&mix.to_lowercase()) {
+        return title.to_owned();
+    }
+    format!("{title} ({mix})")
+}
+
+/// One proposal per file tag the best candidate fills, in stored form. The mix goes into the
+/// title, and fields no file can hold are not proposed.
 pub fn proposals_from(best: &RankedCandidate) -> Vec<Proposal> {
     let candidate = &best.candidate;
     let year = candidate.year.map(|year| year.to_string());
+    let title = candidate
+        .title
+        .as_deref()
+        .map(|title| title_with_mix(title, candidate.mix.as_deref()));
     [
         (TagField::Artist, candidate.artist.as_deref()),
-        (TagField::Title, candidate.title.as_deref()),
-        (TagField::Mix, candidate.mix.as_deref()),
+        (TagField::Title, title.as_deref()),
         (TagField::Album, candidate.album.as_deref()),
         (TagField::Genre, candidate.genre.as_deref()),
-        (TagField::Subgenre, candidate.subgenre.as_deref()),
         (TagField::Label, candidate.label.as_deref()),
         (TagField::CatNo, candidate.catno.as_deref()),
         (TagField::Year, year.as_deref()),
@@ -183,15 +200,15 @@ pub fn proposals_from(best: &RankedCandidate) -> Vec<Proposal> {
     .collect()
 }
 
-/// The proposals that would change what the track shows. One that matches is nothing to
-/// decide, so it is not staged.
+/// The proposals that would change what the track shows. One that matches, or differs only in
+/// letter case, is nothing to decide, so it is not staged. Fix case handles case on purpose.
 pub fn changing_proposals(proposals: Vec<Proposal>, shown: &[(TagField, String)]) -> Vec<Proposal> {
     proposals
         .into_iter()
         .filter(|proposal| {
-            !shown
-                .iter()
-                .any(|(field, value)| *field == proposal.field && *value == proposal.value)
+            !shown.iter().any(|(field, value)| {
+                *field == proposal.field && value.to_lowercase() == proposal.value.to_lowercase()
+            })
         })
         .collect()
 }
@@ -513,8 +530,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             [
                 (TagField::Artist, "Artist"),
-                (TagField::Title, "Song"),
-                (TagField::Mix, "Extended Mix"),
+                (TagField::Title, "Song (Extended Mix)"),
                 (TagField::Genre, "Electronic"),
                 (TagField::Year, "2019"),
                 (TagField::TrackNumber, "A1"),
@@ -523,5 +539,29 @@ mod tests {
         assert!(proposals.iter().all(|proposal| {
             proposal.provider == "discogs" && proposal.confidence == 0.92 && !proposal.audio_matched
         }));
+    }
+
+    #[test]
+    fn the_mix_goes_into_the_title_once() {
+        assert_eq!(
+            title_with_mix("Low Tide", Some("Harbour Remix")),
+            "Low Tide (Harbour Remix)"
+        );
+        assert_eq!(title_with_mix("Song (Dub)", Some("dub")), "Song (Dub)");
+        assert_eq!(title_with_mix(" Song ", Some(" ")), "Song");
+        assert_eq!(title_with_mix("Song", None), "Song");
+    }
+
+    #[test]
+    fn a_value_that_differs_only_in_case_is_not_staged() {
+        let proposal = Proposal {
+            field: TagField::Artist,
+            value: "Alb".to_owned(),
+            provider: "discogs".to_owned(),
+            confidence: 1.0,
+            audio_matched: false,
+        };
+        let shown = [(TagField::Artist, "ALB".to_owned())];
+        assert!(changing_proposals(vec![proposal], &shown).is_empty());
     }
 }

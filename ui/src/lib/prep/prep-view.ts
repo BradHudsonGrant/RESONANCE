@@ -39,8 +39,14 @@ export const MISSING_FIELDS = Object.keys(MISSING_LABELS) as MissingField[];
 /** The tags a DJ notices are missing. BPM and key come from analysis, so they are left out. */
 const CORE_FIELDS: MissingField[] = ['artist', 'title', 'artwork', 'genre', 'label', 'year'];
 
-/** Fields Resonance keeps in its library because the common tag formats have no frame for them. */
-export const LIBRARY_ONLY_FIELDS: ReadonlySet<TagName> = new Set(['mix', 'subgenre']);
+/** Fields the common tag formats have no frame for. Prep shows only what a file carries, so the
+ * mix appears as part of the title instead. */
+const LIBRARY_ONLY_FIELDS: ReadonlySet<TagName> = new Set(['mix', 'subgenre']);
+
+/** The tags a file can hold, in the order staging shows them. */
+export function fileFields(item: PrepItem): StagedField[] {
+  return item.fields.filter((field) => !LIBRARY_ONLY_FIELDS.has(field.field));
+}
 
 export const STAGE_TABS: ReadonlyArray<{ id: StageTab; label: string }> = [
   { id: 'review', label: 'To review' },
@@ -120,6 +126,42 @@ export function buildMissingQuery(
   };
 }
 
+/** The list's columns, the tags DJ stores and libraries lead with. */
+export type ListColumn = 'title' | 'genre' | 'label' | 'year';
+export interface ListSort {
+  column: ListColumn;
+  direction: 'asc' | 'desc';
+}
+
+export const LIST_COLUMNS: ReadonlyArray<{ id: ListColumn; label: string }> = [
+  { id: 'title', label: 'Track' },
+  { id: 'genre', label: 'Genre' },
+  { id: 'label', label: 'Label' },
+  { id: 'year', label: 'Year' },
+];
+
+/** Ascending, then descending, then back to the order Prep chose. */
+export function nextListSort(sort: ListSort | null, column: ListColumn): ListSort | null {
+  if (sort?.column !== column) return { column, direction: 'asc' };
+  return sort.direction === 'asc' ? { column, direction: 'desc' } : null;
+}
+
+export function withListSort(query: TrackQuery | null, sort: ListSort | null): TrackQuery | null {
+  if (!sort) return query;
+  return {
+    ...query,
+    sort: sort.column,
+    direction: sort.direction,
+    then_sort: sort.column === 'title' ? 'artist' : 'title',
+    then_direction: 'asc',
+  };
+}
+
+export function withFindText(query: TrackQuery | null, text: string): TrackQuery | null {
+  if (!text) return query;
+  return { ...query, text: [query?.text, text].filter(Boolean).join(' ') };
+}
+
 /** Core tags the track will still lack after its suggestions are saved. */
 export function stillMissing(item: PrepItem): string[] {
   return CORE_FIELDS.filter((name) => {
@@ -142,12 +184,12 @@ export function missingNow(item: PrepItem): string[] {
 
 /** Suggestions the user can still take: changing, and not a value the user set by hand. */
 export function reviewableFields(item: PrepItem): StagedField[] {
-  return item.fields.filter((field) => field.changes && !field.locked_by_user);
+  return fileFields(item).filter((field) => field.changes && !field.locked_by_user);
 }
 
 /** Suggestions held back because the user typed that field. */
 export function keptFields(item: PrepItem): StagedField[] {
-  return item.fields.filter((field) => field.changes && field.locked_by_user);
+  return fileFields(item).filter((field) => field.changes && field.locked_by_user);
 }
 
 export function percent(confidence: number): string {

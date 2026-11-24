@@ -23,7 +23,10 @@ pub use score::{
     MixFamily, RemixQualifier, classify_mix, confirm_by_fingerprint, mix_family_matches,
     mix_search_hint, rank, score, score_confidence,
 };
-pub use url::{ReleaseUrl, UrlRejected, extract_release_urls, parse_release_url};
+pub use url::{
+    MAX_GUESSED_BANDCAMP_PAGES, ReleaseUrl, UrlRejected, extract_release_urls,
+    guessed_bandcamp_pages, parse_release_url,
+};
 
 use crate::library::TagField;
 use crate::providers::ProviderKey;

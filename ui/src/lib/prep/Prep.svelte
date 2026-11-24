@@ -26,10 +26,14 @@
   import PrepReview from './PrepReview.svelte';
   import WriteTagsSheet from './WriteTagsSheet.svelte';
   import {
+    LIST_COLUMNS,
     MISSING_FIELDS,
     MISSING_LABELS,
     STAGE_TABS,
     buildMissingQuery,
+    nextListSort,
+    withFindText,
+    withListSort,
     createSelectionSet,
     emptyStageText,
     firstWorkingTab,
@@ -41,9 +45,14 @@
     pruneSelection,
     rowStatus,
     stageCount,
+    type ListColumn,
+    type ListSort,
     type MissingField,
     type StageTab,
   } from './prep-view';
+
+  /** Columns whose gaps the row already shows as an empty cell. */
+  const COLUMN_GAPS = new Set(['genre', 'label', 'year']);
 
   export interface PrepClient {
     trackIds: (
@@ -169,7 +178,12 @@
   let prevPage = 0;
 
   const stageFilter = $derived<PrepStageName | null>(stage === 'all' ? null : stage);
-  const scopeQuery = $derived(buildMissingQuery(batchQuery, missing));
+  let findText = $state('');
+  let appliedFind = $state('');
+  let findTimer: ReturnType<typeof setTimeout> | undefined;
+  let listSort = $state<ListSort | null>(null);
+  const filterQuery = $derived(withFindText(buildMissingQuery(batchQuery, missing), appliedFind));
+  const scopeQuery = $derived(withListSort(filterQuery, listSort));
   const current = $derived(items.find((item) => item.track.id === activeId) ?? null);
   const detailOpen = $derived(compact && reviewing && current !== null);
   const selectedCount = $derived((void selectionVersion, selected.size));
@@ -191,8 +205,20 @@
   );
   let scopeKey = '';
   let finishedJob = untrack(() => recentOnlineJob?.id ?? null);
-  // The stage is left out: moving between tabs keeps the ticks, which stay valid across them.
-  const contextKey = $derived(JSON.stringify([scopeQuery, batchTrackIds]));
+  // The stage and the sort are left out: moving between tabs or reordering keeps the ticks,
+  // which stay valid across them.
+  const contextKey = $derived(JSON.stringify([filterQuery, batchTrackIds]));
+
+  function typeFind(value: string) {
+    findText = value;
+    clearTimeout(findTimer);
+    findTimer = setTimeout(() => (appliedFind = findText.trim()), 200);
+  }
+
+  function sortBy(column: ListColumn) {
+    listSort = nextListSort(listSort, column);
+    page = 0;
+  }
 
   function markOwnWrite() {
     suppressRevisions++;
@@ -794,6 +820,20 @@
       <SegmentedTabs items={tabs} value={stage} ariaLabel="Prep stages" onChange={chooseStage} />
     </div>
     <div class="tools" role="toolbar" aria-label="Prep controls">
+      <input
+        class="find"
+        type="search"
+        aria-label="Find tracks"
+        placeholder="Find tracks"
+        value={findText}
+        oninput={(event) => typeFind(event.currentTarget.value)}
+        onkeydown={(event) => {
+          if (event.key === 'Escape' && findText) {
+            event.stopPropagation();
+            typeFind('');
+          }
+        }}
+      />
       <select
         aria-label="Filter tracks"
         value={missing}
@@ -950,8 +990,28 @@
             indeterminate={selectedCount > 0 && selectedCount < totalCount}
             onchange={selectAll}
           />
-          <span>Track</span>
-          <span class="numeric">{totalCount.toLocaleString('en-GB')}</span>
+          <div class="columns">
+            {#each LIST_COLUMNS as column (column.id)}
+              {@const sorted = listSort?.column === column.id ? listSort.direction : null}
+              <button
+                type="button"
+                class="column"
+                data-column={column.id}
+                aria-label={'Sort by ' +
+                  column.label.toLowerCase() +
+                  (sorted === 'asc' ? ', A to Z' : sorted === 'desc' ? ', Z to A' : '')}
+                data-sorted={sorted ?? undefined}
+                onclick={() => sortBy(column.id)}
+                >{column.label}{#if column.id === 'title'}<span class="numeric count"
+                    >{totalCount.toLocaleString('en-GB')}</span
+                  >{/if}{#if sorted}<Icon
+                    name={sorted === 'asc' ? 'chevron-up' : 'chevron-down'}
+                    size="xs"
+                  />{/if}</button
+              >
+            {/each}
+            <span class="column status-head">Status</span>
+          </div>
         </div>
         <ul class="list-scroll" aria-busy={loading}>
           {#each items as item (item.track.id)}
@@ -983,9 +1043,24 @@
                   <span class="artist"
                     >{#if item.track.artist}{item.track.artist}{/if}{#if gaps.length}<span
                         class="gaps">{item.track.artist ? ' · ' : ''}Missing {gaps.join(', ')}</span
-                      >{/if}</span
+                      >{#if gaps.some((gap) => !COLUMN_GAPS.has(gap))}<span class="gaps-wide"
+                          >{item.track.artist ? ' · ' : ''}Missing {gaps
+                            .filter((gap) => !COLUMN_GAPS.has(gap))
+                            .join(', ')}</span
+                        >{/if}{/if}</span
                   >
                 </span>
+                {#each ['genre', 'label', 'year'] as const as column (column)}
+                  {@const value = item.track[column]}
+                  <span
+                    class="cell"
+                    data-column={column}
+                    class:numeric={column === 'year'}
+                    class:empty-cell={!value}
+                    title={value ?? undefined}
+                    >{#if value}{value}{:else}<span aria-label={'No ' + column}>–</span>{/if}</span
+                  >
+                {/each}
                 <span class="status" data-stage={searching ? 'searching' : item.stage}>
                   {#if searching && item.stage === 'not_searched'}
                     <span class="status-main">Searching</span>
@@ -1154,7 +1229,8 @@
     transform-origin: left;
     transition: transform var(--duration-fast) var(--ease-out);
   }
-  .gaps {
+  .gaps,
+  .gaps-wide {
     color: var(--color-muted);
   }
   .status[data-stage='searching'] {
@@ -1167,7 +1243,8 @@
     font-size: var(--text-sm);
   }
 
-  select {
+  select,
+  .find {
     font: inherit;
     font-size: var(--text-sm);
     height: var(--control-height-sm);
@@ -1205,7 +1282,7 @@
   .workspace {
     flex: 1;
     display: grid;
-    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     min-width: 0;
     min-height: 0;
   }
@@ -1217,19 +1294,114 @@
     background: var(--color-surface);
     border-right: var(--border-width) solid var(--color-border);
   }
+  .tracks {
+    container: tracks / inline-size;
+    --col-genre: 96px;
+    --col-label: 120px;
+    --col-year: 40px;
+    --col-status: 120px;
+    --row-columns: var(--thumb-sm) minmax(0, 1fr) var(--col-genre) var(--col-label) var(--col-year)
+      var(--col-status);
+  }
   .list-head {
     display: grid;
-    grid-template-columns: var(--checkbox-size) minmax(0, 1fr) auto;
+    grid-template-columns: var(--checkbox-size) minmax(0, 1fr);
     align-items: center;
     gap: var(--space-3);
     height: var(--table-header-height);
-    padding-inline: var(--space-4);
+    padding-left: var(--space-4);
     color: var(--color-text-2);
     font-size: var(--text-sm);
     border-bottom: var(--border-width) solid var(--color-border);
   }
-  .list-head .numeric {
+  .columns {
+    min-width: 0;
+    height: 100%;
+    display: grid;
+    grid-template-columns: var(--row-columns);
+    align-items: center;
+    gap: var(--space-3);
+    padding-right: var(--space-4);
+  }
+  .column {
+    min-width: 0;
+    height: 100%;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color var(--duration-fast) var(--ease-out);
+  }
+  .column:hover,
+  .column[data-sorted] {
+    color: var(--color-text);
+  }
+  .column:focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-text);
+    outline-offset: -2px;
+  }
+  .column[data-column='title'] {
+    grid-column: 1 / 3;
+  }
+  .column[data-column='year'] {
+    justify-content: end;
+  }
+  .status-head {
+    justify-content: end;
+    cursor: default;
+  }
+  .count {
     color: var(--color-muted);
+  }
+  .cell {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--text-sm);
+    color: var(--color-text-2);
+  }
+  .cell[data-column='year'] {
+    text-align: right;
+  }
+  .empty-cell {
+    color: var(--color-muted);
+  }
+  .gaps {
+    display: none;
+  }
+  .find {
+    width: 12rem;
+  }
+  @container tracks (max-width: 640px) {
+    .columns,
+    .track-name {
+      --row-columns: var(--thumb-sm) minmax(0, 1fr) var(--col-genre) var(--col-year)
+        var(--col-status);
+    }
+    [data-column='label'] {
+      display: none;
+    }
+  }
+  @container tracks (max-width: 520px) {
+    .columns,
+    .track-name {
+      --row-columns: var(--thumb-sm) minmax(0, 1fr) var(--col-status);
+    }
+    [data-column='genre'],
+    [data-column='year'],
+    .gaps-wide {
+      display: none;
+    }
+    .gaps {
+      display: inline;
+    }
   }
   .list-scroll {
     flex: 1;
@@ -1266,7 +1438,7 @@
   .track-name {
     min-width: 0;
     display: grid;
-    grid-template-columns: var(--thumb-sm) minmax(0, 1fr) auto;
+    grid-template-columns: var(--row-columns);
     align-items: center;
     gap: var(--space-3);
     padding: var(--space-2) var(--space-4) var(--space-2) 0;
@@ -1308,6 +1480,8 @@
   .status-main {
     display: inline-flex;
     gap: var(--space-2);
+    max-width: 100%;
+    overflow: hidden;
     white-space: nowrap;
   }
   .status-main .numeric {
