@@ -12,7 +12,6 @@ import type { TrackQuery } from '../ipc/bindings/TrackQuery';
 import { formatProviderName } from './MatchEvidenceHeader.svelte';
 
 export type MissingField = TagName | 'artwork';
-export type StageTab = PrepStageName | 'all';
 
 export const MISSING_LABELS: Record<MissingField, string> = {
   artist: 'Artist',
@@ -48,42 +47,20 @@ export function fileFields(item: PrepItem): StagedField[] {
   return item.fields.filter((field) => !LIBRARY_ONLY_FIELDS.has(field.field));
 }
 
-export const STAGE_TABS: ReadonlyArray<{ id: StageTab; label: string }> = [
-  { id: 'review', label: 'To review' },
-  { id: 'not_searched', label: 'Not searched' },
-  { id: 'no_match', label: 'No match' },
-  { id: 'done', label: 'Done' },
-  { id: 'all', label: 'All' },
-];
+const STAGE_WORDS: Record<PrepStageName, string> = {
+  review: 'to review',
+  not_searched: 'not searched',
+  no_match: 'with no match',
+  done: 'done',
+};
 
-export function stageCount(counts: PrepStageCounts, tab: StageTab): number {
-  if (tab === 'all') return counts.review + counts.not_searched + counts.no_match + counts.done;
-  return counts[tab];
+/** How the view's tracks stand, in a few words: "36 to review · 395 not searched". */
+export function stageSummary(counts: PrepStageCounts): string {
+  return (['review', 'not_searched', 'no_match', 'done'] as const)
+    .filter((stage) => counts[stage] > 0)
+    .map((stage) => counts[stage].toLocaleString('en-GB') + ' ' + STAGE_WORDS[stage])
+    .join(' · ');
 }
-
-/** The tab to open on: the first one with work in it. */
-export function firstWorkingTab(counts: PrepStageCounts): StageTab {
-  if (counts.review) return 'review';
-  if (counts.not_searched) return 'not_searched';
-  if (counts.no_match) return 'no_match';
-  return 'all';
-}
-
-export function emptyStageText(tab: StageTab): string {
-  switch (tab) {
-    case 'review':
-      return 'Nothing waiting for review';
-    case 'not_searched':
-      return 'Every track has been searched';
-    case 'no_match':
-      return 'Every search found a match';
-    case 'done':
-      return 'No finished tracks yet';
-    case 'all':
-      return 'No tracks in this view';
-  }
-}
-
 export function createSelectionSet(): Set<number> {
   return new Set<number>();
 }
@@ -127,7 +104,7 @@ export function buildMissingQuery(
 }
 
 /** The list's columns, the tags DJ stores and libraries lead with. */
-export type ListColumn = 'title' | 'genre' | 'label' | 'year';
+export type ListColumn = 'title' | 'genre' | 'label' | 'year' | 'status';
 export interface ListSort {
   column: ListColumn;
   direction: 'asc' | 'desc';
@@ -138,7 +115,11 @@ export const LIST_COLUMNS: ReadonlyArray<{ id: ListColumn; label: string }> = [
   { id: 'genre', label: 'Genre' },
   { id: 'label', label: 'Label' },
   { id: 'year', label: 'Year' },
+  { id: 'status', label: 'Status' },
 ];
+
+/** Stages in the order a status sort lists them, work first. */
+export const STAGE_ORDER: readonly PrepStageName[] = ['review', 'not_searched', 'no_match', 'done'];
 
 /** Ascending, then descending, then back to the order Prep chose. */
 export function nextListSort(sort: ListSort | null, column: ListColumn): ListSort | null {
@@ -146,8 +127,9 @@ export function nextListSort(sort: ListSort | null, column: ListColumn): ListSor
   return sort.direction === 'asc' ? { column, direction: 'desc' } : null;
 }
 
+/** The query for a sort; a status sort orders by stage, which Prep does itself. */
 export function withListSort(query: TrackQuery | null, sort: ListSort | null): TrackQuery | null {
-  if (!sort) return query;
+  if (!sort || sort.column === 'status') return query;
   return {
     ...query,
     sort: sort.column,

@@ -2,7 +2,6 @@
   import { tick, untrack } from 'svelte';
   import Button from '../design/Button.svelte';
   import Icon from '../design/Icon.svelte';
-  import SegmentedTabs from '../design/SegmentedTabs.svelte';
   import Thumb from '../design/Thumb.svelte';
   import { artworkUrl } from '../ipc/artwork';
   import type { AcceptedTagWriteReport } from '../ipc/bindings/AcceptedTagWriteReport';
@@ -30,14 +29,12 @@
     LIST_COLUMNS,
     MISSING_FIELDS,
     MISSING_LABELS,
-    STAGE_TABS,
+    STAGE_ORDER,
     buildMissingQuery,
     nextListSort,
     withFindText,
     withListSort,
     createSelectionSet,
-    emptyStageText,
-    firstWorkingTab,
     formatSaveNotice,
     formatUrlLookupNotice,
     formatWriteNotice,
@@ -45,11 +42,10 @@
     missingNow,
     pruneSelection,
     rowStatus,
-    stageCount,
+    stageSummary,
     type ListColumn,
     type ListSort,
     type MissingField,
-    type StageTab,
   } from './prep-view';
 
   /** Columns whose gaps the row already shows as an empty cell. */
@@ -127,18 +123,18 @@
     onfocustrack,
   }: Props = $props();
 
-  const pageSize = 50;
+  // Rows load as the list scrolls, this many at a time.
+  const chunkSize = 50;
   const noCounts: PrepStageCounts = { review: 0, not_searched: 0, no_match: 0, done: 0 };
   let missing = $state<MissingField | ''>('');
-  let stage = $state<StageTab>('all');
-  // The first load in a scope opens the tab with work in it; after that the user's choice stands.
-  let stageChosen = false;
   let counts = $state<PrepStageCounts>(noCounts);
-  let totalCount = $state(0);
+  // The order of the whole view, fixed when the view loads or the user sorts. Saving or
+  // searching refreshes rows in place, so a track never jumps while it is being worked on.
+  let order = $state.raw<number[]>([]);
+  const totalCount = $derived(order.length);
   let items = $state.raw<PrepItem[]>([]);
-  let page = $state(0);
+  let loadingMore = $state(false);
   let activeId = $state<number | null>(null);
-  let activePosition = 0;
   const selected = createSelectionSet();
   let selectionVersion = $state(0);
   let selectingAll = $state(false);
@@ -165,13 +161,12 @@
   let history = $state.raw<SavedChange[]>([]);
   const lastAction = $derived(history.at(-1) ?? null);
   let workspace: HTMLElement;
+  let listScroll = $state<HTMLElement>();
   let review = $state<ReturnType<typeof PrepReview>>();
   let width = $state(0);
   let reviewing = $state(false);
   const compact = $derived(width > 0 && width <= 800);
   let keyboardTarget: number | null = null;
-  let pendingEdge = $state<'first' | 'last' | null>(null);
-  let pendingShiftSelect = false;
   let reloading = $state(false);
   let scopeGeneration = 0;
   let fetchGeneration = 0;
@@ -179,9 +174,7 @@
   let lastOwnWriteAt = 0;
   let prevRevision = untrack(() => revision);
   let prevRefresh = 0;
-  let prevPage = 0;
 
-  const stageFilter = $derived<PrepStageName | null>(stage === 'all' ? null : stage);
   let findText = $state('');
   let appliedFind = $state('');
   let findTimer: ReturnType<typeof setTimeout> | undefined;
@@ -191,13 +184,8 @@
   const current = $derived(items.find((item) => item.track.id === activeId) ?? null);
   const detailOpen = $derived(compact && reviewing && current !== null);
   const selectedCount = $derived((void selectionVersion, selected.size));
-  const pageCount = $derived(Math.ceil(totalCount / pageSize));
   const searchBusy = $derived(busy || !!activeOnlineJob || selectingAll);
-  const viewCount = $derived(stageCount(counts, 'all'));
-  const tabs = $derived(
-    STAGE_TABS.map((tab) => ({ id: tab.id, label: tab.label, count: stageCount(counts, tab.id) })),
-  );
-  const findCount = $derived(selectedCount || (stage === 'done' ? 0 : totalCount));
+  const findCount = $derived(selectedCount || counts.not_searched);
   const toolsScopeLabel = $derived(
     selectedCount > 0
       ? selectedCount === 1
@@ -208,9 +196,9 @@
         : 'This track',
   );
   let scopeKey = '';
+  let sortKey = '';
   let finishedJob = untrack(() => recentOnlineJob?.id ?? null);
-  // The stage and the sort are left out: moving between tabs or reordering keeps the ticks,
-  // which stay valid across them.
+  // The sort is left out: reordering keeps the ticks, which stay valid.
   const contextKey = $derived(JSON.stringify([filterQuery, batchTrackIds]));
 
   function typeFind(value: string) {
@@ -221,7 +209,6 @@
 
   function sortBy(column: ListColumn) {
     listSort = nextListSort(listSort, column);
-    page = 0;
   }
 
   function markOwnWrite() {
@@ -229,121 +216,104 @@
     lastOwnWriteAt = Date.now();
   }
 
+  /** The view's track order: the query's own, or grouped by stage when sorting by status. */
+  async function viewOrder(): Promise<number[]> {
+    if (listSort?.column !== 'status') return client.trackIds(scopeQuery, batchTrackIds, null);
+    const groups = await Promise.all(
+      STAGE_ORDER.map((stage) => client.trackIds(filterQuery, batchTrackIds, stage)),
+    );
+    if (listSort.direction === 'desc') groups.reverse();
+    return groups.flat();
+  }
+
+  async function viewCounts(): Promise<PrepStageCounts> {
+    return (await client.prepPage(scopeQuery, batchTrackIds, null, 0, 1)).stages;
+  }
+
+  /** Items for these tracks, in the order given. */
+  async function itemsFor(ids: number[]): Promise<PrepItem[]> {
+    const chunks: number[][] = [];
+    for (let start = 0; start < ids.length; start += 500)
+      chunks.push(ids.slice(start, start + 500));
+    const pages = await Promise.all(
+      chunks.map((chunk) => client.prepPage(null, chunk, null, 0, chunk.length)),
+    );
+    return pages.flatMap((page) => page.items);
+  }
+
   $effect(() => {
     const key = contextKey;
-    const query = scopeQuery;
-    const scope = batchTrackIds;
-    const wanted = stageFilter;
-    const currentPage = page;
+    const sorting = JSON.stringify(listSort);
     const currentRefresh = refresh;
     const currentRevision = revision;
+    void scopeQuery;
 
+    const newScope = key !== scopeKey;
+    const newSort = sorting !== sortKey;
     const onlyRevisionChanged =
-      key === scopeKey &&
-      currentPage === prevPage &&
-      currentRefresh === prevRefresh &&
-      currentRevision !== prevRevision;
+      !newScope && !newSort && currentRefresh === prevRefresh && currentRevision !== prevRevision;
     prevRevision = currentRevision;
     prevRefresh = currentRefresh;
-    prevPage = currentPage;
     if (onlyRevisionChanged && suppressRevisions > 0 && Date.now() - lastOwnWriteAt < 1500) {
       suppressRevisions--;
       return;
     }
-    if (onlyRevisionChanged) {
-      suppressRevisions = 0;
-    }
+    if (onlyRevisionChanged) suppressRevisions = 0;
 
     const request = ++fetchGeneration;
     reloading = true;
     untrack(() => {
-      if (scopeKey !== key) {
+      if (newScope) {
         scopeKey = key;
         scopeGeneration++;
         selected.clear();
         selectionVersion++;
         selectingAll = false;
         selectAllPromise = null;
-        totalCount = 0;
+        order = [];
         items = [];
-        page = 0;
-        prevPage = 0;
         activeId = null;
-        activePosition = 0;
         reviewing = false;
         chosenCoverByTrack = {};
         loading = true;
         keyboardTarget = null;
-        pendingEdge = null;
-        pendingShiftSelect = false;
       } else if (!items.length) {
         loading = true;
       }
+      sortKey = sorting;
       loadError = '';
     });
 
-    const offset = untrack(() => page) * pageSize;
-    void client
-      .prepPage(query, scope, wanted, offset, pageSize)
-      .then((result) => {
+    const keep = untrack(() => Math.max(items.length, chunkSize));
+    const previous = untrack(() => order);
+    const reorder = newScope || newSort || onlyRevisionChanged;
+    void (async () => {
+      const [nextOrder, nextCounts] = await Promise.all([
+        reorder ? viewOrder() : Promise.resolve(previous),
+        viewCounts(),
+      ]);
+      // Tracks already in the list keep their places when the library changes underneath; new
+      // ones join at the end. Only a new view or a new sort reorders.
+      let ids = nextOrder;
+      if (reorder && !newScope && !newSort) {
+        const fresh = new Set(nextOrder);
+        const kept = previous.filter((id) => fresh.has(id));
+        const known = new Set(kept);
+        ids = [...kept, ...nextOrder.filter((id) => !known.has(id))];
+      }
+      const loaded = await itemsFor(ids.slice(0, keep));
+      return { ids, loaded, nextCounts };
+    })()
+      .then(({ ids, loaded, nextCounts }) => {
         if (request !== fetchGeneration) return;
-        counts = result.stages;
-        if (!stageChosen) {
-          stageChosen = true;
-          const opening = firstWorkingTab(result.stages);
-          if (opening !== stage) {
-            stage = opening;
-            return;
-          }
-        }
-        totalCount = result.total;
-        if (result.total > 0 && offset >= result.total) {
-          page = Math.max(0, Math.ceil(result.total / pageSize) - 1);
-          return;
-        }
-        items = result.items;
-        if (viewCount === 0) {
-          if (selected.size > 0) {
-            selected.clear();
-            selectionVersion++;
-          }
-        } else if (
-          wanted === null &&
-          page === 0 &&
-          result.items.length === result.total &&
-          selected.size > 0 &&
-          pruneSelection(
-            selected,
-            result.items.map((item) => item.track.id),
-          )
-        ) {
+        order = ids;
+        counts = nextCounts;
+        items = loaded;
+        if (selected.size > 0 && !selectAllPromise && pruneSelection(selected, ids)) {
           selectionVersion++;
         }
-
-        if (pendingEdge && result.items.length > 0) {
-          const edgeItem =
-            pendingEdge === 'first' ? result.items[0] : result.items[result.items.length - 1];
-          pendingEdge = null;
-          const shiftSelect = pendingShiftSelect;
-          pendingShiftSelect = false;
-          if (edgeItem) {
-            if (shiftSelect && !selected.has(edgeItem.track.id)) {
-              selected.add(edgeItem.track.id);
-              selectionVersion++;
-            }
-            setActive(edgeItem.track.id);
-            keyboardTarget = edgeItem.track.id;
-          }
-        } else {
-          pendingEdge = null;
-          pendingShiftSelect = false;
-          if (!items.some((item) => item.track.id === activeId)) {
-            // A saved track leaves its tab, so the next one moves up into its place.
-            const next = items[Math.min(activePosition, items.length - 1)] ?? null;
-            const hadFocus = workspace.contains(document.activeElement);
-            setActive(next?.track.id ?? null);
-            if (next && hadFocus) keyboardTarget = next.track.id;
-          }
+        if (!items.some((item) => item.track.id === activeId)) {
+          setActive(items[0]?.track.id ?? null);
         }
         reloading = false;
         loading = false;
@@ -351,16 +321,33 @@
       })
       .catch((err: unknown) => {
         if (request !== fetchGeneration) return;
-        pendingEdge = null;
-        pendingShiftSelect = false;
         items = [];
-        totalCount = 0;
+        order = [];
         activeId = null;
         loadError = message(err);
         reloading = false;
         loading = false;
       });
   });
+
+  async function loadMore() {
+    if (loadingMore || reloading || items.length >= order.length) return;
+    loadingMore = true;
+    const request = fetchGeneration;
+    try {
+      const next = await itemsFor(order.slice(items.length, items.length + chunkSize));
+      if (request === fetchGeneration) items = [...items, ...next];
+    } catch (err) {
+      notice = message(err);
+    } finally {
+      loadingMore = false;
+    }
+  }
+
+  function onListScroll(event: Event) {
+    const list = event.currentTarget as HTMLElement;
+    if (list.scrollTop + list.clientHeight > list.scrollHeight - 600) void loadMore();
+  }
 
   $effect(() => {
     const job = recentOnlineJob;
@@ -401,16 +388,8 @@
   }
   function setActive(id: number | null) {
     activeId = id;
-    const position = items.findIndex((item) => item.track.id === id);
-    if (position >= 0) activePosition = position;
   }
-  function chooseStage(id: string) {
-    stageChosen = true;
-    stage = id as StageTab;
-    page = 0;
-    activePosition = 0;
-    reviewing = false;
-  }
+
   function isSelected(id: number) {
     void selectionVersion;
     const toggled = pendingSelectToggles.includes(id);
@@ -442,7 +421,7 @@
       clearTicks();
       return;
     }
-    if (page === 0 && items.length === totalCount) {
+    if (items.length === totalCount) {
       selected.clear();
       for (const item of items) selected.add(item.track.id);
       pendingSelectToggles = [];
@@ -453,7 +432,7 @@
     pendingSelectToggles = [];
     selectingAll = true;
     const promise = client
-      .trackIds(scopeQuery, batchTrackIds, stageFilter)
+      .trackIds(scopeQuery, batchTrackIds, null)
       .then((allIds) => {
         if (gen !== scopeGeneration) return;
         selected.clear();
@@ -628,7 +607,7 @@
       return;
     }
     void client
-      .trackIds(scopeQuery, batchTrackIds, stageFilter)
+      .trackIds(scopeQuery, batchTrackIds, 'not_searched')
       .then(runOnlineSearch)
       .catch((err: unknown) => (notice = message(err)));
   }
@@ -793,19 +772,9 @@
         void focusKeyboardRow();
         return;
       }
-      if (offset > 0 && page + 1 < pageCount) {
+      if (offset > 0 && items.length < totalCount) {
         event.preventDefault();
-        pendingEdge = 'first';
-        pendingShiftSelect = event.shiftKey;
-        page++;
-        return;
-      }
-      if (offset < 0 && page > 0) {
-        event.preventDefault();
-        pendingEdge = 'last';
-        pendingShiftSelect = event.shiftKey;
-        page--;
-        return;
+        void loadMore();
       }
       return;
     }
@@ -867,9 +836,6 @@
   bind:clientWidth={width}
 >
   <div class="bar" hidden={detailOpen}>
-    <div class="stages">
-      <SegmentedTabs items={tabs} value={stage} ariaLabel="Prep stages" onChange={chooseStage} />
-    </div>
     <div class="tools" role="toolbar" aria-label="Prep controls">
       <input
         class="find"
@@ -905,6 +871,7 @@
           <Icon name="close" size="xs" />
         </Button>
       {/if}
+      {#if stageSummary(counts)}<span class="summary">{stageSummary(counts)}</span>{/if}
       <span class="spacer"></span>
       {#if !activeOnlineJob}
         {#if selectedCount > 0}
@@ -977,8 +944,10 @@
         <span class="numeric">{summary.review.toLocaleString('en-GB')}</span> to review ·
         <span class="numeric">{summary.noMatch.toLocaleString('en-GB')}</span> with no match
       </span>
-      {#if summary.review > 0 && stage !== 'review'}
-        <Button size="sm" onclick={() => chooseStage('review')}>Review them</Button>
+      {#if summary.review > 0 && listSort?.column !== 'status'}
+        <Button size="sm" onclick={() => (listSort = { column: 'status', direction: 'asc' })}
+          >Show them first</Button
+        >
       {/if}
       <Button size="sm" variant="icon" ariaLabel="Dismiss" onclick={() => (searchSummary = null)}
         ><Icon name="close" size="xs" /></Button
@@ -1015,14 +984,14 @@
   {:else if !totalCount}
     <div class="empty">
       <h2>
-        {missing && (viewCount === 0 || stage === 'all')
+        {missing
           ? 'No tracks missing ' + MISSING_LABELS[missing].toLowerCase()
-          : viewCount === 0
-            ? 'No tracks in this view'
-            : emptyStageText(stage)}
+          : appliedFind
+            ? 'No tracks match ' + appliedFind
+            : 'No tracks in this view'}
       </h2>
-      {#if viewCount > 0 && stage !== 'all'}
-        <Button size="sm" onclick={() => chooseStage('all')}>Show all tracks</Button>
+      {#if appliedFind}
+        <Button size="sm" onclick={() => typeFind('')}>Clear find</Button>
       {:else if missing}
         <Button size="sm" onclick={() => (missing = '')}>Show all tracks</Button>
       {:else if onopenlibrary}
@@ -1036,7 +1005,7 @@
           <input
             type="checkbox"
             aria-label={selectedCount === totalCount ? 'Deselect all tracks' : 'Select all tracks'}
-            title="Tick every track in this tab (Ctrl+A)"
+            title="Tick every track in the list (Ctrl+A)"
             checked={selectedCount === totalCount && totalCount > 0}
             indeterminate={selectedCount > 0 && selectedCount < totalCount}
             onchange={selectAll}
@@ -1061,10 +1030,9 @@
                   />{/if}</button
               >
             {/each}
-            <span class="column status-head">Status</span>
           </div>
         </div>
-        <ul class="list-scroll" aria-busy={loading}>
+        <ul class="list-scroll" aria-busy={loading} bind:this={listScroll} onscroll={onListScroll}>
           {#each items as item (item.track.id)}
             {@const status = rowStatus(item)}
             {@const gaps = missingNow(item)}
@@ -1127,14 +1095,10 @@
             </li>
           {/each}
         </ul>
-        {#if pageCount > 1}
-          <nav aria-label="Track pages">
-            <Button size="sm" disabled={page === 0} onclick={() => page--}>Previous</Button>
-            <span class="numeric"
-              >{(page + 1).toLocaleString('en-GB')} / {pageCount.toLocaleString('en-GB')}</span
-            >
-            <Button size="sm" disabled={page + 1 >= pageCount} onclick={() => page++}>Next</Button>
-          </nav>
+        {#if items.length < totalCount}
+          <p class="more" role="status">
+            {loadingMore ? 'Loading more tracks…' : 'Scroll for more tracks'}
+          </p>
         {/if}
       </section>
 
@@ -1228,14 +1192,7 @@
   .bar[hidden] {
     display: none;
   }
-  .stages {
-    min-width: 0;
-    overflow-x: auto;
-  }
-  /* Each tab as wide as its own label, so five tabs fit the narrowest window. */
-  .stages :global([role='tablist']) {
-    grid-auto-columns: auto;
-  }
+
   .tools {
     display: flex;
     flex-wrap: wrap;
@@ -1291,7 +1248,7 @@
   }
   .ticked,
   .feedback,
-  nav {
+  .summary {
     color: var(--color-text-2);
     font-size: var(--text-sm);
   }
@@ -1405,9 +1362,8 @@
   .column[data-column='year'] {
     justify-content: end;
   }
-  .status-head {
+  .column[data-column='status'] {
     justify-content: end;
-    cursor: default;
   }
   .count {
     color: var(--color-muted);
@@ -1551,13 +1507,12 @@
     color: var(--color-muted);
     white-space: nowrap;
   }
-  nav {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-3);
-    padding: var(--space-2) var(--space-4);
-    border-top: var(--border-width) solid var(--color-border);
+  .more {
+    margin: 0;
+    padding: var(--space-3) var(--space-4);
+    text-align: center;
+    font-size: var(--text-sm);
+    color: var(--color-muted);
   }
   .empty {
     display: grid;

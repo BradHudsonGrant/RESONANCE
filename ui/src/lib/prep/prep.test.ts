@@ -12,11 +12,11 @@ import type { TrackCandidateArtwork } from '../ipc/bindings/TrackCandidateArtwor
 import Prep, { type PrepClient } from './Prep.svelte';
 import {
   basisSentence,
-  firstWorkingTab,
   formatSaveNotice,
   lengthDifference,
   missingNow,
   rowStatus,
+  stageSummary,
   stillMissing,
 } from './prep-view';
 
@@ -134,22 +134,26 @@ function makeClient(items: PrepItem[]) {
     trackIds: vi.fn(async (_query, _ids, stage: PrepStageName | null) =>
       inStage(stage).map((item) => item.track.id),
     ),
-    prepPage: vi.fn(async (_query, _ids, stage: PrepStageName | null, offset, limit) => {
-      const shown = inStage(stage);
-      return {
-        total: shown.length,
-        offset,
-        stages: {
-          review: count('review'),
-          not_searched: count('not_searched'),
-          no_match: count('no_match'),
-          done: count('done'),
-        },
-        items: shown.slice(offset, offset + limit),
-        unwritten_tracks: 0,
-        last_operation: null,
-      };
-    }),
+    prepPage: vi.fn(
+      async (_query, ids: number[] | null, stage: PrepStageName | null, offset, limit) => {
+        const shown = ids
+          ? ids.flatMap((id) => items.filter((item) => item.track.id === id))
+          : inStage(stage);
+        return {
+          total: shown.length,
+          offset,
+          stages: {
+            review: count('review'),
+            not_searched: count('not_searched'),
+            no_match: count('no_match'),
+            done: count('done'),
+          },
+          items: shown.slice(offset, offset + limit),
+          unwritten_tracks: 0,
+          last_operation: null,
+        };
+      },
+    ),
     acceptAndWrite: vi.fn(async (ids: number[]) => ({
       written: ids.length,
       library_fields: 0,
@@ -194,17 +198,45 @@ function makeClient(items: PrepItem[]) {
 }
 
 describe('Prep', () => {
-  it('opens on the first tab with work in it and shows a count on every tab', async () => {
+  it('lists every track in one list with a summary of where they stand', async () => {
     const items = [makeItem(0, 'not_searched'), makeItem(1), makeItem(2, 'no_match')];
     const client = makeClient(items);
     render(Prep, { client });
-    const review = await screen.findByRole('tab', { name: /To review/ });
-    await waitFor(() => expect(review.getAttribute('aria-selected')).toBe('true'));
-    expect(client.prepPage).toHaveBeenLastCalledWith(null, null, 'review', 0, 50);
-    expect(screen.getByRole('tab', { name: /Not searched/ }).textContent).toContain('1');
-    expect(screen.getByRole('tab', { name: /All/ }).textContent).toContain('3');
-    expect(await screen.findByText('94%', { selector: '.confidence' })).toBeTruthy();
-    expect(screen.getByText(/The audio fingerprint matches/)).toBeTruthy();
+    expect(await screen.findByText('1 to review · 1 not searched · 1 with no match')).toBeTruthy();
+    expect(screen.queryByRole('tab')).toBeNull();
+    expect(document.querySelectorAll('.row')).toHaveLength(3);
+    expect(screen.getByText('Not searched online yet')).toBeTruthy();
+  });
+
+  it('keeps every track in its place when a save changes its status', async () => {
+    const items = [makeItem(0, 'not_searched'), makeItem(1), makeItem(2, 'not_searched')];
+    const client = makeClient(items);
+    render(Prep, { client });
+    const titles = () =>
+      [...document.querySelectorAll('.row .title')].map((node) => node.textContent);
+    await screen.findByText('Not searched online yet');
+    const before = titles();
+    await fireEvent.click(document.querySelectorAll<HTMLButtonElement>('.track-name')[1]!);
+    items[1] = { ...items[1]!, stage: 'done', fields: makeFields({}), pending_fields: 0 };
+    await fireEvent.click(await screen.findByRole('button', { name: 'Accept all' }));
+    await waitFor(() => expect(client.acceptAndWrite).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Accept all' })).toBeNull());
+    expect(titles()).toEqual(before);
+  });
+
+  it('sorts by status with work first, then the other way', async () => {
+    const items = [makeItem(0, 'done'), makeItem(1, 'not_searched'), makeItem(2)];
+    const client = makeClient(items);
+    render(Prep, { client });
+    await screen.findByText(/1 to review/);
+    await fireEvent.click(screen.getByRole('button', { name: 'Sort by status' }));
+    await waitFor(() =>
+      expect(document.querySelector('.row .status')?.getAttribute('data-stage')).toBe('review'),
+    );
+    await fireEvent.click(screen.getByRole('button', { name: /Sort by status/ }));
+    await waitFor(() =>
+      expect(document.querySelector('.row .status')?.getAttribute('data-stage')).toBe('done'),
+    );
   });
 
   it('finds matches for every track in the tab without ticking any', async () => {
@@ -396,12 +428,12 @@ describe('Prep', () => {
     );
   });
 
-  it('ticks every track in the tab across pages', async () => {
+  it('ticks every track, loaded or not', async () => {
     const items = Array.from({ length: 120 }, (_, i) => makeItem(i));
     const client = makeClient(items);
     render(Prep, { client });
     await fireEvent.click(await screen.findByRole('checkbox', { name: 'Select all tracks' }));
-    await waitFor(() => expect(client.trackIds).toHaveBeenCalledWith(null, null, 'review'));
+    await waitFor(() => expect(client.trackIds).toHaveBeenCalledWith(null, null, null));
     expect(await screen.findByText('120 ticked')).toBeTruthy();
     await fireEvent.click(screen.getByRole('button', { name: 'Save ticked' }));
     await waitFor(() =>
@@ -426,21 +458,20 @@ describe('Prep', () => {
           filters: [{ any_of: [{ column: 'artwork', condition: { op: 'missing' } }] }],
         },
         [1, 2],
-        expect.anything(),
+        null,
         0,
-        50,
+        1,
       ),
     );
   });
 });
 
 describe('prep view', () => {
-  it('opens on review, then unsearched, then no match', () => {
-    const none = { review: 0, not_searched: 0, no_match: 0, done: 4 };
-    expect(firstWorkingTab({ ...none, review: 1, not_searched: 2 })).toBe('review');
-    expect(firstWorkingTab({ ...none, not_searched: 2, no_match: 1 })).toBe('not_searched');
-    expect(firstWorkingTab({ ...none, no_match: 1 })).toBe('no_match');
-    expect(firstWorkingTab(none)).toBe('all');
+  it('sums up where the tracks stand, leaving out empty stages', () => {
+    expect(stageSummary({ review: 36, not_searched: 1395, no_match: 0, done: 2 })).toBe(
+      '36 to review · 1,395 not searched · 2 done',
+    );
+    expect(stageSummary({ review: 0, not_searched: 0, no_match: 0, done: 0 })).toBe('');
   });
 
   it('describes each row by its stage', () => {
