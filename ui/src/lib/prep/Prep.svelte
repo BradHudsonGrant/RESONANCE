@@ -37,6 +37,7 @@
     formatUrlLookupNotice,
     formatWriteNotice,
     intersectSelection,
+    missingNow,
     pruneSelection,
     rowStatus,
     stageCount,
@@ -141,6 +142,9 @@
   let toolIds = $state.raw<number[]>([]);
   let refresh = $state(0);
   let chosenCoverByTrack = $state.raw<Record<number, number>>({});
+  // Tracks sent to the running search, so their rows can say so, and what the last one found.
+  let searchingIds = $state.raw<ReadonlySet<number>>(new Set());
+  let searchSummary = $state<{ searched: number; review: number; noMatch: number } | null>(null);
   interface SavedChange {
     operation: number;
     track: number | null;
@@ -337,11 +341,31 @@
           ? (job.error_message ?? 'Search failed')
           : job.status === 'cancelled'
             ? 'Search cancelled'
-            : 'Search finished';
-      untrack(() => refresh++);
+            : '';
+      untrack(() => {
+        if (job.status !== 'failed' && job.status !== 'cancelled') void summariseSearch();
+        refresh++;
+      });
     }
   });
 
+  async function summariseSearch() {
+    const searched = [...searchingIds];
+    searchingIds = new Set();
+    if (!searched.length) {
+      notice = 'Search finished';
+      return;
+    }
+    try {
+      const [review, noMatch] = await Promise.all([
+        client.trackIds(scopeQuery, searched, 'review'),
+        client.trackIds(scopeQuery, searched, 'no_match'),
+      ]);
+      searchSummary = { searched: searched.length, review: review.length, noMatch: noMatch.length };
+    } catch (err) {
+      notice = message(err);
+    }
+  }
   function message(err: unknown) {
     return err instanceof Error ? err.message : String(err);
   }
@@ -497,31 +521,17 @@
     }
     notice = formatSaveNotice(report);
   }
-  function saveTrack(
-    item: PrepItem,
-    fields: TagName[],
-    includeArtwork: boolean,
-    skipRest: boolean,
-  ) {
-    if (reloading || item.track.id !== activeId) return;
+  function acceptTrack(item: PrepItem, fields: TagName[], includeArtwork: boolean) {
+    if (reloading || item.track.id !== activeId || (!fields.length && !includeArtwork)) return;
     void run(async () => {
       markOwnWrite();
-      if (fields.length || includeArtwork) {
-        const report = await client.acceptAndWrite(
-          [item.track.id],
-          fields,
-          includeArtwork,
-          item.review_token,
-        );
-        recordSave(report, item.track.id);
-        if (report.failed.length) {
-          refresh++;
-          return;
-        }
-      } else {
-        notice = 'Skipped';
-      }
-      if (skipRest) await client.skipItems([item.track.id], []);
+      const report = await client.acceptAndWrite(
+        [item.track.id],
+        fields,
+        includeArtwork,
+        item.review_token,
+      );
+      recordSave(report, item.track.id);
       refresh++;
     });
   }
@@ -564,6 +574,8 @@
   }
   function runOnlineSearch(target: number[]) {
     if (!target.length) return;
+    searchingIds = new Set(target);
+    searchSummary = null;
     void run(async () => {
       const result = await client.identifyOnline(target, true);
       const done = result.recent.find((job) => job.kind === 'identify_online');
@@ -571,12 +583,11 @@
       if (!running && done) {
         finishedJob = done.id;
       }
-      notice = running
-        ? ''
-        : done?.status === 'failed'
-          ? (done.error_message ?? 'Search failed')
-          : 'Search finished';
-      if (!running) markOwnWrite();
+      notice = running || done?.status !== 'failed' ? '' : (done.error_message ?? 'Search failed');
+      if (!running) {
+        markOwnWrite();
+        await summariseSearch();
+      }
       refresh++;
     });
   }
@@ -738,7 +749,7 @@
       event.preventDefault();
       if (compact && !detailOpen) focusItem(current);
       else if (current.stage === 'not_searched') findMatch(current);
-      else review?.save();
+      else review?.acceptAll();
     } else if (key === 's' && !event.shiftKey && current && current.stage === 'review') {
       event.preventDefault();
       skipTrack(current);
@@ -804,21 +815,7 @@
         </Button>
       {/if}
       <span class="spacer"></span>
-      {#if activeOnlineJob}
-        <span class="progress" role="status">
-          {activeOnlineJob.paused ? 'Search paused' : 'Searching'}
-          {#if activeOnlineJob.total_items != null}
-            <span class="numeric"
-              >{activeOnlineJob.done_items.toLocaleString('en-GB')} / {activeOnlineJob.total_items.toLocaleString(
-                'en-GB',
-              )}</span
-            >
-          {/if}
-        </span>
-        {#if onopenactivity}
-          <Button size="sm" onclick={onopenactivity}>Activity</Button>
-        {/if}
-      {:else}
+      {#if !activeOnlineJob}
         {#if selectedCount > 0}
           <span class="ticked numeric">{selectedCount.toLocaleString('en-GB')} ticked</span>
           <Button size="sm" onclick={clearTicks}>Clear</Button>
@@ -857,6 +854,46 @@
       {/if}
     </div>
   </div>
+
+  {#if activeOnlineJob}
+    {@const done = activeOnlineJob.done_items}
+    {@const all = activeOnlineJob.total_items}
+    <div class="search-strip" role="status" aria-live="polite">
+      <span class="search-text">
+        {activeOnlineJob.paused ? 'Search paused' : 'Searching online'}
+        {#if all != null}
+          <span class="numeric"
+            >{done.toLocaleString('en-GB')} of {all.toLocaleString('en-GB')} tracks</span
+          >
+        {/if}
+      </span>
+      <span class="search-track" aria-hidden="true">
+        <span
+          class="search-fill"
+          style:transform={'scaleX(' + (all ? Math.min(1, done / all) : 0) + ')'}
+        ></span>
+      </span>
+      {#if onopenactivity}
+        <Button size="sm" variant="quiet" onclick={onopenactivity}>Details</Button>
+      {/if}
+    </div>
+  {:else if searchSummary}
+    {@const summary = searchSummary}
+    <div class="search-strip done" role="status" aria-live="polite">
+      <span class="search-text">
+        Search finished for <span class="numeric">{summary.searched.toLocaleString('en-GB')}</span>
+        {summary.searched === 1 ? 'track' : 'tracks'} ·
+        <span class="numeric">{summary.review.toLocaleString('en-GB')}</span> to review ·
+        <span class="numeric">{summary.noMatch.toLocaleString('en-GB')}</span> with no match
+      </span>
+      {#if summary.review > 0 && stage !== 'review'}
+        <Button size="sm" onclick={() => chooseStage('review')}>Review them</Button>
+      {/if}
+      <Button size="sm" variant="icon" ariaLabel="Dismiss" onclick={() => (searchSummary = null)}
+        ><Icon name="close" size="xs" /></Button
+      >
+    </div>
+  {/if}
 
   {#if notice || failures.length}
     <div class="feedback" hidden={detailOpen && !failures.length}>
@@ -919,6 +956,8 @@
         <ul class="list-scroll" aria-busy={loading}>
           {#each items as item (item.track.id)}
             {@const status = rowStatus(item)}
+            {@const gaps = missingNow(item)}
+            {@const searching = !!activeOnlineJob && searchingIds.has(item.track.id)}
             {@const art = item.artwork.proposed?.artwork ?? item.artwork.artwork}
             <li
               class="row"
@@ -941,14 +980,22 @@
                 <Thumb seed={item.track.id} size="sm" src={art ? artworkUrl(art) : null} alt="" />
                 <span class="names">
                   <span class="title">{item.track.title}</span>
-                  <span class="artist">{item.track.artist || 'No artist'}</span>
-                </span>
-                <span class="status" data-stage={item.stage}>
-                  <span class="status-main"
-                    >{#if status.confidence}<span class="numeric">{status.confidence}</span
-                      >{/if}{status.primary}</span
+                  <span class="artist"
+                    >{#if item.track.artist}{item.track.artist}{/if}{#if gaps.length}<span
+                        class="gaps">{item.track.artist ? ' · ' : ''}Missing {gaps.join(', ')}</span
+                      >{/if}</span
                   >
-                  {#if status.secondary}<span class="status-sub">{status.secondary}</span>{/if}
+                </span>
+                <span class="status" data-stage={searching ? 'searching' : item.stage}>
+                  {#if searching && item.stage === 'not_searched'}
+                    <span class="status-main">Searching</span>
+                  {:else}
+                    <span class="status-main"
+                      >{#if status.confidence}<span class="numeric">{status.confidence}</span
+                        >{/if}{status.primary}</span
+                    >
+                    {#if status.secondary}<span class="status-sub">{status.secondary}</span>{/if}
+                  {/if}
                 </span>
               </button>
             </li>
@@ -976,7 +1023,7 @@
           {compact}
           chosenCover={chosenCoverByTrack[item.track.id]}
           canUndo={lastAction !== null && lastAction.track === item.track.id}
-          onsave={(fields, artwork, skipRest) => saveTrack(item, fields, artwork, skipRest)}
+          onaccept={(fields, artwork) => acceptTrack(item, fields, artwork)}
           onskip={() => skipTrack(item)}
           onchoose={(index) => chooseMatch(item, index)}
           oncover={(index) => useCover(item, index)}
@@ -1074,17 +1121,52 @@
   .spacer {
     flex: 1;
   }
-  .progress,
+  .search-strip {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--text-sm);
+    background: var(--color-surface-2);
+    border-bottom: var(--border-width) solid var(--color-border);
+  }
+  .search-strip.done {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+  .search-text {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: var(--space-1-5);
+    align-items: baseline;
+    color: var(--color-text);
+  }
+  .search-track {
+    height: var(--space-1);
+    border-radius: var(--radius-xs);
+    background: var(--color-border);
+    overflow: hidden;
+  }
+  .search-fill {
+    display: block;
+    height: 100%;
+    background: var(--color-text);
+    transform-origin: left;
+    transition: transform var(--duration-fast) var(--ease-out);
+  }
+  .gaps {
+    color: var(--color-muted);
+  }
+  .status[data-stage='searching'] {
+    color: var(--color-text);
+  }
   .ticked,
   .feedback,
   nav {
     color: var(--color-text-2);
     font-size: var(--text-sm);
   }
-  .progress {
-    display: inline-flex;
-    gap: var(--space-2);
-  }
+
   select {
     font: inherit;
     font-size: var(--text-sm);
@@ -1286,8 +1368,12 @@
     }
   }
   @media (forced-colors: active) {
-    .row.active::before {
+    .row.active::before,
+    .search-fill {
       background: Highlight;
+    }
+    .search-track {
+      outline: 1px solid CanvasText;
     }
   }
 </style>

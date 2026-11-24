@@ -14,6 +14,7 @@ import {
   firstWorkingTab,
   formatSaveNotice,
   lengthDifference,
+  missingNow,
   rowStatus,
   stillMissing,
 } from './prep-view';
@@ -228,29 +229,65 @@ describe('Prep', () => {
     );
   });
 
-  it('saves only the ticked changes and sets the rest aside', async () => {
+  it('accepts one suggested tag with its own button', async () => {
     const items = [makeItem(0), makeItem(1)];
     const client = makeClient(items);
     render(Prep, { client });
-    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Label' }));
-    await fireEvent.click(screen.getByRole('button', { name: 'Save 2 changes' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Accept Label' }));
     await waitFor(() =>
       expect(client.acceptAndWrite).toHaveBeenCalledWith(
         [items[0]!.track.id],
-        ['title', 'artist'],
+        ['label'],
         false,
         'review-' + items[0]!.track.id,
       ),
     );
-    await waitFor(() => expect(client.skipItems).toHaveBeenCalledWith([items[0]!.track.id], []));
+    expect(client.skipItems).not.toHaveBeenCalled();
     expect(await screen.findByText('Saved to 1 file')).toBeTruthy();
   });
 
+  it('shows every tag, marking the missing ones', async () => {
+    const client = makeClient([makeItem(0)]);
+    render(Prep, { client });
+    const table = await screen.findByRole('table');
+    expect(table.textContent).toContain('Genre');
+    expect(table.textContent).toContain('Missing');
+    expect(screen.getByText('3 suggested')).toBeTruthy();
+  });
+
+  it('shows search progress in Prep and what the search found', async () => {
+    const items = [makeItem(0, 'not_searched'), makeItem(1, 'not_searched')];
+    const client = makeClient(items);
+    client.identifyOnline.mockResolvedValueOnce({
+      active: [],
+      recent: [{ id: 9, kind: 'identify_online', status: 'done' }],
+      mix_backoff_active: false,
+    } as never);
+    const view = render(Prep, { client });
+    await fireEvent.click(await screen.findByRole('button', { name: 'Find matches for 2' }));
+    expect(await screen.findByText(/Search finished for/)).toBeTruthy();
+    expect(client.trackIds).toHaveBeenCalledWith(
+      null,
+      [items[0]!.track.id, items[1]!.track.id],
+      'review',
+    );
+    await view.rerender({
+      client,
+      activeOnlineJob: {
+        id: 10,
+        kind: 'identify_online',
+        done_items: 3,
+        total_items: 8,
+        paused: false,
+      } as never,
+    });
+    expect(await screen.findByText('3 of 8 tracks')).toBeTruthy();
+  });
   it('saves every change with Enter and leaves nothing to skip', async () => {
     const items = [makeItem(0)];
     const client = makeClient(items);
     render(Prep, { client });
-    await screen.findByRole('button', { name: 'Save 3 changes' });
+    await screen.findByRole('button', { name: 'Accept 3 changes' });
     await fireEvent.keyDown(window, { key: 'Enter' });
     await waitFor(() =>
       expect(client.acceptAndWrite).toHaveBeenCalledWith(
@@ -274,8 +311,7 @@ describe('Prep', () => {
       failed: [{ track_id: items[0]!.track.id, path: 'a.mp3', reason: 'File is read-only' }],
     });
     render(Prep, { client });
-    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Title' }));
-    await fireEvent.click(screen.getByRole('button', { name: 'Save 2 changes' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Accept Title' }));
     expect(await screen.findByText('1 file needs attention')).toBeTruthy();
     expect(client.skipItems).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: 'Undo save' })).toBeNull();
@@ -285,10 +321,10 @@ describe('Prep', () => {
     const items = [makeItem(0), makeItem(1)];
     const client = makeClient(items);
     render(Prep, { client });
-    await screen.findByRole('button', { name: 'Save 3 changes' });
+    await screen.findByRole('button', { name: 'Accept 3 changes' });
     await fireEvent.keyDown(window, { key: 's' });
     await waitFor(() => expect(client.skipItems).toHaveBeenCalledWith([items[0]!.track.id], []));
-    await fireEvent.click(await screen.findByRole('button', { name: 'Save 3 changes' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Accept 3 changes' }));
     await screen.findByText('Saved to 1 file');
     await fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
     await waitFor(() => expect(client.undoOperation).toHaveBeenCalledWith(45));
@@ -299,7 +335,7 @@ describe('Prep', () => {
     const items = [makeItem(0)];
     const client = makeClient(items);
     render(Prep, { client });
-    await screen.findByRole('button', { name: 'Save 3 changes' });
+    await screen.findByRole('button', { name: 'Accept 3 changes' });
     await fireEvent.keyDown(window, { key: '2' });
     await waitFor(() =>
       expect(client.selectCandidate).toHaveBeenCalledWith(
@@ -374,7 +410,13 @@ describe('prep view', () => {
       secondary: '3 changes',
       confidence: '94%',
     });
-    const local = { ...makeItem(1), candidates: [], evidence: null };
+    const base = makeItem(1);
+    const local = {
+      ...base,
+      candidates: [],
+      evidence: null,
+      fields: base.fields.map((field) => ({ ...field, provider: field.provider && 'filename' })),
+    };
     expect(rowStatus(local).primary).toBe('From filename');
     expect(rowStatus({ ...makeItem(2, 'no_match'), needs_url: true })).toEqual({
       primary: 'No match',
@@ -392,6 +434,7 @@ describe('prep view', () => {
 
   it('lists only the core tags still missing after the suggestions', () => {
     expect(stillMissing(makeItem(0))).toEqual(['Artwork', 'Genre', 'Year']);
+    expect(missingNow(makeItem(0))).toEqual(['artist', 'title', 'cover', 'genre', 'label', 'year']);
   });
 
   it('formats save notices with digits', () => {

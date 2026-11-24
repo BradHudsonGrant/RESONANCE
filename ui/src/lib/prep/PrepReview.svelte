@@ -1,12 +1,12 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { SvelteSet } from 'svelte/reactivity';
   import Button from '../design/Button.svelte';
   import Icon from '../design/Icon.svelte';
   import Thumb from '../design/Thumb.svelte';
   import { artworkUrl } from '../ipc/artwork';
   import type { MatchCandidateSummary } from '../ipc/bindings/MatchCandidateSummary';
   import type { PrepItem } from '../ipc/bindings/PrepItem';
+  import type { StagedField } from '../ipc/bindings/StagedField';
   import type { TagName } from '../ipc/bindings/TagName';
   import MatchEvidenceHeader, { formatProviderName } from './MatchEvidenceHeader.svelte';
   import {
@@ -14,7 +14,6 @@
     MISSING_LABELS,
     basisSentence,
     candidateTitle,
-    keptFields,
     lengthDifference,
     localSource,
     percent,
@@ -22,7 +21,6 @@
     resolveActiveCoverIndex,
     reviewableFields,
     selectedCandidate,
-    stillMissing,
   } from './prep-view';
 
   interface Props {
@@ -33,7 +31,7 @@
     compact: boolean;
     chosenCover: number | undefined;
     canUndo: boolean;
-    onsave: (fields: TagName[], includeArtwork: boolean, skipRest: boolean) => void;
+    onaccept: (fields: TagName[], includeArtwork: boolean) => void;
     onskip: () => void;
     onchoose: (index: number) => void;
     oncover: (index: number) => void;
@@ -55,7 +53,7 @@
     compact,
     chosenCover,
     canUndo,
-    onsave,
+    onaccept,
     onskip,
     onchoose,
     oncover,
@@ -70,68 +68,81 @@
     onopenproviders,
   }: Props = $props();
 
-  const excluded = new SvelteSet<string>();
-  let excludedFor = '';
   let url = $state('');
+  let urlFor = -1;
   $effect.pre(() => {
-    const key = item.track.id + ':' + item.review_token;
+    const id = item.track.id;
     untrack(() => {
-      if (key === excludedFor) return;
-      if (!excludedFor.startsWith(item.track.id + ':')) url = '';
-      excludedFor = key;
-      excluded.clear();
+      if (id !== urlFor) {
+        urlFor = id;
+        url = '';
+      }
     });
   });
 
   const match = $derived(selectedCandidate(item));
-  const fields = $derived(reviewableFields(item));
-  const kept = $derived(keptFields(item));
+  const suggested = $derived(reviewableFields(item));
   const cover = $derived(item.artwork.proposed);
   const covers = $derived(item.candidates.filter((candidate) => candidate.has_artwork));
   const activeCover = $derived(resolveActiveCoverIndex(item, chosenCover, covers));
-  const chosenFields = $derived(fields.filter((field) => !excluded.has(field.field)));
-  const includeArtwork = $derived(!!cover && !excluded.has('artwork'));
-  const total = $derived(fields.length + (cover ? 1 : 0));
-  const chosen = $derived(chosenFields.length + (includeArtwork ? 1 : 0));
-  const missing = $derived(stillMissing(item));
+  const total = $derived(suggested.length + (cover ? 1 : 0));
   const source = $derived(match ? null : localSource(item));
   const needsKey = $derived(item.steps.some((step) => step.outcome.kind === 'skipped_missing_key'));
   const evidence = $derived(match?.evidence ?? item.evidence);
-  const evidenceText = $derived(
-    evidence
-      ? [
-          basisSentence(evidence.basis),
-          lengthDifference(evidence.duration_delta_ms),
-          [...new Set(evidence.providers.map(formatProviderName))].join(', '),
-        ]
-          .filter(Boolean)
-          .join(' · ')
-      : '',
+
+  const heroArt = $derived(cover?.artwork ?? item.artwork.artwork ?? match?.artwork_hash ?? null);
+  const heroCaption = $derived(
+    cover
+      ? 'Suggested cover · ' + formatProviderName(cover.provider)
+      : item.artwork.artwork
+        ? 'Cover in the file'
+        : match?.artwork_hash
+          ? 'Cover of this match'
+          : 'No cover',
   );
 
-  const currentValue = (name: TagName) =>
-    item.fields.find((field) => field.field === name)?.current_value ?? null;
+  const verdict = $derived.by(() => {
+    if (match && evidence) {
+      return [
+        basisSentence(evidence.basis),
+        lengthDifference(evidence.duration_delta_ms),
+        [...new Set(evidence.providers.map(formatProviderName))].join(', '),
+      ]
+        .filter(Boolean)
+        .join(' · ');
+    }
+    if (source) return 'Suggested from the ' + source.toLowerCase() + '. Not searched online yet';
+    if (item.stage === 'not_searched') return 'Not searched online yet';
+    if (item.stage === 'no_match') {
+      return needsKey
+        ? 'No online match. Some providers were skipped because they need a key'
+        : 'No online match. Paste the release page below, or edit the tags';
+    }
+    return total ? '' : 'Every tag is up to date';
+  });
+
   const fileRelease = $derived(
     releaseLine({
-      album: currentValue('album'),
-      label: currentValue('label'),
-      catno: currentValue('catno'),
-      year: Number(currentValue('year')) || null,
+      album: currentOf('album'),
+      label: currentOf('label'),
+      catno: currentOf('catno'),
+      year: Number(currentOf('year')) || null,
     }),
   );
 
-  function toggle(name: string) {
-    if (excluded.has(name)) excluded.delete(name);
-    else excluded.add(name);
+  function currentOf(name: TagName) {
+    return item.fields.find((field) => field.field === name)?.current_value ?? null;
+  }
+  function isSuggested(field: StagedField) {
+    return field.changes && !field.locked_by_user;
   }
 
-  /** Saves the ticked changes and sets the rest aside, so the track leaves the review list. */
-  export function save() {
+  /** Accepts every suggestion on this track. */
+  export function acceptAll() {
     if (busy || !total) return;
-    onsave(
-      chosenFields.map((field) => field.field),
-      includeArtwork,
-      chosen < total,
+    onaccept(
+      suggested.map((field) => field.field),
+      !!cover,
     );
   }
 
@@ -152,193 +163,55 @@
 </script>
 
 <section class="review" aria-label="Review" aria-busy={busy}>
-  <header class="head">
+  <div class="body">
     {#if compact}
       <span class="back-to-tracks"><Button size="sm" onclick={onback}>Back to tracks</Button></span>
     {/if}
-    <div class="heading">
-      <h2 title={item.track.title}>{item.track.title}</h2>
-      {#if item.track.artist}<p>{item.track.artist}</p>{/if}
-    </div>
-    {#if onpreview}
-      <Button
-        variant="icon"
-        size="sm"
-        ariaLabel="Preview"
-        title="Preview (Space)"
-        onclick={onpreview}
-      >
-        <Icon name="play" size="xs" />
-      </Button>
-    {/if}
-  </header>
-
-  <div class="body">
-    {#if match}
-      <div class="match-block">
-        <div class="compare">
-          <div class="side">
-            <span class="side-label">In the file</span>
-            <Thumb
-              seed={item.track.id}
-              size="md"
-              src={item.artwork.artwork ? artworkUrl(item.artwork.artwork) : null}
-              alt="Current cover"
-            />
-            <p class="name">{item.track.title}</p>
-            <p class="meta">{item.track.artist || 'No artist'}</p>
-            {#if fileRelease}<p class="meta">{fileRelease}</p>{/if}
-          </div>
-          <span class="arrow" aria-hidden="true"><Icon name="arrow-right" size="sm" /></span>
-          <div class="side">
-            <span class="side-label">Suggested</span>
-            <Thumb
-              seed={item.track.id + 1}
-              size="md"
-              src={cover
-                ? artworkUrl(cover.artwork)
-                : match.artwork_hash
-                  ? artworkUrl(match.artwork_hash)
-                  : null}
-              alt="Suggested cover"
-            />
-            <p class="name">{candidateTitle(match)}</p>
-            {#if releaseLine(match)}<p class="meta">{releaseLine(match)}</p>{/if}
-          </div>
-        </div>
-        {#if evidence}
-          <p class="evidence">
-            <span class="numeric confidence">{percent(match.confidence)}</span>
-            <span>{evidenceText}</span>
+    <header class="hero">
+      <figure>
+        <Thumb
+          seed={item.track.id}
+          size="xl"
+          src={heroArt ? artworkUrl(heroArt) : null}
+          alt={heroCaption}
+        />
+        <figcaption>{heroCaption}</figcaption>
+      </figure>
+      <div class="identity">
+        <h2 title={item.track.title}>{item.track.title}</h2>
+        <p class="artist">{item.track.artist || 'No artist'}</p>
+        {#if fileRelease}<p class="meta">{fileRelease}</p>{/if}
+        {#if verdict}
+          <p class="verdict">
+            {#if match}<span class="numeric confidence">{percent(match.confidence)}</span>{/if}
+            <span>{verdict}</span>
           </p>
         {/if}
-      </div>
-    {:else if item.stage === 'not_searched' || source}
-      <div class="state">
-        <p class="state-title">
-          {source ? 'Suggested from the ' + source.toLowerCase() : 'Not searched online yet'}
-        </p>
-        <p class="meta">
-          Search online to compare the audio against release databases and fill in the rest
-        </p>
-        <Button size="sm" disabled={searching} onclick={onsearch}>
-          <Icon name="search" size="xs" />Find a match
-        </Button>
-      </div>
-    {:else if item.stage === 'no_match'}
-      <div class="state">
-        <p class="state-title">No online match</p>
-        <p class="meta">
-          {needsKey
-            ? 'Some providers were skipped because they need a key'
-            : 'Paste the release page below, or edit the tags by hand'}
-        </p>
-        <div class="state-actions">
-          <Button size="sm" disabled={searching} onclick={onsearch}>Search again</Button>
+        <div class="hero-actions">
+          {#if onpreview}
+            <Button size="sm" title="Preview (Space)" onclick={onpreview}>
+              <Icon name="play" size="xs" />Preview
+            </Button>
+          {/if}
+          {#if item.stage === 'not_searched' || item.stage === 'no_match' || source}
+            <Button size="sm" disabled={searching} title="Search online (F)" onclick={onsearch}>
+              <Icon name="search" size="xs" />{item.stage === 'no_match'
+                ? 'Search again'
+                : 'Find a match'}
+            </Button>
+          {/if}
           {#if needsKey && onopenproviders}
             <Button size="sm" onclick={onopenproviders}>Provider settings</Button>
           {/if}
         </div>
       </div>
-    {/if}
+    </header>
 
-    {#if total}
-      <section class="group" aria-labelledby="prep-changes">
-        <h3 id="prep-changes">
-          Changes <span class="numeric"
-            >{chosen.toLocaleString('en-GB')} / {total.toLocaleString('en-GB')}</span
-          >
-        </h3>
-        <ul class="changes">
-          {#each fields as field (field.field)}
-            <li class="change" class:off={excluded.has(field.field)}>
-              <input
-                id={'prep-change-' + field.field}
-                type="checkbox"
-                aria-label={MISSING_LABELS[field.field]}
-                checked={!excluded.has(field.field)}
-                onchange={() => toggle(field.field)}
-              />
-              <label class="field" for={'prep-change-' + field.field}
-                >{MISSING_LABELS[field.field]}{#if LIBRARY_ONLY_FIELDS.has(field.field)}<small
-                    >Library</small
-                  >{/if}</label
-              >
-              <span class="old" title={field.current_value ?? ''}>{field.current_value || '—'}</span
-              >
-              <span class="new" title={field.proposed_value ?? ''}
-                >{field.proposed_value || '—'}</span
-              >
-            </li>
-          {/each}
-          {#if cover}
-            <li class="change artwork" class:off={excluded.has('artwork')}>
-              <input
-                id="prep-change-artwork"
-                type="checkbox"
-                aria-label="Artwork"
-                checked={!excluded.has('artwork')}
-                onchange={() => toggle('artwork')}
-              />
-              <label class="field" for="prep-change-artwork">Artwork</label>
-              <span class="old">
-                {#if item.artwork.artwork}
-                  <Thumb
-                    seed={item.track.id}
-                    size="sm"
-                    src={artworkUrl(item.artwork.artwork)}
-                    alt="Current cover"
-                  />
-                {:else}—{/if}
-              </span>
-              <span class="new covers">
-                {#if covers.length > 1}
-                  {#each covers as candidate (candidate.index)}
-                    <button
-                      type="button"
-                      class="cover"
-                      aria-pressed={candidate.index === activeCover}
-                      aria-label={coverLabel(candidate)}
-                      title={coverLabel(candidate)}
-                      disabled={busy}
-                      onclick={() => oncover(candidate.index)}
-                    >
-                      <Thumb
-                        seed={candidate.index}
-                        size="sm"
-                        src={candidate.artwork_hash ? artworkUrl(candidate.artwork_hash) : null}
-                        alt=""
-                      />
-                    </button>
-                  {/each}
-                {:else}
-                  <Thumb
-                    seed={item.track.id + 1}
-                    size="sm"
-                    src={artworkUrl(cover.artwork)}
-                    alt="Suggested cover"
-                  />
-                {/if}
-              </span>
-            </li>
-          {/if}
-        </ul>
-        {#if kept.length}
-          <p class="note">
-            Kept your own {kept
-              .map((field) => MISSING_LABELS[field.field].toLowerCase())
-              .join(', ')}
-          </p>
-        {/if}
-      </section>
-    {:else if match || item.stage === 'done'}
-      <p class="note">Nothing to change. The file already has these tags</p>
-    {/if}
-
-    {#if item.candidates.length > 1}
+    {#if item.candidates.length}
       <section class="group" aria-labelledby="prep-matches">
         <h3 id="prep-matches">
-          Matches <span class="numeric">{item.candidates.length.toLocaleString('en-GB')}</span>
+          Matches found <span class="numeric">{item.candidates.length.toLocaleString('en-GB')}</span
+          >
         </h3>
         <ol class="matches">
           {#each item.candidates as candidate, position (candidate.index)}
@@ -355,6 +228,12 @@
                 <span class="keycap numeric" aria-hidden="true"
                   >{position < 9 ? position + 1 : ''}</span
                 >
+                <Thumb
+                  seed={candidate.index + item.track.id}
+                  size="sm"
+                  src={candidate.artwork_hash ? artworkUrl(candidate.artwork_hash) : null}
+                  alt=""
+                />
                 <span class="match-text">
                   <span class="name">{candidateTitle(candidate)}</span>
                   <span class="meta"
@@ -363,10 +242,10 @@
                       .join(' · ')}</span
                   >
                 </span>
-                <span class="numeric match-score">{percent(candidate.confidence)}</span>
-                <span class="tick" class:shown={active} aria-hidden="true"
-                  ><Icon name="check" size="xs" /></span
-                >
+                <span class="match-side">
+                  <span class="numeric">{percent(candidate.confidence)}</span>
+                  <span class="in-use" class:shown={active}>In use</span>
+                </span>
               </button>
             </li>
           {/each}
@@ -378,23 +257,131 @@
       <label for="prep-release-link">
         {item.candidates.length ? 'Not the right release?' : 'Know the release?'}
       </label>
-      <div class="link-row">
-        <input
-          id="prep-release-link"
-          type="url"
-          bind:value={url}
-          placeholder="Paste a release link"
-          autocomplete="off"
-        />
-        <Button type="submit" size="sm" disabled={busy || linkBusy || !url.trim()}
-          >{linkBusy ? 'Looking up' : 'Look up'}</Button
-        >
-      </div>
+      <input
+        id="prep-release-link"
+        type="url"
+        bind:value={url}
+        placeholder="Paste a release link"
+        autocomplete="off"
+      />
+      <Button type="submit" size="sm" disabled={busy || linkBusy || !url.trim()}
+        >{linkBusy ? 'Looking up' : 'Look up'}</Button
+      >
     </form>
 
-    {#if missing.length}
-      <p class="note">Still missing {missing.join(', ').toLowerCase()}</p>
-    {/if}
+    <section class="group" aria-labelledby="prep-tags">
+      <div class="group-head">
+        <h3 id="prep-tags">
+          Tags
+          {#if total}<span class="numeric">{total.toLocaleString('en-GB')} suggested</span>{/if}
+        </h3>
+        {#if total}
+          <Button size="sm" disabled={busy} title="Accept all (Enter)" onclick={acceptAll}
+            >Accept all</Button
+          >
+        {/if}
+      </div>
+      <table class="tags">
+        <thead>
+          <tr>
+            <th scope="col">Tag</th>
+            <th scope="col">In the file</th>
+            <th scope="col">Suggested</th>
+            <th scope="col" aria-label="Action"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class:suggested={!!cover}>
+            <th scope="row">Cover</th>
+            <td>
+              {#if item.artwork.artwork}
+                <Thumb
+                  seed={item.track.id}
+                  size="sm"
+                  src={artworkUrl(item.artwork.artwork)}
+                  alt="Cover in the file"
+                />
+              {:else}<span class="missing">Missing</span>{/if}
+            </td>
+            <td>
+              {#if covers.length > 1 && cover}
+                <span class="covers">
+                  {#each covers as candidate (candidate.index)}
+                    <button
+                      type="button"
+                      class="cover-choice"
+                      aria-pressed={candidate.index === activeCover}
+                      aria-label={coverLabel(candidate)}
+                      title={coverLabel(candidate)}
+                      disabled={busy}
+                      onclick={() => oncover(candidate.index)}
+                    >
+                      <Thumb
+                        seed={candidate.index}
+                        size="sm"
+                        src={candidate.artwork_hash ? artworkUrl(candidate.artwork_hash) : null}
+                        alt=""
+                      />
+                    </button>
+                  {/each}
+                </span>
+              {:else if cover}
+                <Thumb
+                  seed={item.track.id + 1}
+                  size="sm"
+                  src={artworkUrl(cover.artwork)}
+                  alt="Suggested cover"
+                />
+              {/if}
+            </td>
+            <td class="action">
+              {#if cover}
+                <Button
+                  size="sm"
+                  disabled={busy}
+                  aria-label="Accept cover"
+                  onclick={() => onaccept([], true)}>Accept</Button
+                >
+              {/if}
+            </td>
+          </tr>
+          {#each item.fields as field (field.field)}
+            {@const offered = isSuggested(field)}
+            <tr class:suggested={offered}>
+              <th scope="row"
+                >{MISSING_LABELS[field.field]}{#if LIBRARY_ONLY_FIELDS.has(field.field)}<small
+                    title="Kept in the library, not the file">Library</small
+                  >{/if}</th
+              >
+              <td class:old={offered} title={field.current_value ?? ''}>
+                {#if field.current_value}{field.current_value}{:else}<span class="missing"
+                    >Missing</span
+                  >{/if}
+              </td>
+              <td title={field.proposed_value ?? ''}>
+                {#if offered}{field.proposed_value || 'Clear'}{:else if field.changes}<span
+                    class="kept">{field.proposed_value}</span
+                  >{/if}
+              </td>
+              <td class="action">
+                {#if offered}
+                  <Button
+                    size="sm"
+                    disabled={busy}
+                    aria-label={'Accept ' + MISSING_LABELS[field.field]}
+                    onclick={() => onaccept([field.field], false)}>Accept</Button
+                  >
+                {:else if field.changes}
+                  <span class="kept" title="You set this tag, so suggestions never change it"
+                    >Yours</span
+                  >
+                {/if}
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </section>
 
     <div class="details">
       <MatchEvidenceHeader evidence={item.evidence} steps={item.steps} {onopenproviders} />
@@ -403,14 +390,18 @@
 
   <footer class="actions">
     {#if total}
-      <Button variant="primary" size="sm" disabled={busy} title="Save (Enter)" onclick={save}>
-        {chosen === 0
-          ? 'Skip all changes'
-          : chosen === 1
-            ? 'Save 1 change'
-            : 'Save ' + chosen.toLocaleString('en-GB') + ' changes'}
+      <Button
+        variant="primary"
+        size="sm"
+        disabled={busy}
+        title="Accept all (Enter)"
+        onclick={acceptAll}
+      >
+        {total === 1 ? 'Accept 1 change' : 'Accept ' + total.toLocaleString('en-GB') + ' changes'}
       </Button>
-      <Button size="sm" disabled={busy} title="Skip (S)" onclick={onskip}>Skip</Button>
+      <Button size="sm" disabled={busy} title="Skip the suggestions (S)" onclick={onskip}
+        >Skip</Button
+      >
     {/if}
     <span class="spacer"></span>
     {#if canUndo}
@@ -439,37 +430,9 @@
     min-width: 0;
     min-height: 0;
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr) auto;
     container-type: inline-size;
     background: var(--color-background);
-  }
-  .head {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    min-width: 0;
-    padding: var(--space-3) var(--space-5);
-    border-bottom: var(--border-width) solid var(--color-border);
-  }
-  .heading {
-    flex: 1;
-    min-width: 0;
-  }
-  h2,
-  .heading p {
-    margin: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  h2 {
-    font-size: var(--text-lg);
-    font-weight: var(--weight-medium);
-  }
-  .heading p {
-    margin-top: var(--space-1);
-    color: var(--color-text-2);
-    font-size: var(--text-sm);
   }
   .body {
     min-width: 0;
@@ -480,52 +443,51 @@
     flex-direction: column;
     gap: var(--space-6);
   }
-  p {
+  p,
+  figure {
     margin: 0;
   }
-  .match-block {
+  .hero {
     display: grid;
-    gap: var(--space-4);
-  }
-  .compare {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-    gap: var(--space-4);
+    grid-template-columns: var(--thumb-xl) minmax(0, 1fr);
+    gap: var(--space-5);
     align-items: start;
   }
-  .side {
+  figure {
+    display: grid;
+    gap: var(--space-2);
+  }
+  figcaption {
+    font-size: var(--text-xs);
+    color: var(--color-muted);
+  }
+  .identity {
     min-width: 0;
     display: grid;
     gap: var(--space-1-5);
-    justify-items: start;
+    align-content: start;
   }
-  .side-label,
-  h3 {
-    color: var(--color-text-2);
-    font-size: var(--text-sm);
+  h2 {
+    margin: 0;
+    font-size: var(--text-xl);
     font-weight: var(--weight-medium);
-  }
-  .name {
-    min-width: 0;
-    max-width: 100%;
-    font-size: var(--text-md);
     overflow-wrap: anywhere;
+  }
+  .artist {
+    font-size: var(--text-base);
+    color: var(--color-text-2);
   }
   .meta {
     min-width: 0;
-    max-width: 100%;
-    color: var(--color-text-2);
     font-size: var(--text-sm);
+    color: var(--color-text-2);
     overflow-wrap: anywhere;
   }
-  .arrow {
-    align-self: center;
-    color: var(--color-muted);
-  }
-  .evidence {
+  .verdict {
     display: flex;
     align-items: baseline;
-    gap: var(--space-3);
+    gap: var(--space-2-5);
+    margin-top: var(--space-2);
     font-size: var(--text-sm);
     color: var(--color-text-2);
   }
@@ -533,56 +495,57 @@
     font-size: var(--text-lg);
     color: var(--color-text);
   }
-  .state {
-    display: grid;
-    gap: var(--space-2);
-    justify-items: start;
-  }
-  .state-title {
-    font-size: var(--text-md);
-  }
-  .state :global(button) {
-    margin-top: var(--space-2);
-  }
-  .state-actions {
+  .hero-actions {
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-2-5);
+    margin-top: var(--space-3);
+  }
+  .hero-actions :global(button),
+  .actions :global(button) {
+    gap: var(--space-1-5);
   }
   .group {
     display: grid;
     gap: var(--space-2);
     min-width: 0;
   }
+  .group-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+  }
   h3 {
     margin: 0;
     display: flex;
     gap: var(--space-2);
     align-items: baseline;
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    color: var(--color-text-2);
   }
   h3 .numeric {
     color: var(--color-muted);
     font-weight: var(--weight-regular);
   }
-  ol,
-  ul {
+  ol {
     list-style: none;
     margin: 0;
     padding: 0;
     min-width: 0;
   }
-  .matches li + li,
-  .changes li + li {
+  .matches li + li {
     border-top: var(--border-width) solid var(--color-border);
   }
   .match {
     width: 100%;
     min-width: 0;
     display: grid;
-    grid-template-columns: var(--control-height-keybadge) minmax(0, 1fr) auto var(--space-4);
+    grid-template-columns: var(--control-height-keybadge) var(--thumb-sm) minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--space-3);
-    padding: var(--space-2) var(--space-2);
+    padding: var(--space-2);
     font: inherit;
     text-align: left;
     color: var(--color-text);
@@ -599,7 +562,7 @@
     background: var(--color-surface-2);
   }
   .match:focus-visible,
-  .cover:focus-visible {
+  .cover-choice:focus-visible {
     outline: var(--focus-ring-width) solid var(--color-text);
     outline-offset: 1px;
   }
@@ -626,90 +589,106 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .match-score {
+  .name {
+    font-size: var(--text-md);
+  }
+  .match-side {
+    display: grid;
+    justify-items: end;
+    gap: var(--space-1);
     font-size: var(--text-sm);
     color: var(--color-text-2);
   }
-  .tick {
+  .in-use {
+    font-size: var(--text-xs);
+    color: var(--color-text);
     opacity: 0;
   }
-  .tick.shown {
+  .in-use.shown {
     opacity: 1;
   }
   .link {
     display: grid;
-    gap: var(--space-2);
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-2-5);
+    font-size: var(--text-sm);
   }
   .link label {
-    font-size: var(--text-sm);
     color: var(--color-text-2);
   }
-  .link-row {
-    display: flex;
-    gap: var(--space-2);
-    min-width: 0;
-  }
   input[type='url'] {
-    flex: 1;
     min-width: 0;
     height: var(--control-height-sm);
     font: inherit;
-    font-size: var(--text-sm);
     color: var(--color-text);
     background: var(--color-surface-2);
     border: var(--border-width) solid var(--color-border-control);
     border-radius: var(--radius-sm);
     padding-inline: var(--space-2-5);
   }
-  .change {
-    display: grid;
-    grid-template-columns: var(--checkbox-size) minmax(0, 8rem) minmax(0, 1fr) minmax(0, 1.4fr);
-    align-items: center;
-    gap: var(--space-3);
-    min-height: var(--row-height);
-    padding-block: var(--space-1);
+  .tags {
+    width: 100%;
+    border-spacing: 0;
+    table-layout: fixed;
     font-size: var(--text-sm);
   }
-  .change input {
-    width: var(--checkbox-size);
-    height: var(--checkbox-size);
-    margin: 0;
-    accent-color: var(--color-text);
-    cursor: pointer;
-  }
-  .field {
-    color: var(--color-text-2);
-    cursor: pointer;
-    display: flex;
-    gap: var(--space-2);
-    align-items: baseline;
-    min-width: 0;
-  }
-  .field small {
-    color: var(--color-muted);
-    font-size: var(--text-xs);
-  }
-  .old,
-  .new {
-    min-width: 0;
+  .tags th,
+  .tags td {
+    height: var(--row-height);
+    padding: var(--space-1) var(--space-2-5);
+    text-align: left;
+    vertical-align: middle;
+    border-bottom: var(--border-width) solid var(--color-border);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .old {
+  .tags thead th {
+    height: var(--table-header-height);
+    font-weight: var(--weight-regular);
     color: var(--color-muted);
   }
-  .change.off .new {
+  .tags thead th:first-child {
+    width: 9rem;
+  }
+  .tags thead th:last-child {
+    width: 6rem;
+  }
+  .tags tbody th {
+    font-weight: var(--weight-regular);
+    color: var(--color-text-2);
+  }
+  .tags tbody th small {
+    margin-left: var(--space-2);
+    font-size: var(--text-xs);
     color: var(--color-muted);
-    text-decoration: line-through;
+  }
+  .tags tr.suggested {
+    background: var(--color-surface);
+  }
+  .tags tr.suggested td:nth-child(3) {
+    color: var(--color-text);
+    font-weight: var(--weight-medium);
+  }
+  .old,
+  .missing,
+  .kept {
+    color: var(--color-muted);
+  }
+  .action {
+    text-align: right;
   }
   .covers {
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-2);
-    white-space: normal;
   }
-  .cover {
+  .tags td:has(.covers) {
+    white-space: normal;
+    padding-block: var(--space-2);
+  }
+  .cover-choice {
     padding: 0;
     border: var(--border-width) solid transparent;
     border-radius: var(--radius-md);
@@ -717,12 +696,8 @@
     cursor: pointer;
     line-height: 0;
   }
-  .cover[aria-pressed='true'] {
+  .cover-choice[aria-pressed='true'] {
     border-color: var(--color-text);
-  }
-  .note {
-    font-size: var(--text-sm);
-    color: var(--color-text-2);
   }
   .details {
     margin-top: auto;
@@ -739,34 +714,28 @@
   .spacer {
     flex: 1;
   }
-  .actions :global(button) {
-    gap: var(--space-1-5);
-  }
-  @container (max-width: 440px) {
-    .match-block {
-      display: grid;
-      gap: var(--space-4);
-    }
-    .compare {
+  @container (max-width: 520px) {
+    .hero {
       grid-template-columns: minmax(0, 1fr);
     }
-    .arrow {
+    .tags th:nth-child(2),
+    .tags td:nth-child(2) {
       display: none;
     }
-    .change {
-      grid-template-columns: var(--checkbox-size) minmax(0, 1fr);
+    .link {
+      grid-template-columns: minmax(0, 1fr) auto;
     }
-    .old {
-      display: none;
-    }
-    .new {
-      grid-column: 2;
+    .link label {
+      grid-column: 1 / -1;
     }
   }
   @media (forced-colors: active) {
     .match[aria-pressed='true'],
-    .cover[aria-pressed='true'] {
+    .cover-choice[aria-pressed='true'] {
       outline: 2px solid Highlight;
+    }
+    .tags tr.suggested {
+      outline: 1px solid CanvasText;
     }
   }
 </style>

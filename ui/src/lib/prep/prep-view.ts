@@ -130,6 +130,16 @@ export function stillMissing(item: PrepItem): string[] {
   }).map((name) => MISSING_LABELS[name]);
 }
 
+/** Core tags the track lacks right now, in the short words a list row has room for. */
+export function missingNow(item: PrepItem): string[] {
+  return CORE_FIELDS.filter((name) => {
+    if (name === 'artwork') return !item.artwork.artwork;
+    const field = item.fields.find((entry) => entry.field === name);
+    const value = field ? field.current_value : item.track[name];
+    return !String(value ?? '').trim();
+  }).map((name) => (name === 'artwork' ? 'cover' : MISSING_LABELS[name].toLowerCase()));
+}
+
 /** Suggestions the user can still take: changing, and not a value the user set by hand. */
 export function reviewableFields(item: PrepItem): StagedField[] {
   return item.fields.filter((field) => field.changes && !field.locked_by_user);
@@ -222,7 +232,12 @@ export function rowStatus(item: PrepItem): RowStatus {
           confidence: percent(match.confidence),
         };
       }
-      return { primary: 'From filename', secondary: changeText, confidence: null };
+      const source = localSource(item);
+      return {
+        primary: source ? 'From ' + source.toLowerCase() : 'Suggested',
+        secondary: changeText,
+        confidence: null,
+      };
     }
     case 'not_searched':
       return { primary: 'Not searched', secondary: '', confidence: null };

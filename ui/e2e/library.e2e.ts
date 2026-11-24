@@ -1365,7 +1365,7 @@ test('a batch of 50 mixed files goes from untagged to tagged in Prep using the k
         await firstTrack.press('Enter');
         await expect(prep.getByRole('button', { name: 'Back to tracks' })).toBeFocused();
       }
-      await expect(prep.getByRole('checkbox', { name: 'Artist', exact: true })).toBeInViewport();
+      await expect(prep.getByRole('button', { name: 'Accept Artist' })).toBeInViewport();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       );
