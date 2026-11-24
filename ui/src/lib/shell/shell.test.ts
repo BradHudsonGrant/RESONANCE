@@ -258,13 +258,15 @@ describe('Sidebar', () => {
   };
 
   it('lists the five spaces in order, with the active one current', () => {
-    render(Sidebar, props);
+    render(Sidebar, { ...props, prepCount: 14 });
 
     expect(spaces.map((space) => space.name)).toEqual(['Library', 'Prep', 'Sets', 'Mix', 'Replay']);
     expect(screen.getByRole('button', { name: 'Library' }).getAttribute('aria-current')).toBe(
       'page',
     );
     expect(screen.getByText('12,846')).toBeTruthy();
+    expect(screen.getByText('14')).toBeTruthy();
+    expect(tooltipTexts().some((text) => text?.includes('Prep · 14 pending'))).toBe(true);
   });
 
   it('names the milestone of each space still to come, and does not open it', async () => {
@@ -613,9 +615,10 @@ describe('SettingsSheet', () => {
     expect(document.documentElement.dataset.theme).toBe('dark');
   });
 
-  it('closes on Done', async () => {
-    render(SettingsSheet, { open: true });
+  it('closes on Done and accepts focusSection="providers"', async () => {
+    render(SettingsSheet, { open: true, focusSection: 'providers' });
     const dialog = screen.getByRole('dialog') as HTMLDialogElement;
+    expect(within(dialog).getByText('Providers')).toBeTruthy();
 
     await fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
     expect(dialog.open).toBe(false);

@@ -101,12 +101,15 @@ pub enum Request {
     /// Computes pending byte hashes, decoded-audio hashes and Chromaprint fingerprints.
     Identify,
     /// Looks tracks up online as an Activity job: the given tracks first, then every other track
-    /// without an online result.
+    /// without an online result (or only `track_ids` when `only_selected` is true).
     IdentifyOnline {
         #[ts(type = "Array<number>")]
         track_ids: Vec<i64>,
+        #[serde(default)]
+        only_selected: bool,
     },
-    /// Reads a Discogs release or Bandcamp page the user pasted for one track.
+    /// Looks up a pasted release link (Discogs, Bandcamp, MusicBrainz, Deezer, Apple Music,
+    /// SoundCloud, or YouTube) for one track.
     IdentifyWithUrl {
         #[ts(type = "number")]
         track_id: i64,
@@ -310,6 +313,17 @@ pub enum Request {
         #[ts(type = "Array<number>")]
         track_ids: Vec<i64>,
     },
+    /// Saves selected proposals. A null field list takes every unlocked field. An empty list
+    /// takes only the cover when requested. Mix and subgenre are saved in the library.
+    AcceptAndWrite {
+        #[ts(type = "Array<number>")]
+        track_ids: Vec<i64>,
+        fields: Option<Vec<TagName>>,
+        include_artwork: bool,
+        #[serde(default)]
+        #[ts(optional)]
+        expected_review: Option<String>,
+    },
     /// The journal of changes to files, newest first.
     RecentOperations {
         limit: u32,
@@ -332,14 +346,37 @@ pub enum Request {
         scope: RenameScope,
         template: String,
     },
-    /// The Prep queue and staging diffs, either for tracks with pending proposals or for a batch
-    /// matching `query` sent from Library.
+    /// All track IDs in the filtered Prep view, optionally restricted to a Library selection.
+    PrepTrackIds {
+        #[serde(default)]
+        #[ts(optional = nullable)]
+        query: Option<TrackQuery>,
+        #[serde(default)]
+        #[ts(optional = nullable, type = "Array<number>")]
+        track_ids: Option<Vec<i64>>,
+    },
+    /// Total matching tracks and one page of the Prep queue.
+    PrepPage {
+        #[serde(default)]
+        #[ts(optional = nullable)]
+        query: Option<TrackQuery>,
+        #[serde(default)]
+        #[ts(optional = nullable, type = "Array<number>")]
+        track_ids: Option<Vec<i64>>,
+        offset: u32,
+        limit: u32,
+    },
+    /// The Prep queue and staging diffs, either for explicit `track_ids`, a batch matching `query`
+    /// sent from Library, pending proposals, or the whole library.
     PrepQueue {
         #[serde(default)]
         #[ts(optional = nullable)]
         query: Option<TrackQuery>,
         #[serde(default = "default_true")]
         proposals_only: bool,
+        #[serde(default)]
+        #[ts(optional = nullable, type = "Array<number>")]
+        track_ids: Option<Vec<i64>>,
     },
     /// Accepts pending proposals on one or more tracks (such as a release group) in one
     /// transaction. When `fields` is empty, takes all pending unlocked changing fields.
@@ -348,6 +385,40 @@ pub enum Request {
         track_ids: Vec<i64>,
         #[serde(default)]
         fields: Vec<TagName>,
+        #[serde(default)]
+        #[ts(optional = nullable)]
+        candidate_index: Option<u32>,
+        #[serde(default)]
+        skip_remaining: bool,
+        #[serde(default)]
+        #[ts(optional = nullable)]
+        include_artwork: Option<bool>,
+    },
+    /// Switches the active identification candidate for a Prep item and re-stages its proposals.
+    SelectPrepCandidate {
+        #[ts(type = "number")]
+        track_id: i64,
+        candidate_index: u32,
+        #[serde(default)]
+        #[ts(optional)]
+        expected_review: Option<String>,
+    },
+    /// Stages or applies release artwork from a stored candidate without changing tag proposals
+    /// or `selected_candidate`.
+    UsePrepCandidateArtwork {
+        #[ts(type = "number")]
+        track_id: i64,
+        candidate_index: u32,
+        accept: bool,
+        #[serde(default)]
+        #[ts(optional)]
+        expected_review: Option<String>,
+    },
+    /// Fetches and caches cover artwork for one stored Prep candidate without modifying proposals.
+    FetchPrepCandidateArtwork {
+        #[ts(type = "number")]
+        track_id: i64,
+        candidate_index: u32,
     },
     /// Skips pending proposals on one or more tracks in one transaction.
     SkipPrepItems {
@@ -367,6 +438,12 @@ pub enum Request {
         #[ts(type = "Array<number>")]
         track_ids: Vec<i64>,
         tool: BatchTagTool,
+    },
+    /// Reads identification behaviour settings.
+    IdentificationSettings,
+    /// Updates identification behaviour settings and rebuilds the active pipeline.
+    SetIdentificationSettings {
+        settings: IdentificationSettings,
     },
 }
 
@@ -462,15 +539,23 @@ pub enum Response {
     SetUserTag(UserTagReport),
     PreviewTagWrites(Vec<FileTagWrite>),
     ApplyTagWrites(TagWriteReport),
+    AcceptAndWrite(AcceptedTagWriteReport),
     PreviewRename(RenamePreview),
     ApplyRename(RenameReport),
     RecentOperations(Vec<JournalOperation>),
     UndoOperation(UndoReport),
+    PrepTrackIds(#[ts(type = "Array<number>")] Vec<i64>),
+    PrepPage(PrepPageSnapshot),
     PrepQueue(PrepQueueSnapshot),
     AcceptPrepItems(AcceptedProposals),
+    SelectPrepCandidate(Box<PrepItem>),
+    UsePrepCandidateArtwork(Box<PrepItem>),
+    FetchPrepCandidateArtwork(TrackCandidateArtwork),
     SkipPrepItems(AcceptedProposals),
     PreviewBatchTag(AcceptedProposals),
     ApplyBatchTag(AcceptedProposals),
+    IdentificationSettings(IdentificationSettings),
+    SetIdentificationSettings(IdentificationSettings),
 }
 
 /// One field a tag write changes. `null` is no value.
@@ -512,6 +597,17 @@ pub struct TagWriteReport {
     pub operation_id: Option<i64>,
     pub written: u32,
     pub failed: Vec<FailedTagWrite>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct AcceptedTagWriteReport {
+    #[serde(flatten)]
+    #[ts(flatten)]
+    pub files: TagWriteReport,
+    pub library_fields: u32,
+    #[serde(default)]
+    pub reverted_fields: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
@@ -675,6 +771,8 @@ pub struct StagedField {
     pub locked_by_user: bool,
     /// A pending proposal that would change what the track shows.
     pub changes: bool,
+    /// True when writing tags to disk will modify this field in the file.
+    pub dirty_on_disk: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -695,6 +793,8 @@ pub struct TrackArtwork {
     pub artwork: Option<String>,
     /// A release picture waiting for the user's decision.
     pub proposed: Option<ProposedTrackArtwork>,
+    /// True when the user's cover has not yet been written to the file.
+    pub dirty_on_disk: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -902,7 +1002,7 @@ pub struct TrackIdentification {
     pub steps: Vec<IdentifyStepReport>,
 }
 
-/// The best candidate. udio_matched is true only when Chromaprint compared the audio.
+/// The best candidate. `audio_matched` is true only when Chromaprint compared the audio.
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[ts(export)]
 pub struct IdentifiedRelease {
@@ -1555,6 +1655,85 @@ pub struct RelinkPreview {
     pub merges_existing_track_id: Option<i64>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum MatchBasis {
+    AudioFingerprint,
+    AudioPreview,
+    AudioRecogniser,
+    UserUrl,
+    EmbeddedUrl,
+    CatalogAndDuration,
+    TagsAndDuration,
+    TagsOnly,
+    LocalTags,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct MatchEvidence {
+    pub basis: MatchBasis,
+    pub providers: Vec<String>,
+    pub primary_provider: String,
+    #[ts(type = "number | null")]
+    pub duration_delta_ms: Option<u64>,
+    pub preview_similarity: Option<f32>,
+    pub catno_matched: bool,
+    pub isrc_matched: bool,
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct MatchCandidateSummary {
+    pub index: u32,
+    pub provider: String,
+    pub providers: Vec<String>,
+    pub confidence: f64,
+    pub audio_matched: bool,
+    pub artist: Option<String>,
+    pub title: Option<String>,
+    pub mix: Option<String>,
+    pub album: Option<String>,
+    pub label: Option<String>,
+    pub catno: Option<String>,
+    pub year: Option<u16>,
+    pub genre: Option<String>,
+    pub subgenre: Option<String>,
+    pub track_number: Option<String>,
+    #[ts(type = "number | null")]
+    pub duration_delta_ms: Option<u64>,
+    pub url: Option<String>,
+    pub has_artwork: bool,
+    pub artwork_provider: Option<String>,
+    pub artwork_hash: Option<String>,
+    pub evidence: MatchEvidence,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct CandidateArtworkState {
+    pub index: u32,
+    pub has_artwork: bool,
+    pub artwork_provider: Option<String>,
+    pub artwork_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct TrackCandidateArtwork {
+    #[ts(type = "number")]
+    pub track_id: i64,
+    pub candidates: Vec<CandidateArtworkState>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct IdentificationSettings {
+    pub verify_audio_previews: bool,
+}
+
 /// How Prep groups tracks that belong to the same release or folder.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export)]
@@ -1569,6 +1748,7 @@ pub struct PrepReleaseGroup {
 #[ts(export)]
 pub struct PrepItem {
     pub track: LibraryTrack,
+    pub review_token: String,
     pub fields: Vec<StagedField>,
     pub artwork: TrackArtwork,
     pub pending_fields: u32,
@@ -1580,6 +1760,23 @@ pub struct PrepItem {
     /// previews.
     pub changeable_confidences: Vec<f64>,
     pub release: Option<PrepReleaseGroup>,
+    pub evidence: Option<MatchEvidence>,
+    pub candidates: Vec<MatchCandidateSummary>,
+    pub selected_candidate: u32,
+    pub candidates_expanded: bool,
+    pub steps: Vec<IdentifyStepReport>,
+    pub has_unwritten: bool,
+    pub online_checked: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct PrepPageSnapshot {
+    pub total: u32,
+    pub offset: u32,
+    pub items: Vec<PrepItem>,
+    pub unwritten_tracks: u32,
+    pub last_operation: Option<JournalOperation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]

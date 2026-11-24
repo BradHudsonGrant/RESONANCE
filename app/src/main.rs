@@ -84,6 +84,67 @@ async fn pick_folder() -> Result<Option<String>, ApiError> {
     .map_err(ApiError::internal)?
 }
 
+fn validate_external_url(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty()
+        || trimmed.len() > 2048
+        || trimmed.chars().any(|c| c.is_control() || c.is_whitespace())
+    {
+        return Err(
+            "External URL must be a single line without control characters or spaces.".to_owned(),
+        );
+    }
+    if trimmed.contains(['"', ',', '\\']) {
+        return Err("External URL contains unsupported punctuation.".to_owned());
+    }
+    let parsed = Url::parse(trimmed).map_err(|_| "External URL is not valid.".to_owned())?;
+    if parsed.scheme() != "https" {
+        return Err("Only https:// URLs may be opened externally.".to_owned());
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("External URL must not include userinfo.".to_owned());
+    }
+    let Some(host) = parsed.domain() else {
+        return Err("External URL must include a valid domain host.".to_owned());
+    };
+    if !host.contains('.')
+        || host.split('.').any(|label| label.is_empty())
+        || host.eq_ignore_ascii_case("localhost")
+        || host.to_ascii_lowercase().ends_with(".localhost")
+    {
+        return Err("External URL host is not valid.".to_owned());
+    }
+    let clean = parsed.as_str();
+    if clean.contains(['"', ',', '\\']) {
+        return Err("External URL contains unsupported punctuation.".to_owned());
+    }
+    Ok(clean.to_owned())
+}
+
+#[tauri::command]
+async fn open_external_url(url: String) -> Result<(), ApiError> {
+    let clean = validate_external_url(&url).map_err(ApiError::invalid_input)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(target_os = "windows")]
+        let status = std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", &clean])
+            .status();
+        #[cfg(target_os = "macos")]
+        let status = std::process::Command::new("open").arg(&clean).status();
+        #[cfg(all(unix, not(target_os = "macos")))]
+        let status = std::process::Command::new("xdg-open").arg(&clean).status();
+        let exit = status.map_err(ApiError::internal)?;
+        if !exit.success() {
+            return Err(ApiError::internal(
+                "Could not open link in default browser.",
+            ));
+        }
+        Ok(())
+    })
+    .await
+    .map_err(ApiError::internal)?
+}
+
 /// A stored picture for `artwork://<hash>`, the desktop's way to the same files the local
 /// socket serves at `/artwork/<hash>`.
 fn artwork_response(
@@ -151,7 +212,8 @@ fn run(options: Options) -> Result<(), AppError> {
         .invoke_handler(tauri::generate_handler![
             dispatch,
             pick_audio_file,
-            pick_folder
+            pick_folder,
+            open_external_url
         ])
         .setup(move |app| {
             let window =
@@ -252,5 +314,32 @@ mod tests {
                 .data_folder
                 .is_none()
         );
+    }
+
+    #[test]
+    fn external_url_validation_allows_https_and_blocks_unsafe_schemes_or_chars() {
+        assert_eq!(
+            validate_external_url(" https://www.discogs.com/release/123 "),
+            Ok("https://www.discogs.com/release/123".to_owned())
+        );
+        for bad in [
+            "",
+            "http://example.com",
+            "file:///C:/Windows/System32/calc.exe",
+            "javascript:alert(1)",
+            "https://example.com/a b",
+            "https://example.com/\nfoo",
+            "https://user@example.com",
+            "https://localhost/test",
+            "https://sub.localhost/test",
+            "https://127.0.0.1/release/1",
+            "https://example.com:abc/",
+            "https://a..b.com/test",
+            "https://example.com/a,b",
+            "https://example.com/a\"b",
+            "https://example.com/a\\b",
+        ] {
+            assert!(validate_external_url(bad).is_err(), "{bad}");
+        }
     }
 }

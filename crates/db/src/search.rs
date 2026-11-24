@@ -123,12 +123,66 @@ fn write_asset_metadata(
     delete_existing_fts: bool,
 ) -> Result<(), DbError> {
     let meta = AssetSearchMeta::from_path_and_tags(path, tags);
-    write_search_columns(tx, asset_id, path, &meta, delete_existing_fts)?;
-    // Schema v16 added it, so the earlier backfills that share the writers above leave it out.
-    tx.prepare_cached("UPDATE asset SET title_tagged = ?2 WHERE id = ?1")?
-        .execute(params![asset_id, meta.title_tagged])?;
-    write_table_columns(tx, asset_id, &meta, tags)?;
-    write_missing_tags(tx, asset_id, tags)
+    let included: bool = tx
+        .prepare_cached("SELECT included FROM asset WHERE id = ?1")?
+        .query_row([asset_id], |row| row.get(0))?;
+    tx.prepare_cached(
+        "UPDATE asset
+         SET sort_title = ?2,
+             sort_artist = ?3,
+             tag_album = ?4,
+             tag_genre = ?5,
+             tag_label = ?6,
+             tag_key = ?7,
+             sort_key = ?8,
+             tag_bpm = ?9,
+             tag_year = ?10,
+             tag_catno = ?11,
+             tag_comment = ?12,
+             tag_composer = ?13,
+             tag_remixer = ?14,
+             tag_mix = ?15,
+             title_tagged = ?16
+         WHERE id = ?1",
+    )?
+    .execute(params![
+        asset_id,
+        meta.title,
+        meta.artist,
+        meta.album,
+        meta.genre,
+        meta.label,
+        meta.tag_key,
+        meta.sort_key,
+        meta.tag_bpm,
+        meta.tag_year,
+        meta.catno,
+        meta.comment,
+        meta.composer,
+        meta.remixer,
+        meta.mix,
+        meta.title_tagged,
+    ])?;
+    if delete_existing_fts {
+        tx.prepare_cached("DELETE FROM asset_fts WHERE rowid = ?1")?
+            .execute([asset_id])?;
+    }
+    tx.prepare_cached(
+        "INSERT INTO asset_fts (rowid, title, artist, album, genre, label, comment, path)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+    )?
+    .execute(params![
+        asset_id,
+        meta.title,
+        meta.artist.unwrap_or(""),
+        meta.album.unwrap_or(""),
+        meta.genre.unwrap_or(""),
+        meta.label.unwrap_or(""),
+        meta.comment.unwrap_or(""),
+        path,
+    ])?;
+    write_tag_values(tx, asset_id, tags, included)?;
+    write_missing_tags(tx, asset_id, tags, included)
 }
 
 /// The sort, filter and search columns schema v4 added.
@@ -139,7 +193,7 @@ fn write_search_columns(
     meta: &AssetSearchMeta<'_>,
     delete_existing_fts: bool,
 ) -> Result<(), DbError> {
-    tx.execute(
+    tx.prepare_cached(
         "UPDATE asset
          SET sort_title = ?2,
              sort_artist = ?3,
@@ -151,36 +205,37 @@ fn write_search_columns(
              tag_bpm = ?9,
              tag_year = ?10
          WHERE id = ?1",
-        params![
-            asset_id,
-            meta.title,
-            meta.artist,
-            meta.album,
-            meta.genre,
-            meta.label,
-            meta.tag_key,
-            meta.sort_key,
-            meta.tag_bpm,
-            meta.tag_year,
-        ],
-    )?;
+    )?
+    .execute(params![
+        asset_id,
+        meta.title,
+        meta.artist,
+        meta.album,
+        meta.genre,
+        meta.label,
+        meta.tag_key,
+        meta.sort_key,
+        meta.tag_bpm,
+        meta.tag_year,
+    ])?;
     if delete_existing_fts {
-        tx.execute("DELETE FROM asset_fts WHERE rowid = ?1", [asset_id])?;
+        tx.prepare_cached("DELETE FROM asset_fts WHERE rowid = ?1")?
+            .execute([asset_id])?;
     }
-    tx.execute(
+    tx.prepare_cached(
         "INSERT INTO asset_fts (rowid, title, artist, album, genre, label, comment, path)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        params![
-            asset_id,
-            meta.title,
-            meta.artist.unwrap_or(""),
-            meta.album.unwrap_or(""),
-            meta.genre.unwrap_or(""),
-            meta.label.unwrap_or(""),
-            meta.comment.unwrap_or(""),
-            path,
-        ],
-    )?;
+    )?
+    .execute(params![
+        asset_id,
+        meta.title,
+        meta.artist.unwrap_or(""),
+        meta.album.unwrap_or(""),
+        meta.genre.unwrap_or(""),
+        meta.label.unwrap_or(""),
+        meta.comment.unwrap_or(""),
+        path,
+    ])?;
     Ok(())
 }
 
@@ -204,7 +259,10 @@ fn write_table_columns(
         meta.remixer,
         meta.mix,
     ])?;
-    write_tag_values(tx, asset_id, tags)
+    let included: bool = tx
+        .prepare_cached("SELECT included FROM asset WHERE id = ?1")?
+        .query_row([asset_id], |row| row.get(0))?;
+    write_tag_values(tx, asset_id, tags, included)
 }
 
 /// Replaces the asset's rows in the tag value index with the tags that have no column of their own.
@@ -212,12 +270,13 @@ pub(crate) fn write_tag_values(
     tx: &Transaction<'_>,
     asset_id: i64,
     tags: &[(TagField, String)],
+    included: bool,
 ) -> Result<(), DbError> {
     tx.prepare_cached("DELETE FROM asset_tag_value WHERE asset_id = ?1")?
         .execute([asset_id])?;
     let mut add = tx.prepare_cached(
         "INSERT INTO asset_tag_value (asset_id, field, sort_value, included)
-         SELECT ?1, ?2, ?3, included FROM asset WHERE id = ?1",
+         VALUES (?1, ?2, ?3, ?4)",
     )?;
     for field in generic_tag_fields() {
         let value = tags
@@ -225,7 +284,7 @@ pub(crate) fn write_tag_values(
             .find(|(tag, _)| *tag == field)
             .and_then(|(_, value)| tag_sort_value(value));
         if let Some(value) = value {
-            add.execute(params![asset_id, field.name(), value])?;
+            add.execute(params![asset_id, field.name(), value, included])?;
         }
     }
     Ok(())
@@ -237,19 +296,20 @@ pub(crate) fn write_missing_tags(
     tx: &Transaction<'_>,
     asset_id: i64,
     tags: &[(TagField, String)],
+    included: bool,
 ) -> Result<(), DbError> {
     tx.prepare_cached("DELETE FROM asset_tag_missing WHERE asset_id = ?1")?
         .execute([asset_id])?;
     let mut add = tx.prepare_cached(
         "INSERT INTO asset_tag_missing (asset_id, field, included)
-         SELECT ?1, ?2, included FROM asset WHERE id = ?1",
+         VALUES (?1, ?2, ?3)",
     )?;
     for field in generic_tag_fields() {
         let has = tags
             .iter()
             .any(|(tag, value)| *tag == field && tag_sort_value(value).is_some());
         if !has {
-            add.execute(params![asset_id, field.name()])?;
+            add.execute(params![asset_id, field.name(), included])?;
         }
     }
     Ok(())
@@ -328,9 +388,9 @@ impl Database {
         limit: u32,
     ) -> Result<Vec<TrackRow>, DbError> {
         let ids = if let Some(sort) = TagSort::of(query) {
-            sort.ids(&self.connection, offset, Some(limit))?
+            sort.ids(&self.connection, false, offset, Some(limit))?
         } else {
-            let (sql, mut params) = build_query_sql(query, false);
+            let (sql, mut params) = build_query_sql(query, QueryRows::Assets, false);
             let limit_bind = bind_param(&mut params, Value::Integer(i64::from(limit)));
             let offset_bind = bind_param(&mut params, Value::Integer(i64::from(offset)));
             let sql = format!("{sql} LIMIT {limit_bind} OFFSET {offset_bind}");
@@ -341,12 +401,47 @@ impl Database {
         load_tracks_by_ids(&self.connection, &ids)
     }
 
+    /// Primary included rows for `track_ids` indexed by `track_id`, loaded in batched queries.
+    pub fn tracks_by_ids(&self, track_ids: &[i64]) -> Result<HashMap<i64, TrackRow>, DbError> {
+        if track_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        const CHUNK_SIZE: usize = 500;
+        let mut asset_ids = Vec::with_capacity(track_ids.len());
+        for chunk in track_ids.chunks(CHUNK_SIZE) {
+            let placeholders: Vec<String> = (1..=chunk.len()).map(|i| format!("?{i}")).collect();
+            let in_list = placeholders.join(", ");
+            let sql = format!(
+                "SELECT track_id, id FROM asset
+                 WHERE track_id IN ({in_list}) AND included = 1
+                 ORDER BY track_id ASC, is_primary DESC, id ASC"
+            );
+            let mut stmt = self.connection.prepare(&sql)?;
+            let mut rows = stmt.query(params_from_iter(chunk.iter().copied()))?;
+            let mut prev_track: Option<i64> = None;
+            while let Some(row) = rows.next()? {
+                let track_id: i64 = row.get(0)?;
+                if prev_track != Some(track_id) {
+                    prev_track = Some(track_id);
+                    asset_ids.push(row.get(1)?);
+                }
+            }
+        }
+        let mut by_track_id = HashMap::with_capacity(asset_ids.len());
+        for chunk in asset_ids.chunks(CHUNK_SIZE) {
+            for track in load_tracks_by_ids(&self.connection, chunk)? {
+                by_track_id.insert(track.track_id, track);
+            }
+        }
+        Ok(by_track_id)
+    }
+
     /// Every included file matching `query`, in its order.
     pub fn query_asset_ids(&self, query: &TrackQuery) -> Result<Vec<i64>, DbError> {
         if let Some(sort) = TagSort::of(query) {
-            return sort.ids(&self.connection, 0, None);
+            return sort.ids(&self.connection, false, 0, None);
         }
-        let (sql, params) = build_query_sql(query, false);
+        let (sql, params) = build_query_sql(query, QueryRows::Assets, false);
         let mut stmt = self.connection.prepare(&sql)?;
         let ids = stmt
             .query_map(params_from_iter(params), |row| row.get(0))?
@@ -354,9 +449,65 @@ impl Database {
         Ok(ids)
     }
 
+    /// The file Prep shows for each included track, in the view's display order.
+    pub fn prep_track_ids(&self, query: &TrackQuery) -> Result<Vec<i64>, DbError> {
+        let dedup = has_included_non_primary(&self.connection)?;
+        if !dedup && let Some(sort) = TagSort::of(query) {
+            return sort.ids(&self.connection, true, 0, None);
+        }
+        let (sql, params) = build_query_sql(query, QueryRows::PrepTracks, dedup);
+        let mut stmt = self.connection.prepare(&sql)?;
+        Ok(stmt
+            .query_map(params_from_iter(params), |row| row.get(0))?
+            .collect::<Result<_, _>>()?)
+    }
+
+    /// Total matching tracks and one page of Prep track IDs, in the view's display order.
+    pub fn prep_track_page(
+        &self,
+        query: &TrackQuery,
+        offset: u32,
+        limit: u32,
+    ) -> Result<(u32, Vec<i64>), DbError> {
+        let dedup = has_included_non_primary(&self.connection)?;
+        if !dedup && let Some(sort) = TagSort::of(query) {
+            let ids = sort.ids(&self.connection, true, offset, Some(limit))?;
+            let total = if offset == 0 && (ids.len() as u64) < u64::from(limit) {
+                ids.len() as u32
+            } else {
+                self.connection
+                    .prepare_cached("SELECT count(*) FROM asset WHERE included = 1")?
+                    .query_row([], |row| row.get(0))?
+            };
+            return Ok((total, ids));
+        }
+        let (sql, mut params) = build_query_sql(query, QueryRows::PrepTracks, dedup);
+        let limit_bind = bind_param(&mut params, Value::Integer(i64::from(limit)));
+        let offset_bind = bind_param(&mut params, Value::Integer(i64::from(offset)));
+        let paged_sql = format!("{sql} LIMIT {limit_bind} OFFSET {offset_bind}");
+        let mut stmt = self.connection.prepare(&paged_sql)?;
+        let ids: Vec<i64> = stmt
+            .query_map(params_from_iter(params), |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        let total = if offset == 0 && (ids.len() as u64) < u64::from(limit) {
+            ids.len() as u32
+        } else {
+            let count_rows = if dedup {
+                QueryRows::PrepCount
+            } else {
+                QueryRows::Count
+            };
+            let (count_sql, count_params) = build_query_sql(query, count_rows, dedup);
+            self.connection
+                .prepare(&count_sql)?
+                .query_row(params_from_iter(count_params), |row| row.get(0))?
+        };
+        Ok((total, ids))
+    }
+
     /// Number of included tracks matching `query`.
     pub fn query_track_count(&self, query: &TrackQuery) -> Result<u32, DbError> {
-        let (sql, params) = build_query_sql(query, true);
+        let (sql, params) = build_query_sql(query, QueryRows::Count, false);
         let count: u32 = self
             .connection
             .query_row(&sql, params_from_iter(params), |row| row.get(0))?;
@@ -450,7 +601,7 @@ impl Database {
 
     /// Query plan steps for counting `query`'s tracks.
     pub fn explain_track_count(&self, query: &TrackQuery) -> Result<Vec<String>, DbError> {
-        let (sql, params) = build_query_sql(query, true);
+        let (sql, params) = build_query_sql(query, QueryRows::Count, false);
         let mut stmt = self
             .connection
             .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
@@ -468,9 +619,32 @@ impl Database {
         limit: u32,
     ) -> Result<Vec<String>, DbError> {
         if let Some(sort) = TagSort::of(query) {
-            return sort.explain(&self.connection);
+            return sort.explain(&self.connection, false);
         }
-        let (sql, mut params) = build_query_sql(query, false);
+        let (sql, mut params) = build_query_sql(query, QueryRows::Assets, false);
+        let limit_bind = bind_param(&mut params, Value::Integer(i64::from(limit)));
+        let offset_bind = bind_param(&mut params, Value::Integer(i64::from(offset)));
+        let sql = format!("EXPLAIN QUERY PLAN {sql} LIMIT {limit_bind} OFFSET {offset_bind}");
+
+        let mut stmt = self.connection.prepare(&sql)?;
+        let steps = stmt
+            .query_map(params_from_iter(params), |row| row.get(3))?
+            .collect::<Result<Vec<String>, _>>()?;
+        Ok(steps)
+    }
+
+    /// Query plan steps (`EXPLAIN QUERY PLAN`) for `prep_track_page`.
+    pub fn explain_prep_track_query(
+        &self,
+        query: &TrackQuery,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<String>, DbError> {
+        let dedup = has_included_non_primary(&self.connection)?;
+        if !dedup && let Some(sort) = TagSort::of(query) {
+            return sort.explain(&self.connection, true);
+        }
+        let (sql, mut params) = build_query_sql(query, QueryRows::PrepTracks, dedup);
         let limit_bind = bind_param(&mut params, Value::Integer(i64::from(limit)));
         let offset_bind = bind_param(&mut params, Value::Integer(i64::from(offset)));
         let sql = format!("EXPLAIN QUERY PLAN {sql} LIMIT {limit_bind} OFFSET {offset_bind}");
@@ -765,10 +939,43 @@ fn tag_filter_sql(field: &'static str, condition: &Condition, params: &mut Vec<V
     }
 }
 
-fn build_query_sql(query: &TrackQuery, count_only: bool) -> (String, Vec<Value>) {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum QueryRows {
+    Assets,
+    Count,
+    PrepTracks,
+    PrepCount,
+}
+
+fn has_included_non_primary(connection: &Connection) -> Result<bool, DbError> {
+    Ok(connection
+        .prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM asset WHERE included = 1 AND is_primary = 0 LIMIT 1)",
+        )?
+        .query_row([], |row| row.get(0))?)
+}
+
+fn is_selective_filter_term(term: &FilterTerm) -> bool {
+    !term.filters().is_empty()
+        && term
+            .filters()
+            .iter()
+            .all(|f| f.column != LibraryColumn::Added && matches!(f.condition, Condition::Missing))
+}
+
+fn build_query_sql(query: &TrackQuery, rows: QueryRows, dedup_prep: bool) -> (String, Vec<Value>) {
+    let count_only = matches!(rows, QueryRows::Count | QueryRows::PrepCount);
+    let prep_rows = matches!(rows, QueryRows::PrepTracks | QueryRows::PrepCount);
     let mut params = Vec::new();
     let fts_match = build_fts_match_query(query.text.as_deref().unwrap_or(""));
     let mut conditions = vec!["asset.included = 1".to_owned()];
+    if prep_rows && dedup_prep {
+        conditions.push(
+            "asset.id = (SELECT a.id FROM asset a WHERE a.track_id = asset.track_id
+             AND a.included = 1 ORDER BY a.is_primary DESC, a.id LIMIT 1)"
+                .to_owned(),
+        );
+    }
     let sorts = sort_keys(query);
     let sorts_by = |field: TrackSortField| sorts.iter().any(|(sort, _)| *sort == field);
     let mut needs_track_join = (!count_only && sorts_by(TrackSortField::Added))
@@ -828,8 +1035,10 @@ fn build_query_sql(query: &TrackQuery, count_only: bool) -> (String, Vec<Value>)
         }
     }
     // Choose join order to keep SQLite walking the matching index without a temp sort.
-    let has_selective_filter =
-        query.pill == FilterPill::Favourites || query.collection_id.is_some() || query.missing_only;
+    let has_selective_filter = query.pill == FilterPill::Favourites
+        || query.collection_id.is_some()
+        || query.missing_only
+        || (query.filters.len() == 1 && is_selective_filter_term(&query.filters[0]));
 
     let from = if fts_match.is_some() {
         let mut from =
@@ -925,9 +1134,14 @@ fn build_query_sql(query: &TrackQuery, count_only: bool) -> (String, Vec<Value>)
         _ => order.push(format!("asset.id {}", sql_direction(last_direction))),
     }
     let order_by = order.join(", ");
+    let id = if prep_rows {
+        "asset.track_id"
+    } else {
+        "asset.id"
+    };
 
     (
-        format!("SELECT asset.id {from} WHERE {where_clause} ORDER BY {order_by}"),
+        format!("SELECT {id} {from} WHERE {where_clause} ORDER BY {order_by}"),
         params,
     )
 }
@@ -1040,20 +1254,32 @@ impl TagSort {
         })
     }
 
-    fn tagged_sql(&self) -> String {
+    fn tagged_sql(&self, prep: bool) -> String {
         let dir = sql_direction(self.direction);
-        format!(
-            "SELECT asset_id FROM asset_tag_value
-             WHERE field = ?1 AND included = 1
-             ORDER BY sort_value {dir}, asset_id {dir}
-             LIMIT ?2 OFFSET ?3"
-        )
+        if prep {
+            format!(
+                "SELECT asset.track_id
+                 FROM asset_tag_value
+                 JOIN asset ON asset.id = asset_tag_value.asset_id
+                 WHERE asset_tag_value.field = ?1 AND asset_tag_value.included = 1
+                 ORDER BY asset_tag_value.sort_value {dir}, asset_tag_value.asset_id {dir}
+                 LIMIT ?2 OFFSET ?3"
+            )
+        } else {
+            format!(
+                "SELECT asset_id FROM asset_tag_value
+                 WHERE field = ?1 AND included = 1
+                 ORDER BY sort_value {dir}, asset_id {dir}
+                 LIMIT ?2 OFFSET ?3"
+            )
+        }
     }
 
-    fn untagged_sql(&self) -> String {
+    fn untagged_sql(&self, prep: bool) -> String {
         let dir = sql_direction(self.direction);
+        let col = if prep { "asset.track_id" } else { "asset.id" };
         format!(
-            "SELECT asset.id FROM asset INDEXED BY asset_included_id
+            "SELECT {col} FROM asset INDEXED BY asset_included_id
              WHERE asset.included = 1 AND NOT EXISTS (
                  SELECT 1 FROM asset_tag_value
                  WHERE asset_tag_value.asset_id = asset.id AND asset_tag_value.field = ?1
@@ -1066,6 +1292,7 @@ impl TagSort {
     fn ids(
         &self,
         connection: &Connection,
+        prep: bool,
         offset: u32,
         limit: Option<u32>,
     ) -> Result<Vec<i64>, DbError> {
@@ -1079,7 +1306,7 @@ impl TagSort {
         let mut ids: Vec<i64> = Vec::new();
         if offset < tagged {
             ids = connection
-                .prepare_cached(&self.tagged_sql())?
+                .prepare_cached(&self.tagged_sql(prep))?
                 .query_map(params![field, wanted, offset], |row| row.get(0))?
                 .collect::<Result<_, _>>()?;
         }
@@ -1087,7 +1314,7 @@ impl TagSort {
         if still_wanted.is_none_or(|left| left > 0) {
             let skip = offset.saturating_sub(tagged);
             let untagged: Vec<i64> = connection
-                .prepare_cached(&self.untagged_sql())?
+                .prepare_cached(&self.untagged_sql(prep))?
                 .query_map(params![field, still_wanted.unwrap_or(-1), skip], |row| {
                     row.get(0)
                 })?
@@ -1097,9 +1324,9 @@ impl TagSort {
         Ok(ids)
     }
 
-    fn explain(&self, connection: &Connection) -> Result<Vec<String>, DbError> {
+    fn explain(&self, connection: &Connection, prep: bool) -> Result<Vec<String>, DbError> {
         let mut steps = Vec::new();
-        for sql in [self.tagged_sql(), self.untagged_sql()] {
+        for sql in [self.tagged_sql(prep), self.untagged_sql(prep)] {
             let mut statement = connection.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
             let plan = statement
                 .query_map(params![self.field.name(), 200, 0], |row| row.get(3))?

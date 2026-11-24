@@ -10,7 +10,7 @@ use resonance_core::columns::LibraryColumn;
 use resonance_core::filter::{Condition, FieldFilter, FilterTerm, parse_command};
 use resonance_core::library::{AudioFacts, AudioFormat, ScannedFile, TagField};
 use resonance_core::quick_filters::{QuickFilterBar, QuickFilterChange};
-use resonance_core::search::{FilterPill, TrackQuery};
+use resonance_core::search::{FilterPill, SortDirection, TrackQuery, TrackSortField};
 use resonance_db::{ArtworkStore, Database, DbError};
 
 fn file(path: &str, format: AudioFormat, bitrate: u32, tags: &[(TagField, &str)]) -> ScannedFile {
@@ -365,4 +365,78 @@ fn a_condition_built_in_code_reads_the_same_as_its_command() {
         ..TrackQuery::default()
     };
     assert_eq!(titles(&db, &built), shown(&db, &["bitrate < 320"]));
+}
+
+#[test]
+fn prep_track_page_paginates_supports_tag_sort_and_uses_missing_index() {
+    let mut db = library();
+    let all_ids = db.prep_track_ids(&TrackQuery::default()).unwrap();
+    assert_eq!(all_ids.len(), 5);
+
+    let (total_a, page_a) = db.prep_track_page(&TrackQuery::default(), 0, 2).unwrap();
+    let (total_b, page_b) = db.prep_track_page(&TrackQuery::default(), 4, 2).unwrap();
+    assert_eq!(total_a, 5);
+    assert_eq!(total_b, 5);
+    assert_eq!(page_a, &all_ids[0..2]);
+    assert_eq!(page_b, &all_ids[4..5]);
+
+    let tag_sorted = TrackQuery {
+        sort: TrackSortField::Tag(TagField::Genre),
+        direction: SortDirection::Asc,
+        ..TrackQuery::default()
+    };
+    let tag_all = db.prep_track_ids(&tag_sorted).unwrap();
+    let (tag_total, tag_page) = db.prep_track_page(&tag_sorted, 0, 3).unwrap();
+    assert_eq!(tag_total, 5);
+    assert_eq!(tag_page, &tag_all[0..3]);
+    let tag_plan = db.explain_prep_track_query(&tag_sorted, 0, 50).unwrap();
+    assert!(
+        tag_plan.iter().all(|step| !step.contains("TEMP B-TREE")),
+        "{tag_plan:?}"
+    );
+
+    let extra = db.source("D:/More").unwrap();
+    let mut extra_files = Vec::new();
+    for i in 0..100 {
+        let tags: &[(TagField, &str)] = if i < 5 {
+            &[(TagField::Title, "Missing Artist")]
+        } else {
+            &[(TagField::Title, "Tagged"), (TagField::Artist, "Someone")]
+        };
+        extra_files.push(file(
+            &format!("Bulk/track_{i:03}.flac"),
+            AudioFormat::Flac,
+            900,
+            tags,
+        ));
+    }
+    db.record_scan(extra, &extra_files).unwrap();
+    let missing_artist = query(&["missing artist"]);
+    let (missing_total, missing_page) = db.prep_track_page(&missing_artist, 0, 50).unwrap();
+    assert!(missing_total >= 5);
+    assert_eq!(missing_page.len(), missing_total as usize);
+    let artist_plan = db.explain_prep_track_query(&missing_artist, 0, 50).unwrap();
+    assert!(
+        artist_plan
+            .iter()
+            .any(|step| step.contains("SEARCH asset USING INTEGER PRIMARY KEY")),
+        "expected selective IN-subquery driving plan, got: {artist_plan:?}"
+    );
+    assert!(
+        artist_plan.iter().all(|step| !step.contains("SCAN source")),
+        "expected source not to drive a full scan, got: {artist_plan:?}"
+    );
+    assert!(
+        !artist_plan.iter().any(|step| step.contains("file_tag")),
+        "{artist_plan:?}"
+    );
+
+    let missing_title = query(&["missing title"]);
+    let title_plan = db.explain_prep_track_query(&missing_title, 0, 50).unwrap();
+    assert!(
+        title_plan
+            .iter()
+            .any(|step| step.contains("asset_missing_title")),
+        "expected asset_missing_title index in plan, got: {title_plan:?}"
+    );
 }

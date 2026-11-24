@@ -8,6 +8,7 @@ use lofty::picture::PictureType;
 use lofty::prelude::{AudioFile, ItemKey, TaggedFileExt};
 use lofty::probe::Probe;
 use lofty::tag::Tag;
+use resonance_core::identify::extract_isrc;
 use resonance_core::library::{AudioFacts, TagField, id3v2_tag_end, is_mp4_ftyp_box};
 
 #[derive(Debug)]
@@ -30,6 +31,8 @@ impl std::error::Error for FileReadError {}
 pub struct FileContents {
     pub audio: AudioFacts,
     pub tags: Vec<(TagField, String)>,
+    /// Embedded ISO 3901 ISRC frame, if any.
+    pub isrc: Option<String>,
     /// The bytes of the picture the file shows as its cover.
     pub front_cover: Option<Vec<u8>>,
 }
@@ -193,9 +196,15 @@ pub fn read(path: &Path) -> Result<FileContents, FileReadError> {
         .filter_map(|field| Some((field, value(&in_file, field)?)))
         .collect();
 
+    let isrc = in_file
+        .iter()
+        .filter_map(|tag| tag.get_string(ItemKey::Isrc))
+        .find_map(extract_isrc);
+
     Ok(FileContents {
         audio,
         tags,
+        isrc,
         front_cover: front_cover(&in_file),
     })
 }

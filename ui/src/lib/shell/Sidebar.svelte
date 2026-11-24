@@ -37,6 +37,8 @@
     activeSpace: SpaceName;
     /** Missing until the library has been read. */
     trackCount: number | null;
+    /** Tracks with pending Prep proposals, shown calmly when non-zero. */
+    prepCount?: number | null;
     /** Pauses the ambient dot wave while Mix is playing. */
     wavePaused?: boolean;
     collections?: LibraryCollection[];
@@ -58,6 +60,7 @@
   let {
     activeSpace,
     trackCount,
+    prepCount = null,
     wavePaused = false,
     collections = [],
     activeCollectionId = null,
@@ -284,7 +287,9 @@
     ? `${space.name} arrives in ${space.arrives}`
     : space.name === 'Library' && activeCollection
       ? `Library · ${activeCollection.name}`
-      : space.name}
+      : space.name === 'Prep' && prepCount != null && prepCount > 0
+        ? `Prep · ${prepCount.toLocaleString('en-GB')} pending`
+        : space.name}
   {@const subActive = space.name === 'Library' && activeCollectionId != null}
   <Tooltip text={tooltipText} shortcut={space.arrives ? undefined : String(index + 1)} side="right">
     <button
@@ -305,6 +310,8 @@
       <span class="label">{space.name}</span>
       {#if space.name === 'Library' && trackCount !== null}
         <span class="count numeric">{trackCount.toLocaleString('en-GB')}</span>
+      {:else if space.name === 'Prep' && prepCount != null && prepCount > 0}
+        <span class="count numeric">{prepCount.toLocaleString('en-GB')}</span>
       {/if}
     </button>
   </Tooltip>

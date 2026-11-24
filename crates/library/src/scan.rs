@@ -318,6 +318,7 @@ where
     let (
         artwork_store,
         artwork_unread,
+        isrc_unread,
         source,
         include_subfolders,
         excluded_subfolders,
@@ -338,9 +339,11 @@ where
             Some(_) => db.paths_without_artwork_read(source)?,
             None => HashSet::new(),
         };
+        let isrc_unread = db.paths_without_isrc_read(source)?;
         (
             db.artwork_store(),
             artwork_unread,
+            isrc_unread,
             source,
             include_subfolders,
             excluded_subfolders,
@@ -407,6 +410,7 @@ where
         let mut prepared: Vec<PreparedScanFile> = Vec::new();
         let mut chunk_unchanged = 0usize;
         let mut covers: Vec<(String, Option<StoredArtwork>)> = Vec::new();
+        let mut isrcs: Vec<(String, Option<String>)> = Vec::new();
 
         for path in chunk {
             check_cancelled()?;
@@ -436,35 +440,43 @@ where
             let is_new_path = match stamps.get(&stored) {
                 Some(before) if *before == now => {
                     chunk_unchanged += 1;
-                    // Scanned before covers were read: read the cover once, nothing else.
-                    if let Some(store) = &artwork_store
-                        && artwork_unread.contains(&stored)
+                    let need_art = artwork_store
+                        .as_ref()
+                        .is_some_and(|_| artwork_unread.contains(&stored));
+                    let need_isrc = isrc_unread.contains(&stored);
+                    if (need_art || need_isrc)
+                        && let Ok(contents) = file_tags::read(path)
                     {
-                        let cover = file_tags::read(path)
-                            .ok()
-                            .and_then(|contents| store_cover(store, contents.front_cover));
-                        covers.push((stored, cover));
+                        if let Some(store) = &artwork_store
+                            && need_art
+                        {
+                            covers.push((stored.clone(), store_cover(store, contents.front_cover)));
+                        }
+                        if need_isrc {
+                            isrcs.push((stored.clone(), contents.isrc));
+                        }
                     }
                     continue;
                 }
                 Some(_) => false,
                 None => true,
             };
-            let (audio, tags) = match file_tags::read(path) {
+            let (audio, tags, isrc) = match file_tags::read(path) {
                 Ok(contents) => {
                     if let Some(store) = &artwork_store {
                         covers.push((stored.clone(), store_cover(store, contents.front_cover)));
                     }
-                    (Some(contents.audio), contents.tags)
+                    (Some(contents.audio), contents.tags, contents.isrc)
                 }
                 Err(source) => {
                     unreadable.push(Unreadable {
                         path: shown,
                         reason: source.to_string(),
                     });
-                    (None, Vec::new())
+                    (None, Vec::new(), None)
                 }
             };
+            isrcs.push((stored.clone(), isrc));
             let scanned = ScannedFile {
                 path: stored,
                 size_bytes: now.size_bytes,
@@ -513,8 +525,10 @@ where
             batch_to_record.push(item.scanned);
         }
 
-        let wrote_changes =
-            !resolved_moves.is_empty() || !batch_to_record.is_empty() || !covers.is_empty();
+        let wrote_changes = !resolved_moves.is_empty()
+            || !batch_to_record.is_empty()
+            || !covers.is_empty()
+            || !isrcs.is_empty();
         if wrote_changes {
             let mut db = database.lock().unwrap_or_else(PoisonError::into_inner);
             for mv in &resolved_moves {
@@ -527,6 +541,9 @@ where
             }
             if !batch_to_record.is_empty() {
                 db.record_scan(source, &batch_to_record)?;
+            }
+            if !isrcs.is_empty() {
+                db.set_assets_isrc(source, &isrcs)?;
             }
             if !covers.is_empty() {
                 db.record_scanned_artwork(source, &covers)?;

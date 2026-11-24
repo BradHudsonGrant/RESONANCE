@@ -206,7 +206,7 @@
                   ? Math.min(job.done_items, job.total_items)
                   : 0}
               >
-                <div class="progress-fill" style:width={`${percent}%`}></div>
+                <div class="progress-fill" style:transform={`scaleX(${percent / 100})`}></div>
               </div>
             </li>
           {/each}
@@ -371,9 +371,11 @@
   }
 
   .progress-fill {
+    width: 100%;
     height: 100%;
     background: var(--color-text);
-    transition: width var(--duration-fast) var(--ease-out);
+    transform-origin: left center;
+    transition: transform var(--duration-fast) var(--ease-out);
   }
 
   .job-error {

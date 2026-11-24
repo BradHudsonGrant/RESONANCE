@@ -1,4 +1,5 @@
 <script lang="ts" module>
+  import type { IdentificationSettings } from '../ipc/bindings/IdentificationSettings';
   import type { ProviderKeyKind } from '../ipc/bindings/ProviderKeyKind';
   import type { ProviderKeyStatus } from '../ipc/bindings/ProviderKeyStatus';
 
@@ -6,6 +7,10 @@
     status: () => Promise<ProviderKeyStatus[]>;
     save: (provider: ProviderKeyKind, value: string) => Promise<ProviderKeyStatus>;
     clear: (provider: ProviderKeyKind) => Promise<ProviderKeyStatus>;
+    identificationSettings?: () => Promise<IdentificationSettings>;
+    saveIdentificationSettings?: (
+      settings: IdentificationSettings,
+    ) => Promise<IdentificationSettings>;
   }
 </script>
 
@@ -13,7 +18,9 @@
   import Button from '../design/Button.svelte';
   import DataTag from '../design/DataTag.svelte';
   import Icon from '../design/Icon.svelte';
+  import ModularDivider from '../design/ModularDivider.svelte';
   import TextInput from '../design/TextInput.svelte';
+  import { openExternalUrl } from '../ipc/external';
 
   interface Props {
     client?: ProviderKeysClient;
@@ -25,6 +32,9 @@
     label: string;
     name: string;
     paid: boolean;
+    hint?: string;
+    registerUrl: string;
+    registerLabel: string;
   }
 
   const ROWS: ProviderRow[] = [
@@ -33,14 +43,27 @@
       label: 'AcoustID application key',
       name: 'AcoustID key',
       paid: false,
+      hint: 'Use the Application API key from your AcoustID app registration, not a User API key',
+      registerUrl: 'https://acoustid.org/my-applications',
+      registerLabel: 'Register app on AcoustID',
     },
     {
       provider: 'discogs',
       label: 'Discogs personal access token',
       name: 'Discogs token',
       paid: false,
+      registerUrl: 'https://www.discogs.com/settings/developers',
+      registerLabel: 'Create token on Discogs',
     },
-    { provider: 'audd', label: 'AudD API token', name: 'AudD token', paid: true },
+    {
+      provider: 'audd',
+      label: 'AudD API token',
+      name: 'AudD token',
+      paid: true,
+      hint: 'Paid excerpt fallback only called when free steps are uncertain',
+      registerUrl: 'https://dashboard.audd.io/',
+      registerLabel: 'Open AudD dashboard',
+    },
   ];
 
   let { client, active = true }: Props = $props();
@@ -52,6 +75,7 @@
     audd: false,
   });
   let drafts = $state<Record<ProviderKeyKind, string>>({ acoustid: '', discogs: '', audd: '' });
+  let verifyPreviews = $state(true);
   let paidOpen = $state(false);
   let busy = $state(false);
   let status = $state('');
@@ -77,10 +101,47 @@
       .catch((failure: unknown) => {
         if (!cancelled) error = failure instanceof Error ? failure.message : String(failure);
       });
+    if (client.identificationSettings) {
+      void client
+        .identificationSettings()
+        .then((settings) => {
+          if (!cancelled) verifyPreviews = settings.verify_audio_previews;
+        })
+        .catch(() => {});
+    }
     return () => {
       cancelled = true;
     };
   });
+
+  async function toggleVerifyPreviews(checked: boolean) {
+    if (!client?.saveIdentificationSettings || busy) return;
+    const previous = verifyPreviews;
+    verifyPreviews = checked;
+    await run(async () => {
+      try {
+        const saved = await client.saveIdentificationSettings!({
+          verify_audio_previews: checked,
+        });
+        verifyPreviews = saved.verify_audio_previews;
+        return saved.verify_audio_previews
+          ? 'Preview verification turned on.'
+          : 'Preview verification turned off.';
+      } catch (failure) {
+        verifyPreviews = previous;
+        throw failure;
+      }
+    });
+  }
+
+  async function openRegistration(url: string) {
+    error = '';
+    try {
+      await openExternalUrl(url);
+    } catch (failure) {
+      error = failure instanceof Error ? failure.message : String(failure);
+    }
+  }
 
   async function run(action: () => Promise<string>) {
     if (!client || busy) return;
@@ -134,6 +195,7 @@
         <TextInput
           label={row.label}
           hideLabel
+          size="md"
           type="password"
           autocomplete="off"
           spellcheck={false}
@@ -144,7 +206,7 @@
       </div>
       <Button
         variant="primary"
-        size="sm"
+        size="md"
         type="submit"
         disabled={busy || !client || !drafts[row.provider].trim()}
       >
@@ -152,13 +214,26 @@
       </Button>
       <Button
         variant="quiet"
-        size="sm"
+        size="md"
         disabled={busy || !client || !configured[row.provider]}
         aria-label={`Clear ${row.name}`}
         onclick={() => clear(row)}
       >
         Clear
       </Button>
+    </div>
+    <div class="key-meta">
+      {#if row.hint}
+        <p class="key-hint">{row.hint}</p>
+      {/if}
+      <button
+        type="button"
+        class="register-link"
+        onclick={() => void openRegistration(row.registerUrl)}
+      >
+        <Icon name="external-link" size="xs" />
+        <span>{row.registerLabel}</span>
+      </button>
     </div>
   </form>
 {/snippet}
@@ -186,6 +261,23 @@
     {#each paidRows as row (row.provider)}
       {@render keyRow(row)}
     {/each}
+  </div>
+
+  <ModularDivider />
+
+  <div class="verify-block">
+    <label class="verify-check">
+      <input
+        type="checkbox"
+        checked={verifyPreviews}
+        disabled={busy || !client?.saveIdentificationSettings}
+        onchange={(event) => void toggleVerifyPreviews(event.currentTarget.checked)}
+      />
+      <span>Verify uncertain matches against 30 s audio previews</span>
+    </label>
+    <p class="note">
+      Checks short streaming previews in memory without saving preview audio or artwork to disk.
+    </p>
   </div>
 
   {#if status}
@@ -274,9 +366,65 @@
     color: var(--color-text);
   }
 
+  .key-meta {
+    display: grid;
+    gap: var(--space-1);
+    justify-items: start;
+  }
+
+  .key-hint {
+    margin: 0;
+    color: var(--color-text-2);
+    font-size: var(--text-xs);
+  }
+
+  .register-link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-text-2);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+    cursor: pointer;
+    transition: color var(--duration-fast) var(--ease-out);
+  }
+
+  .register-link:hover {
+    color: var(--color-text);
+  }
+
+  .verify-block {
+    display: grid;
+    gap: var(--space-1-5);
+  }
+
+  .verify-check {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    cursor: pointer;
+  }
+
+  .verify-check input {
+    width: var(--checkbox-size);
+    height: var(--checkbox-size);
+    flex-shrink: 0;
+    margin: 0;
+    accent-color: var(--color-text);
+  }
+
   @media (forced-colors: active) {
     .disclosure {
       color: ButtonText;
+    }
+
+    .register-link {
+      color: LinkText;
     }
   }
 </style>

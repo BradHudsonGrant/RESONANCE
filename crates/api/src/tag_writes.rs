@@ -6,11 +6,11 @@ use resonance_library::write_tags::{
 
 use crate::Api;
 use crate::command::{
-    FailedTagWrite, FieldChange, FileTagWrite, JournalOperation, OperationKindName,
-    OperationStateName, TagWriteReport, UndoReport,
+    AcceptedTagWriteReport, FailedTagWrite, FieldChange, FileTagWrite, JournalOperation,
+    OperationKindName, OperationStateName, TagName, TagWriteReport, UndoReport,
 };
 use crate::error::ApiError;
-use crate::staging::tag_name;
+use crate::staging::{fields_of, tag_name};
 
 const MAX_RECENT_OPERATIONS: u32 = 200;
 
@@ -59,6 +59,9 @@ fn file_tag_write(file: PlannedFile) -> FileTagWrite {
 
 fn api_error(error: TagWriteError) -> ApiError {
     match error {
+        TagWriteError::Database(resonance_db::DbError::DecisionChanged) => {
+            ApiError::invalid_input(error)
+        }
         TagWriteError::Database(source) => ApiError::library_unreadable(source),
         TagWriteError::Journal(_) => ApiError::internal(error),
         _ => ApiError::invalid_input(error),
@@ -77,10 +80,45 @@ impl Api {
 
     pub(crate) fn apply_tag_writes(&self, track_ids: &[i64]) -> Result<TagWriteReport, ApiError> {
         let report = apply_tag_writes(&self.core.library, track_ids).map_err(api_error)?;
-        if report.written > 0 {
+        Ok(self.tag_write_report(report))
+    }
+
+    pub(crate) fn accept_and_write(
+        &self,
+        track_ids: &[i64],
+        fields: Option<&[TagName]>,
+        include_artwork: bool,
+        expected_review: Option<&str>,
+    ) -> Result<AcceptedTagWriteReport, ApiError> {
+        if track_ids.is_empty() {
+            return Err(ApiError::invalid_input("Select at least one track."));
+        }
+        if expected_review.is_some() && track_ids.len() != 1 {
+            return Err(ApiError::invalid_input(
+                "A reviewed selection needs one track.",
+            ));
+        }
+        let fields = fields.map(fields_of);
+        let report = write_tags::accept_reviewed_and_write(
+            &self.core.library,
+            track_ids,
+            fields.as_deref(),
+            include_artwork,
+            expected_review,
+        )
+        .map_err(api_error)?;
+        Ok(AcceptedTagWriteReport {
+            library_fields: report.library_fields,
+            reverted_fields: report.reverted_fields,
+            files: self.tag_write_report(report),
+        })
+    }
+
+    fn tag_write_report(&self, report: write_tags::TagWriteReport) -> TagWriteReport {
+        if report.operation_id.is_some() {
             self.library_edited();
         }
-        Ok(TagWriteReport {
+        TagWriteReport {
             operation_id: report.operation_id,
             written: report.written,
             failed: report
@@ -92,7 +130,7 @@ impl Api {
                     reason: failed.problem.to_string(),
                 })
                 .collect(),
-        })
+        }
     }
 
     pub(crate) fn recent_operations(&self, limit: u32) -> Result<Vec<JournalOperation>, ApiError> {
@@ -116,9 +154,7 @@ impl Api {
             operation,
             restored,
         } = undo_operation(&self.core.library, operation_id).map_err(api_error)?;
-        if restored > 0 {
-            self.library_edited();
-        }
+        self.library_edited();
         Ok(UndoReport {
             operation: journal_operation(operation),
             restored,

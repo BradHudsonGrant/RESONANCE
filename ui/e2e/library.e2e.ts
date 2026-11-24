@@ -1,4 +1,13 @@
-import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test } from '@playwright/test';
@@ -1221,6 +1230,7 @@ test('a large rename in Activity pauses, holds its place, resumes and finishes',
     }
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     const settings = page.getByRole('dialog', { name: 'Settings' });
+    await expect(settings.getByRole('button', { name: /Remove/ }).first()).toBeVisible();
     const batchCard = settings.getByRole('region', { name: /pause-batch/i });
     if ((await batchCard.count()) > 0) {
       await batchCard.getByRole('button', { name: /Remove/ }).click();
@@ -1236,7 +1246,7 @@ test('a batch of 50 mixed files goes from untagged to tagged in Prep using the k
 }) => {
   await page.setViewportSize({ width: 1586, height: 992 });
   await page.goto('/');
-  await expect(page.getByRole('grid', { name: 'Tracks' })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole('combobox', { name: 'Commands' })).toBeVisible({ timeout: 10_000 });
 
   const prepFolder = join(musicFolder, '..', 'prep-batch-50');
   const releaseFolder = join(prepFolder, '[VEC001] Vector Recordings - Horizon EP (2024)');
@@ -1300,99 +1310,82 @@ test('a batch of 50 mixed files goes from untagged to tagged in Prep using the k
       makeAiff(index),
     );
   }
-  // Track 50 has no artist in its filename, so its local confidence is 78% (< 90%) and stays in
-  // the queue after Shift+A for inline keyboard editing.
-  writeFileSync(join(releaseFolder, '50 - Horizon Finale.wav'), makeWav(50));
-
+  writeFileSync(join(releaseFolder, '50 - Kaden - Horizon Finale.wav'), makeWav(50));
+  const files = readdirSync(releaseFolder).map((name) => join(releaseFolder, name));
+  const id3ArtistFrame = Buffer.from([0x54, 0x50, 0x45, 0x31]);
   try {
-    // Prepare the library so only the 50 new untagged mixed files are pending in Prep.
-    await page.evaluate(
-      async ({ folder, rootMusicFolder }) => {
-        const socket = new WebSocket(new URL('/core', location.href));
-        await new Promise((ready) => (socket.onopen = ready));
-        let next = 0;
-        const call = <T>(command: string, params?: unknown) =>
-          new Promise<T>((resolve, reject) => {
-            const id = ++next;
-            socket.addEventListener('message', (event) => {
-              if (typeof event.data !== 'string') return;
-              const reply = JSON.parse(event.data);
-              if (reply.id !== id) return;
-              if (reply.error) reject(new Error(reply.error.message));
-              else resolve(reply.response.result as T);
-            });
-            socket.send(
-              JSON.stringify({ id, request: params ? { command, params } : { command } }),
-            );
-          });
-        await call('scan', { folder: rootMusicFolder });
-        const dirtyBefore = await call<Array<{ track_id: number }>>('preview_tag_writes', {
-          track_ids: [],
-        });
-        if (dirtyBefore.length > 0) {
-          await call('apply_tag_writes', {
-            track_ids: dirtyBefore.map((d) => d.track_id),
-          });
-        }
-        const before = await call<{ items: Array<{ track: { id: number } }> }>('prep_queue', {
-          proposals_only: true,
-        });
-        if (before.items.length > 0) {
-          await call('skip_prep_items', {
-            track_ids: before.items.map((item) => item.track.id),
-            fields: [],
-          });
-        }
-        await call('scan', { folder });
+    await page.evaluate(async (folder) => {
+      const socket = new WebSocket(new URL('/core', location.href));
+      await new Promise((resolve) => (socket.onopen = resolve));
+      const scanned = new Promise<void>((resolve, reject) => {
+        socket.onmessage = (event) => {
+          if (typeof event.data !== 'string') return;
+          const reply = JSON.parse(event.data);
+          if (reply.id !== 1) return;
+          if (reply.error) reject(new Error(reply.error.message));
+          else resolve();
+        };
+      });
+      socket.send(JSON.stringify({ id: 1, request: { command: 'scan', params: { folder } } }));
+      try {
+        await scanned;
+      } finally {
         socket.close();
-      },
-      { folder: prepFolder, rootMusicFolder: musicFolder },
-    );
+      }
+    }, prepFolder);
+    await page.reload();
+    const library = page.getByRole('grid', { name: 'Tracks' });
+    const search = page.getByRole('combobox', { name: 'Commands' });
+    await search.fill('Horizon');
+    await expect(page.getByText('50 tracks', { exact: true }).first()).toBeVisible();
+    await library.getByRole('checkbox', { name: 'Select all tracks' }).press('Space');
+    await page.getByRole('button', { name: 'Open in Prep' }).press('Enter');
 
-    // Zero mouse clicks from here on: press 2 to open Prep.
-    await page.keyboard.press('2');
-    const prep = page.getByRole('region', { name: 'Prep' });
-    await expect(prep.getByRole('heading', { name: 'Prep', exact: true })).toBeVisible();
-    await expect(prep.getByText('50 pending')).toBeVisible({ timeout: 10_000 });
-    await expect(prep.getByRole('button', { name: /Accept above 90% \(49 tracks/ })).toBeVisible();
-
-    // Verify advancing to the next item with ArrowDown renders inside one 16 ms frame.
-    const advanceMs = await page.evaluate(async () => {
-      const start = performance.now();
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-      return performance.now() - start;
-    });
-    expect(advanceMs).toBeLessThan(32);
-
-    // Accept all 49 tracks above the 90% threshold with Shift+A.
-    await page.keyboard.press('Shift+A');
-    await expect(prep.getByText('1 pending')).toBeVisible();
-    await expect(prep.getByText(/49 to write/)).toBeVisible();
-    await expect(prep.getByRole('heading', { name: /50 - Horizon Finale/ })).toBeVisible();
-
-    // Edit the remaining 50th track inline with E, move to Artist with ArrowDown, type Kaden,
-    // save with Enter, and accept its remaining proposed fields with Enter.
-    await page.keyboard.press('e');
-    await expect(prep.getByRole('textbox', { name: 'Edit Title' })).toBeFocused();
+    const prep = page.getByRole('region', { name: 'Prep', exact: true });
+    const filter = prep.getByRole('combobox', { name: 'Filter tracks' });
+    await filter.focus();
+    await page.keyboard.press('Home');
     await page.keyboard.press('ArrowDown');
-    await expect(prep.getByRole('textbox', { name: 'Edit Artist' })).toBeFocused();
-    await page.keyboard.type('Kaden');
     await page.keyboard.press('Enter');
-    await expect(prep.getByRole('textbox', { name: 'Edit Artist' })).toHaveCount(0);
-
-    await page.keyboard.press('Enter');
-    await expect(prep.getByRole('heading', { name: 'Nothing waiting in Prep' })).toBeVisible();
-    await expect(prep.getByText(/50 to write/)).toBeVisible();
-
-    // Open Write tags sheet with W and confirm writing all 50 files to disk with Enter.
-    await page.keyboard.press('w');
-    const writeDialog = page.getByRole('dialog', { name: 'Write tags to files' });
-    await expect(writeDialog).toBeVisible();
-    await expect(writeDialog.getByRole('button', { name: 'Write tags to 50 files' })).toBeEnabled();
-    await page.keyboard.press('Enter');
-    await expect(writeDialog).toBeHidden({ timeout: 20_000 });
-    await expect(prep.getByText('Wrote tags to 50 files')).toBeVisible();
+    await expect(filter).toHaveValue('artist');
+    const selectAll = prep.getByRole('checkbox', { name: 'Select all tracks' });
+    await selectAll.press('Space');
+    await expect(prep.getByText('50 selected')).toBeVisible();
+    for (const [width, height] of [
+      [1100, 700],
+      [760, 480],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      const firstTrack = prep.locator('.track-name').first();
+      await expect(firstTrack).toBeInViewport();
+      await expect(page.getByRole('combobox', { name: 'Commands' })).toBeHidden();
+      if (width === 760) {
+        await expect(prep.locator('.track-name').nth(2)).toBeInViewport();
+        await page.screenshot({ path: test.info().outputPath('prep-list-760.png') });
+        await firstTrack.press('Enter');
+        await expect(prep.getByRole('button', { name: 'Back to tracks' })).toBeFocused();
+      }
+      await expect(prep.getByRole('button', { name: 'Accept Artist' })).toBeInViewport();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      );
+      await page.screenshot({ path: test.info().outputPath('prep-' + width + '.png') });
+      if (width === 760) {
+        await page.keyboard.press('Escape');
+        await expect(firstTrack).toBeFocused();
+      }
+    }
+    await page.setViewportSize({ width: 1586, height: 992 });
+    await page.keyboard.press('Shift+A');
+    await expect(prep.getByText('Saved to 50 files')).toBeVisible({ timeout: 30_000 });
+    await expect(prep.getByRole('heading', { name: 'No tracks missing artist' })).toBeVisible();
+    expect(files.every((file) => readFileSync(file).includes(id3ArtistFrame))).toBe(true);
+    await prep.getByRole('button', { name: 'Undo save' }).press('Enter');
+    await expect(prep.getByText('Restored 50 files')).toBeVisible({ timeout: 30_000 });
+    expect(files.every((file) => !readFileSync(file).includes(id3ArtistFrame))).toBe(true);
+    await selectAll.press('Space');
+    await prep.getByRole('button', { name: 'Accept selected' }).press('Enter');
+    await expect(prep.getByText('Saved to 50 files')).toBeVisible({ timeout: 30_000 });
 
     // Verify all 50 mixed files on disk now hold their tags and have zero unwritten changes left.
     const verified = await page.evaluate(async () => {

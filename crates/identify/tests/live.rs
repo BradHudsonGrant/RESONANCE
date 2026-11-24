@@ -32,6 +32,7 @@ fn input(artist: &str, title: &str, duration_ms: u64) -> IdentificationInput {
         duration_ms: Some(duration_ms),
         fingerprint: None,
         fingerprint_duration_s: None,
+        file_isrc: None,
         tags: vec![
             (TagField::Artist, artist.to_owned()),
             (TagField::Title, title.to_owned()),

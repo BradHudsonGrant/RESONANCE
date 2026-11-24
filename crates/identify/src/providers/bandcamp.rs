@@ -1,7 +1,10 @@
-//! A Bandcamp album or track page the user pasted. Only pages the user asks for are read, and
-//! only the structured data the page publishes for search engines.
+//! A Bandcamp album or track page the user pasted or stored in file comments. Only structured
+//! JSON-LD published for search engines is read; no search scraping.
 
-use resonance_core::identify::{Candidate, ReleaseUrl, split_mix};
+use resonance_core::identify::{
+    Candidate, ReleaseKind, ReleaseUrl, find_catno, is_placeholder_artist, split_artist_from_title,
+    split_mix, strip_promo_and_catno,
+};
 use resonance_core::providers::ProviderKey;
 use serde_json::Value;
 
@@ -11,7 +14,7 @@ use crate::provider::{
 };
 use crate::rate::RateLimit;
 
-const ID: &str = "bandcamp";
+pub(crate) const ID: &str = "bandcamp";
 
 pub struct Bandcamp;
 
@@ -62,50 +65,164 @@ fn structured_data(page: &str) -> Option<&str> {
 fn candidates(data: &Value, url: &str) -> Vec<Candidate> {
     let artist = data.get("byArtist").and_then(|artist| text(artist, "name"));
     let year = text(data, "datePublished").as_deref().and_then(year_in);
-    let label = data
+    let publisher_name = data
         .get("publisher")
-        .and_then(|publisher| text(publisher, "name"))
+        .and_then(|publisher| text(publisher, "name"));
+    let label = publisher_name
+        .clone()
         .filter(|publisher| Some(publisher) != artist.as_ref());
+    let artwork_url = image_url(data);
+    let artwork_provider = artwork_url.as_ref().map(|_| ID.to_owned());
+    let (genre, subgenre) = keywords_genres(data);
+
     let base = Candidate {
         provider: ID.to_owned(),
-        artist: artist.clone(),
+        artist,
         label,
         year,
+        genre,
+        subgenre,
         url: Some(url.to_owned()),
+        artwork_url,
+        artwork_provider,
         ..Candidate::default()
     };
-    let track = |item: &Value, album: Option<String>| {
-        let (title, mix) = split_mix(&text(item, "name")?);
-        Some(Candidate {
-            artist: item
+
+    let track =
+        |item: &Value, album: Option<String>, position: Option<String>, kind: ReleaseKind| {
+            let (clean_raw, name_catno) = strip_promo_and_catno(&text(item, "name")?);
+            let catno = album
+                .as_deref()
+                .and_then(find_catno)
+                .or(name_catno)
+                .or_else(|| text(data, "description").as_deref().and_then(find_catno));
+            let raw_artist = item
                 .get("byArtist")
                 .and_then(|artist| text(artist, "name"))
-                .or_else(|| base.artist.clone()),
-            title: Some(title),
-            mix,
-            album,
-            duration_ms: text(item, "duration").as_deref().and_then(iso_duration),
-            ..base.clone()
-        })
-    };
+                .or_else(|| base.artist.clone());
+            let (artist, title, mix, track_label) = if let Some((left, right)) =
+                split_artist_from_title(&clean_raw)
+                && (raw_artist.is_none()
+                    || raw_artist.as_deref() == publisher_name.as_deref()
+                    || raw_artist.as_deref().is_some_and(is_placeholder_artist))
+            {
+                let (title, mix) = split_mix(&right);
+                (
+                    Some(left),
+                    title,
+                    mix,
+                    base.label.clone().or_else(|| publisher_name.clone()),
+                )
+            } else {
+                let (title, mix) = split_mix(&clean_raw);
+                (raw_artist, title, mix, base.label.clone())
+            };
+            let item_art = image_url(item).or_else(|| base.artwork_url.clone());
+            let item_art_provider = item_art.as_ref().map(|_| ID.to_owned());
+            let (item_genre, item_subgenre) = keywords_genres(item);
+            Some(Candidate {
+                artist,
+                title: Some(title),
+                mix,
+                album,
+                label: track_label,
+                catno,
+                track_number: position,
+                genre: item_genre.or_else(|| base.genre.clone()),
+                subgenre: item_subgenre.or_else(|| base.subgenre.clone()),
+                artwork_url: item_art,
+                artwork_provider: item_art_provider,
+                release_kind: kind,
+                duration_ms: text(item, "duration").as_deref().and_then(iso_duration),
+                ..base.clone()
+            })
+        };
+
     match data.get("@type").and_then(Value::as_str) {
         Some("MusicRecording") => track(
             data,
             data.get("inAlbum").and_then(|album| text(album, "name")),
+            None,
+            ReleaseKind::SingleOrEp,
         )
         .into_iter()
         .collect(),
         _ => {
             let album = text(data, "name");
-            data.get("track")
+            let elements = data
+                .get("track")
                 .and_then(|tracks| tracks.get("itemListElement"))
-                .and_then(Value::as_array)
+                .and_then(Value::as_array);
+            let count = elements.map_or(0, Vec::len);
+            let kind = if (1..=6).contains(&count) {
+                ReleaseKind::SingleOrEp
+            } else if count > 6 {
+                ReleaseKind::Album
+            } else {
+                ReleaseKind::Unknown
+            };
+            elements
                 .into_iter()
                 .flatten()
-                .filter_map(|element| track(element.get("item")?, album.clone()))
+                .filter_map(|element| {
+                    let pos = element
+                        .get("position")
+                        .and_then(Value::as_u64)
+                        .filter(|&p| p > 0)
+                        .map(|p| p.to_string());
+                    track(element.get("item")?, album.clone(), pos, kind)
+                })
                 .collect()
         }
     }
+}
+
+fn image_url(value: &Value) -> Option<String> {
+    match value.get("image") {
+        Some(Value::String(s)) if s.trim().starts_with("https://") => Some(s.trim().to_owned()),
+        Some(Value::Array(arr)) => arr
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .find(|s| s.starts_with("https://"))
+            .map(str::to_owned),
+        Some(Value::Object(map)) => map
+            .get("url")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| s.starts_with("https://"))
+            .map(str::to_owned),
+        _ => None,
+    }
+}
+
+fn keywords_genres(value: &Value) -> (Option<String>, Option<String>) {
+    let tags: Vec<String> = match value.get("keywords") {
+        Some(Value::Array(arr)) => arr
+            .iter()
+            .filter_map(|entry| entry.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect(),
+        Some(Value::String(s)) => s
+            .split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .map(str::to_owned)
+            .collect(),
+        _ => Vec::new(),
+    };
+    let genre = tags.first().cloned();
+    let subgenre = (tags.len() > 1).then(|| {
+        tags.iter()
+            .skip(1)
+            .take(2)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ")
+    });
+    (genre, subgenre)
 }
 
 /// `P00H06M52S` as milliseconds.
@@ -142,7 +259,9 @@ mod tests {
     fn the_structured_data_is_found_in_the_page() {
         let page = r#"<html><script type="application/ld+json">
             {"@type":"MusicRecording","name":"Tune (Dub)","duration":"P00H05M00S",
-             "byArtist":{"name":"Someone"},"inAlbum":{"name":"The EP"},
+             "byArtist":{"name":"Someone"},"inAlbum":{"name":"The EP [CAT009]"},
+             "image":"https://f4.bcbits.com/img/a123_10.jpg",
+             "keywords":["House","Deep House","Tech House"],
              "datePublished":"03 May 2019 00:00:00 GMT"}
             </script></html>"#;
         let data = parse_json(ID, structured_data(page).unwrap()).unwrap();
@@ -150,8 +269,65 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].title.as_deref(), Some("Tune"));
         assert_eq!(found[0].mix.as_deref(), Some("Dub"));
-        assert_eq!(found[0].album.as_deref(), Some("The EP"));
+        assert_eq!(found[0].album.as_deref(), Some("The EP [CAT009]"));
+        assert_eq!(found[0].catno.as_deref(), Some("CAT009"));
+        assert_eq!(found[0].genre.as_deref(), Some("House"));
+        assert_eq!(found[0].subgenre.as_deref(), Some("Deep House, Tech House"));
+        assert_eq!(found[0].artwork_provider.as_deref(), Some("bandcamp"));
         assert_eq!(found[0].year, Some(2019));
         assert_eq!(found[0].duration_ms, Some(300_000));
+    }
+
+    #[test]
+    fn bandcamp_label_page_extracts_artist_title_mix_label_and_catno() {
+        let page = r#"<html><script type="application/ld+json">
+            {"@type":"MusicRecording","name":"PREMIERE: Artist A - Night Cut (Dub Mix) [CAT008]","duration":"P00H06M00S",
+             "byArtist":{"name":"Underground Wax"},"publisher":{"name":"Underground Wax"},
+             "description":"Catalog CAT008 on Underground Wax",
+             "image":"https://f4.bcbits.com/img/a999_10.jpg",
+             "keywords":["Electronic","House"]}
+            </script></html>"#;
+        let data = parse_json(ID, structured_data(page).unwrap()).unwrap();
+        let found = candidates(
+            &data,
+            "https://undergroundwax.bandcamp.com/track/artist-a-night-cut",
+        );
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].artist.as_deref(), Some("Artist A"));
+        assert_eq!(found[0].title.as_deref(), Some("Night Cut"));
+        assert_eq!(found[0].mix.as_deref(), Some("Dub Mix"));
+        assert_eq!(found[0].label.as_deref(), Some("Underground Wax"));
+        assert_eq!(found[0].catno.as_deref(), Some("CAT008"));
+        assert_eq!(found[0].genre.as_deref(), Some("Electronic"));
+        assert_eq!(found[0].subgenre.as_deref(), Some("House"));
+    }
+
+    #[test]
+    fn bandcamp_self_released_title_with_mix_dash_preserves_artist_and_omits_label() {
+        let mix_dash_page = r#"<html><script type="application/ld+json">
+            {"@type":"MusicRecording","name":"Night Drive - Dub Mix","duration":"P00H06M00S",
+             "byArtist":{"name":"Some Artist"},"publisher":{"name":"Some Artist"}}
+            </script></html>"#;
+        let data = parse_json(ID, structured_data(mix_dash_page).unwrap()).unwrap();
+        let found = candidates(
+            &data,
+            "https://someartist.bandcamp.com/track/night-drive-dub",
+        );
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].artist.as_deref(), Some("Some Artist"));
+        assert_eq!(found[0].title.as_deref(), Some("Night Drive"));
+        assert_eq!(found[0].mix.as_deref(), Some("Dub Mix"));
+        assert_eq!(found[0].label, None);
+
+        let part_page = r#"<html><script type="application/ld+json">
+            {"@type":"MusicRecording","name":"Prelude - Part 1","duration":"P00H04M00S",
+             "byArtist":{"name":"Some Artist"},"publisher":{"name":"Some Artist"}}
+            </script></html>"#;
+        let part_data = parse_json(ID, structured_data(part_page).unwrap()).unwrap();
+        let part_found = candidates(&part_data, "https://someartist.bandcamp.com/track/prelude");
+        assert_eq!(part_found[0].artist.as_deref(), Some("Some Artist"));
+        assert_eq!(part_found[0].title.as_deref(), Some("Prelude - Part 1"));
+        assert_eq!(part_found[0].mix, None);
+        assert_eq!(part_found[0].label, None);
     }
 }

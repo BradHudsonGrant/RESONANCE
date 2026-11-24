@@ -24,6 +24,9 @@
     onclose: () => void;
     onpreview?: (track: LibraryTrack) => void;
     onrelink?: (track: LibraryTrack) => void;
+    onopeninprep?: (track: LibraryTrack) => void;
+    onidentifyonline?: (track: LibraryTrack) => void;
+    identifying?: boolean;
     ontogglefavourite?: (track: LibraryTrack) => void;
     onaddtocollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
     onremovefromcollection?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
@@ -46,6 +49,9 @@
     onclose,
     onpreview,
     onrelink,
+    onopeninprep,
+    onidentifyonline,
+    identifying = false,
     ontogglefavourite,
     onaddtocollection,
     onremovefromcollection,
@@ -225,6 +231,27 @@
           <p class="format numeric">{audioSummary(track.format, track.audio)}</p>
         </div>
       </div>
+
+      {#if !isMissing && (onopeninprep || onidentifyonline)}
+        <div class="prep-actions">
+          {#if onopeninprep}
+            <Button size="sm" onclick={() => track && onopeninprep(track)}>
+              <Icon name="prep" size="xs" />
+              Open in Prep
+            </Button>
+          {/if}
+          {#if onidentifyonline}
+            <Button
+              size="sm"
+              disabled={identifying}
+              onclick={() => track && onidentifyonline(track)}
+            >
+              <Icon name="search" size="xs" />
+              {identifying ? 'Looking up…' : 'Look up online'}
+            </Button>
+          {/if}
+        </div>
+      {/if}
 
       {#if isMissing}
         <div class="missing-banner" role="status">
@@ -407,6 +434,12 @@
   showFavourite={menuShowFavourite}
   onToggleFavourite={ontogglefavourite}
   onRelink={onrelink}
+  onOpenInPrep={menuShowFavourite && onopeninprep
+    ? (tracks) => tracks[0] && onopeninprep(tracks[0])
+    : undefined}
+  onIdentifyOnline={menuShowFavourite && onidentifyonline
+    ? (tracks) => tracks[0] && onidentifyonline(tracks[0])
+    : undefined}
   onAdd={onaddtocollection}
   onRemove={onremovefromcollection}
   onCreateAndAdd={oncreatecollectionandadd}
@@ -553,6 +586,13 @@
     color: var(--color-text-2);
     font-size: var(--text-sm);
     line-height: var(--leading-mono);
+  }
+
+  .prep-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
   }
 
   .warning {

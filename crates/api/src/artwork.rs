@@ -29,10 +29,14 @@ pub(crate) fn artwork_of(library: &Database, track_id: i64) -> Result<TrackArtwo
             artwork: proposed.artwork.hash,
             provider: display_name(&proposed.provider).to_owned(),
         });
+    let dirty_on_disk = library
+        .has_unwritten_artwork(track_id)
+        .map_err(ApiError::library_unreadable)?;
     Ok(TrackArtwork {
         track_id,
         artwork: shown.map(|artwork| artwork.hash),
         proposed,
+        dirty_on_disk,
     })
 }
 
@@ -88,6 +92,9 @@ impl Api {
                 "There is no track {track_id} in the library."
             )));
         }
+        library
+            .clear_pending_proposed_artwork(track_id)
+            .map_err(ApiError::library_unreadable)?;
         let artwork = artwork_of(&library, track_id)?;
         drop(library);
         self.library_edited();

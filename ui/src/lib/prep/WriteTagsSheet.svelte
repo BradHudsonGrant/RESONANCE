@@ -17,11 +17,18 @@
   interface Props {
     open: boolean;
     trackIds?: number[];
+    scopeLabel?: string | null;
     client: WriteTagsClient;
     onwritten?: (report: TagWriteReport) => void;
   }
 
-  let { open = $bindable(false), trackIds = [], client, onwritten }: Props = $props();
+  let {
+    open = $bindable(false),
+    trackIds = [],
+    scopeLabel = null,
+    client,
+    onwritten,
+  }: Props = $props();
 
   const FIELD_LABELS: Record<TagName, string> = {
     title: 'Title',
@@ -32,7 +39,7 @@
     genre: 'Genre',
     subgenre: 'Subgenre',
     label: 'Label',
-    catno: 'CatNo',
+    catno: 'Cat. no.',
     year: 'Year',
     bpm: 'BPM',
     key: 'Key',
@@ -121,8 +128,13 @@
 <Sheet bind:open title="Write tags to files">
   <form bind:this={formEl} id="write-tags-form" class="write-body" onsubmit={submit}>
     <div class="summary">
-      <MonoLabel text="Pending file writes" tone="secondary" />
-      <p class="summary-line numeric" aria-live="polite">
+      <div class="summary-head">
+        <MonoLabel text="Pending file writes" tone="secondary" />
+        {#if scopeLabel}
+          <span class="scope-note">{scopeLabel}</span>
+        {/if}
+      </div>
+      <p class="summary-line" aria-live="polite">
         {#if loading}
           Checking files…
         {:else if files.length === 0}
@@ -135,9 +147,8 @@
         {/if}
       </p>
       <p class="note">
-        Tags are written into a checked copy in each file's own format (ID3v2.3, Vorbis comments or
-        MP4 atoms) and verified by decoded audio hash before replacing the file. The whole batch can
-        be undone with Ctrl+Z.
+        Resonance verifies the decoded audio of each copy before replacing the file, so your audio
+        stays untouched. Ctrl+Z undoes the whole batch.
       </p>
     </div>
 
@@ -157,8 +168,12 @@
                 <span class="file-status blocked">{file.blocked}</span>
               {:else}
                 <span class="file-status numeric">
-                  {file.fields.length}
-                  {file.fields.length === 1 ? 'field' : 'fields'}{file.cover ? ' + cover' : ''}
+                  {#if file.fields.length === 0 && file.cover}
+                    Cover only
+                  {:else}
+                    {file.fields.length}
+                    {file.fields.length === 1 ? 'field' : 'fields'}{file.cover ? ' + cover' : ''}
+                  {/if}
                 </span>
               {/if}
             </div>
@@ -177,6 +192,11 @@
           </div>
         {/each}
       </div>
+      {#if files.length > 50}
+        <p class="note numeric">
+          Showing first 50 of {files.length.toLocaleString('en-GB')} files
+        </p>
+      {/if}
     {/if}
   </form>
 
@@ -205,6 +225,19 @@
   .summary {
     display: grid;
     gap: var(--space-1-5);
+  }
+
+  .summary-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-2);
+  }
+
+  .scope-note {
+    color: var(--color-text-2);
+    font-size: var(--text-xs);
   }
 
   .summary-line {

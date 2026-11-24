@@ -220,6 +220,116 @@ pub fn encode_base64_url_unpadded(bytes: &[u8]) -> String {
     out
 }
 
+/// Encodes bytes as standard RFC 4648 padded Base64 (`+`, `/`, `=`).
+pub fn encode_base64_standard(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    let (triples, remainder) = bytes.as_chunks::<3>();
+    for &[b0, b1, b2] in triples {
+        let n = (u32::from(b0) << 16) | (u32::from(b1) << 8) | u32::from(b2);
+        out.push(char::from(ALPHABET[((n >> 18) & 0x3f) as usize]));
+        out.push(char::from(ALPHABET[((n >> 12) & 0x3f) as usize]));
+        out.push(char::from(ALPHABET[((n >> 6) & 0x3f) as usize]));
+        out.push(char::from(ALPHABET[(n & 0x3f) as usize]));
+    }
+    if remainder.len() == 1 {
+        let n = u32::from(remainder[0]) << 16;
+        out.push(char::from(ALPHABET[((n >> 18) & 0x3f) as usize]));
+        out.push(char::from(ALPHABET[((n >> 12) & 0x3f) as usize]));
+        out.push_str("==");
+    } else if remainder.len() == 2 {
+        let n = (u32::from(remainder[0]) << 16) | (u32::from(remainder[1]) << 8);
+        out.push(char::from(ALPHABET[((n >> 18) & 0x3f) as usize]));
+        out.push(char::from(ALPHABET[((n >> 12) & 0x3f) as usize]));
+        out.push(char::from(ALPHABET[((n >> 6) & 0x3f) as usize]));
+        out.push('=');
+    }
+    out
+}
+
+/// Sliding-window Chromaprint comparison of a 30 s preview excerpt against a full track.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PreviewMatch {
+    pub similarity: f32,
+    pub best_offset_frames: usize,
+    pub background_median: f32,
+    pub peak_margin: f32,
+    pub confirmed: bool,
+}
+
+pub const PREVIEW_MIN_SIMILARITY: f32 = 0.82;
+pub const PREVIEW_MIN_PEAK_MARGIN: f32 = 0.14;
+const PREVIEW_TRIM_START: usize = 12;
+const PREVIEW_TRIM_END: usize = 16;
+const PREVIEW_MIN_CORE_FRAMES: usize = 60;
+const PREVIEW_GUARD_FRAMES: usize = 20;
+const PREVIEW_MIN_FRAME_ENTROPY: f32 = 2.0;
+
+/// Slides a fade-trimmed 30 s `preview_raw` fingerprint over `track_raw`, verifying both peak
+/// similarity (`>= 0.82`) and separation above the track's own non-aligned background median
+/// (`median + 0.14`) so repeated drops do not suppress a true match while flat drones fail.
+pub fn match_preview_fingerprint(track_raw: &[u32], preview_raw: &[u32]) -> Option<PreviewMatch> {
+    if preview_raw.len() < PREVIEW_TRIM_START + PREVIEW_TRIM_END + PREVIEW_MIN_CORE_FRAMES {
+        return None;
+    }
+    let core = &preview_raw[PREVIEW_TRIM_START..preview_raw.len() - PREVIEW_TRIM_END];
+    if core.len() < PREVIEW_MIN_CORE_FRAMES || track_raw.len() < core.len() {
+        return None;
+    }
+
+    let transitions: u64 = core
+        .windows(2)
+        .map(|pair| u64::from((pair[0] ^ pair[1]).count_ones()))
+        .sum();
+    let mean_entropy = transitions as f32 / (core.len() - 1) as f32;
+    if mean_entropy < PREVIEW_MIN_FRAME_ENTROPY {
+        return None;
+    }
+
+    let max_offset = track_raw.len() - core.len();
+    let total_bits = (core.len() as u64) * 32;
+    let mut scores = Vec::with_capacity(max_offset + 1);
+    let mut best_sim = 0.0_f32;
+    let mut best_offset = 0usize;
+
+    for offset in 0..=max_offset {
+        let diff_bits: u64 = track_raw[offset..offset + core.len()]
+            .iter()
+            .zip(core)
+            .map(|(&a, &b)| u64::from((a ^ b).count_ones()))
+            .sum();
+        let sim = 1.0 - (diff_bits as f32 / total_bits as f32);
+        if sim > best_sim {
+            best_sim = sim;
+            best_offset = offset;
+        }
+        scores.push(sim);
+    }
+
+    let mut background: Vec<f32> = scores
+        .into_iter()
+        .enumerate()
+        .filter(|(offset, _)| offset.abs_diff(best_offset) > PREVIEW_GUARD_FRAMES)
+        .map(|(_, score)| score)
+        .collect();
+    let background_median = if background.len() >= 10 {
+        background.sort_by(f32::total_cmp);
+        background[background.len() / 2]
+    } else {
+        0.55
+    };
+    let peak_margin = best_sim - background_median;
+    let confirmed = best_sim >= PREVIEW_MIN_SIMILARITY && peak_margin >= PREVIEW_MIN_PEAK_MARGIN;
+
+    Some(PreviewMatch {
+        similarity: best_sim,
+        best_offset_frames: best_offset,
+        background_median,
+        peak_margin,
+        confirmed,
+    })
+}
+
 /// Best bitwise agreement in `[0.0, 1.0]` between two raw Chromaprint subfingerprint sequences,
 /// searching relative shifts up to `±max_shift` items.
 pub fn fingerprint_similarity(left: &[u32], right: &[u32], max_shift: usize) -> f32 {
@@ -510,5 +620,44 @@ mod tests {
         assert_eq!(ranked[1], exact_audio);
         assert_eq!(ranked[2], same_recording);
         assert_eq!(ranked[3], different);
+    }
+
+    #[test]
+    fn preview_sliding_matcher_finds_offset_slices_and_rejects_flat_or_random() {
+        let track: Vec<u32> = (0..1800)
+            .map(|i: u32| {
+                i.wrapping_mul(0x9e37_79b9).rotate_left((i % 17) + 1)
+                    ^ (i.wrapping_mul(0x517c_c1b7))
+            })
+            .collect();
+
+        // Embedded 240-frame slice at offset 640 with mild lossy bit noise.
+        let mut preview = vec![0x1111_2222; 12];
+        preview.extend(track[640..860].iter().map(|&w| w ^ 0b101));
+        preview.extend(std::iter::repeat_n(0x3333_4444, 16));
+
+        let matched = match_preview_fingerprint(&track, &preview).expect("slice analysed");
+        assert!(matched.confirmed);
+        assert_eq!(matched.best_offset_frames, 640);
+        assert!(matched.similarity >= 0.90);
+        assert!(matched.peak_margin >= PREVIEW_MIN_PEAK_MARGIN);
+
+        // Flat / zero-entropy preview returns None.
+        let flat = vec![0xaaaa_5555u32; 220];
+        assert_eq!(match_preview_fingerprint(&track, &flat), None);
+
+        // Unrelated high-entropy preview never confirms.
+        let unrelated: Vec<u32> = (0..220)
+            .map(|i: u32| (i ^ 0xDEAD_BEEF).wrapping_mul(0x85eb_ca6b).rotate_right(9))
+            .collect();
+        let rejected = match_preview_fingerprint(&track, &unrelated).expect("scored");
+        assert!(!rejected.confirmed);
+    }
+
+    #[test]
+    fn standard_base64_pads_every_remainder() {
+        assert_eq!(encode_base64_standard(b"a"), "YQ==");
+        assert_eq!(encode_base64_standard(b"ab"), "YWI=");
+        assert_eq!(encode_base64_standard(b"abc"), "YWJj");
     }
 }

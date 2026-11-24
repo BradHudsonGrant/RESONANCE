@@ -44,12 +44,18 @@ pub fn run(data_folder: Option<&Path>, online: bool) -> Result<(), IdentifyComma
         return Ok(());
     }
 
+    let verify_previews = database
+        .identification_settings()
+        .map(|s| s.verify_audio_previews)
+        .unwrap_or(true);
     let database = Arc::new(Mutex::new(database));
     let pipeline = Pipeline::with_free_providers(
         Arc::new(NetworkClient::new()),
         Arc::clone(&database),
         Arc::new(OsCredentialStore::new()),
-    );
+    )
+    .with_fingerprinter(Arc::new(resonance_api::LibraryAudioFingerprinter))
+    .with_verify_previews(verify_previews);
     let report = run_online_pass(
         &database,
         &pipeline,

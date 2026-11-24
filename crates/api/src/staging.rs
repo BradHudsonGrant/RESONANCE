@@ -2,7 +2,7 @@ use std::sync::{MutexGuard, PoisonError};
 
 use resonance_core::library::TagField;
 use resonance_core::staging::{
-    FieldDiff, ProposalStatus, Provenance, normalise_value, staging_diff,
+    FieldDiff, ProposalStatus, Provenance, dirty_file_fields, normalise_value, staging_diff,
 };
 use resonance_db::Database;
 
@@ -57,9 +57,10 @@ pub(crate) fn tag_name(field: TagField) -> TagName {
     }
 }
 
-pub(crate) fn staged_field(diff: FieldDiff) -> StagedField {
+pub(crate) fn staged_field(diff: FieldDiff, dirty_fields: &[TagField]) -> StagedField {
     let changes = diff.changes();
     let proposal = diff.proposal.as_ref();
+    let dirty_on_disk = dirty_fields.contains(&diff.field);
     StagedField {
         field: tag_name(diff.field),
         current_provenance: diff.current_provenance.map(|provenance| match provenance {
@@ -77,6 +78,7 @@ pub(crate) fn staged_field(diff: FieldDiff) -> StagedField {
         }),
         locked_by_user: diff.locked_by_user,
         changes,
+        dirty_on_disk,
         current_value: diff.current_value,
     }
 }
@@ -92,11 +94,12 @@ fn diff_of(library: &Database, track_id: i64) -> Result<TrackStagingDiff, ApiErr
         .ok_or_else(|| {
             ApiError::invalid_input(format!("Track {track_id} is no longer in the library."))
         })?;
+    let dirty_fields = dirty_file_fields(&layers.file, &layers.dirty_user);
     Ok(TrackStagingDiff {
         track_id,
         fields: staging_diff(&layers.file, &layers.user, &layers.proposals)
             .into_iter()
-            .map(staged_field)
+            .map(|diff| staged_field(diff, &dirty_fields))
             .collect(),
     })
 }
@@ -121,6 +124,15 @@ impl Api {
         limit: u32,
     ) -> Result<StagingQueuePage, ApiError> {
         let library = self.locked_library();
+        if limit == 0 {
+            return Ok(StagingQueuePage {
+                total: library
+                    .count_pending_prep_tracks()
+                    .map_err(ApiError::library_unreadable)?,
+                offset,
+                items: Vec::new(),
+            });
+        }
         let entries = library
             .staging_queue(offset, limit.min(MAX_QUEUE_PAGE))
             .map_err(ApiError::library_unreadable)?;

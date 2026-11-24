@@ -162,9 +162,12 @@ pub fn proposals_from(best: &RankedCandidate) -> Vec<Proposal> {
         (TagField::Title, candidate.title.as_deref()),
         (TagField::Mix, candidate.mix.as_deref()),
         (TagField::Album, candidate.album.as_deref()),
+        (TagField::Genre, candidate.genre.as_deref()),
+        (TagField::Subgenre, candidate.subgenre.as_deref()),
         (TagField::Label, candidate.label.as_deref()),
         (TagField::CatNo, candidate.catno.as_deref()),
         (TagField::Year, year.as_deref()),
+        (TagField::TrackNumber, candidate.track_number.as_deref()),
     ]
     .into_iter()
     .filter_map(|(field, value)| {
@@ -172,7 +175,7 @@ pub fn proposals_from(best: &RankedCandidate) -> Vec<Proposal> {
         (!value.is_empty()).then(|| Proposal {
             field,
             value,
-            provider: candidate.provider.clone(),
+            provider: candidate.provider_for(field).to_owned(),
             confidence: best.confidence,
             audio_matched: best.audio_matched,
         })
@@ -300,6 +303,17 @@ pub fn tag_writes(
     writes
 }
 
+/// The fields among `dirty_user` that writing tags would actually change in the file.
+pub fn dirty_file_fields(
+    file: &[(TagField, String)],
+    dirty_user: &[(TagField, String)],
+) -> Vec<TagField> {
+    tag_writes(file, dirty_user)
+        .into_iter()
+        .map(|write| write.field)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,6 +344,10 @@ mod tests {
                     to: Some("124".to_owned()),
                 },
             ]
+        );
+        assert_eq!(
+            dirty_file_fields(&file, &unwritten),
+            vec![TagField::Title, TagField::Bpm]
         );
     }
 
@@ -477,11 +495,15 @@ mod tests {
                 mix: Some("Extended Mix".to_owned()),
                 catno: Some(String::new()),
                 year: Some(2019),
+                genre: Some("Electronic".to_owned()),
+                track_number: Some("A1".to_owned()),
                 ..Candidate::default()
             },
             confidence: 0.92,
             audio_matched: false,
             duration_delta_ms: None,
+            providers: vec!["discogs".to_owned()],
+            evidence: crate::identify::MatchEvidence::default(),
         };
         let proposals = proposals_from(&best);
         assert_eq!(
@@ -493,7 +515,9 @@ mod tests {
                 (TagField::Artist, "Artist"),
                 (TagField::Title, "Song"),
                 (TagField::Mix, "Extended Mix"),
+                (TagField::Genre, "Electronic"),
                 (TagField::Year, "2019"),
+                (TagField::TrackNumber, "A1"),
             ]
         );
         assert!(proposals.iter().all(|proposal| {

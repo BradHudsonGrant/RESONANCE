@@ -6,13 +6,14 @@ import type { ProviderKeyKind } from '../ipc/bindings/ProviderKeyKind';
 import type { ProviderKeyStatus } from '../ipc/bindings/ProviderKeyStatus';
 import ProviderKeysSettings, { type ProviderKeysClient } from './ProviderKeysSettings.svelte';
 
-function fakeClient(initial: Partial<Record<ProviderKeyKind, boolean>> = {}) {
+function fakeClient(initial: Partial<Record<ProviderKeyKind, boolean>> = {}, initialVerify = true) {
   const stored: Record<ProviderKeyKind, boolean> = {
     acoustid: false,
     discogs: false,
     audd: false,
     ...initial,
   };
+  let verifyPreviews = initialVerify;
   const status = (provider: ProviderKeyKind): ProviderKeyStatus => ({
     provider,
     configured: stored[provider],
@@ -27,6 +28,11 @@ function fakeClient(initial: Partial<Record<ProviderKeyKind, boolean>> = {}) {
     clear: vi.fn(async (provider: ProviderKeyKind) => {
       stored[provider] = false;
       return status(provider);
+    }),
+    identificationSettings: vi.fn(async () => ({ verify_audio_previews: verifyPreviews })),
+    saveIdentificationSettings: vi.fn(async (settings) => {
+      verifyPreviews = settings.verify_audio_previews;
+      return { verify_audio_previews: verifyPreviews };
     }),
   };
   return client;
@@ -96,5 +102,30 @@ describe('ProviderKeysSettings', () => {
       ),
     );
     expect(within(discogs).getByText('Not set')).toBeTruthy();
+  });
+
+  it('persists the 30 s audio preview verification setting and clarifies the AcoustID key role', async () => {
+    const client = fakeClient({}, true);
+    render(ProviderKeysSettings, { client });
+    await waitFor(() => expect(client.identificationSettings).toHaveBeenCalled());
+
+    expect(
+      screen.getByText(
+        'Use the Application API key from your AcoustID app registration, not a User API key',
+      ),
+    ).toBeTruthy();
+    const toggle = screen.getByRole('checkbox', {
+      name: 'Verify uncertain matches against 30 s audio previews',
+    }) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+
+    await fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(client.saveIdentificationSettings).toHaveBeenCalledWith({
+        verify_audio_previews: false,
+      }),
+    );
+    expect(toggle.checked).toBe(false);
+    expect(screen.getByRole('status').textContent).toBe('Preview verification turned off.');
   });
 });

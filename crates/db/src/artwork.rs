@@ -5,12 +5,14 @@
 //! Identification only ever proposes; a proposal reaches the user layer when it is accepted, and
 //! a file only when the user writes tags.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
+use crate::{IN_CHUNK, placeholders};
 use resonance_core::artwork::{ArtworkRefusal, ImageKind, check_artwork, is_artwork_hash};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -28,6 +30,13 @@ pub struct StoredArtwork {
     pub hash: String,
     pub kind: ImageKind,
     pub byte_len: u64,
+}
+
+/// Result of looking up an external cover address in `artwork_source`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CachedArtworkSource {
+    Stored(StoredArtwork),
+    Unavailable,
 }
 
 #[derive(Debug)]
@@ -132,6 +141,14 @@ pub struct ProposedArtwork {
     pub pending: bool,
 }
 
+/// Complete artwork layer for one track: shown cover, pending/decided proposal, and dirty flag.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TrackArtworkState {
+    pub shown: Option<StoredArtwork>,
+    pub proposed: Option<ProposedArtwork>,
+    pub dirty_on_disk: bool,
+}
+
 fn stored_artwork(connection: &Connection, hash: &str) -> Result<Option<StoredArtwork>, DbError> {
     let row: Option<(String, u64)> = connection
         .prepare_cached("SELECT mime, byte_len FROM artwork WHERE hash = ?1")?
@@ -208,23 +225,49 @@ pub(crate) fn populate_user_artwork(
     connection: &Connection,
     tracks: &mut [TrackRow],
 ) -> Result<(), DbError> {
+    if tracks.is_empty() {
+        return Ok(());
+    }
     let any: bool = connection
         .prepare_cached("SELECT EXISTS(SELECT 1 FROM user_artwork)")?
         .query_row([], |row| row.get(0))?;
     if !any {
         return Ok(());
     }
-    let mut chosen =
-        connection.prepare_cached("SELECT artwork_hash FROM user_artwork WHERE track_id = ?1")?;
+    let track_ids: Vec<i64> = tracks.iter().map(|track| track.track_id).collect();
+    let user_hashes = user_cover_hashes(connection, &track_ids)?;
     for track in tracks {
-        if let Some(hash) = chosen
-            .query_row([track.track_id], |row| row.get::<_, String>(0))
-            .optional()?
-        {
-            track.artwork = Some(hash);
+        if let Some(hash) = user_hashes.get(&track.track_id) {
+            track.artwork = Some(hash.clone());
         }
     }
     Ok(())
+}
+
+/// Each track's own chosen cover, for the tracks in `track_ids` that have one.
+fn user_cover_hashes(
+    connection: &Connection,
+    track_ids: &[i64],
+) -> Result<HashMap<i64, String>, DbError> {
+    if track_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let mut unique_ids = track_ids.to_vec();
+    unique_ids.sort_unstable();
+    unique_ids.dedup();
+    let mut out = HashMap::new();
+    for chunk in unique_ids.chunks(IN_CHUNK) {
+        let in_list = placeholders(chunk.len());
+        let sql = format!(
+            "SELECT track_id, artwork_hash FROM user_artwork WHERE track_id IN ({in_list})"
+        );
+        let mut stmt = connection.prepare(&sql)?;
+        let mut rows = stmt.query(rusqlite::params_from_iter(chunk.iter().copied()))?;
+        while let Some(row) = rows.next()? {
+            out.insert(row.get(0)?, row.get(1)?);
+        }
+    }
+    Ok(out)
 }
 
 impl Database {
@@ -336,17 +379,345 @@ impl Database {
         )
     }
 
-    /// A picture already fetched from this address, so a release's tracks fetch it once.
-    pub fn artwork_fetched_from(&self, source_url: &str) -> Result<Option<StoredArtwork>, DbError> {
+    /// Cached cover outcome for `source_url`, returning `Unavailable` only when a failed/refused
+    /// fetch was recorded within `max_negative_age`. Falls back to `proposed_artwork` for rows
+    /// created before `artwork_source` existed.
+    pub fn cached_artwork_source(
+        &self,
+        source_url: &str,
+        max_negative_age: Duration,
+    ) -> Result<Option<CachedArtworkSource>, DbError> {
+        let cached: Option<(Option<String>, i64)> = self
+            .connection
+            .prepare_cached(
+                "SELECT artwork_hash, fetched_ns FROM artwork_source WHERE source_url = ?1",
+            )?
+            .query_row([source_url], |row| Ok((row.get(0)?, row.get(1)?)))
+            .optional()?;
+        match cached {
+            Some((Some(hash), _)) => {
+                if let Some(artwork) = stored_artwork(&self.connection, &hash)? {
+                    return Ok(Some(CachedArtworkSource::Stored(artwork)));
+                }
+            }
+            Some((None, fetched_ns)) => {
+                let max_ns = i64::try_from(max_negative_age.as_nanos()).unwrap_or(i64::MAX);
+                let fresh_since = now_unix_ns().saturating_sub(max_ns);
+                if !max_negative_age.is_zero() && fetched_ns >= fresh_since {
+                    return Ok(Some(CachedArtworkSource::Unavailable));
+                }
+            }
+            None => {}
+        }
         let hash: Option<String> = self
             .connection
             .prepare_cached("SELECT artwork_hash FROM proposed_artwork WHERE source_url = ?1")?
             .query_row([source_url], |row| row.get(0))
             .optional()?;
         match hash {
-            Some(hash) => stored_artwork(&self.connection, &hash),
+            Some(hash) => {
+                Ok(stored_artwork(&self.connection, &hash)?.map(CachedArtworkSource::Stored))
+            }
             None => Ok(None),
         }
+    }
+
+    /// Single-track artwork state using cached queries.
+    pub fn track_artwork_state(&self, track_id: i64) -> Result<TrackArtworkState, DbError> {
+        let user_row: Option<(String, bool)> = self
+            .connection
+            .prepare_cached(
+                "SELECT artwork_hash, dirty_on_disk FROM user_artwork WHERE track_id = ?1",
+            )?
+            .query_row([track_id], |row| Ok((row.get(0)?, row.get(1)?)))
+            .optional()?;
+        let dirty_on_disk = user_row.as_ref().is_some_and(|(_, dirty)| *dirty);
+        let shown_hash = match user_row {
+            Some((hash, _)) => Some(hash),
+            None => self
+                .connection
+                .prepare_cached(
+                    "SELECT artwork_hash FROM asset
+                     WHERE track_id = ?1
+                     ORDER BY included DESC, is_primary DESC, id ASC LIMIT 1",
+                )?
+                .query_row([track_id], |row| row.get::<_, Option<String>>(0))
+                .optional()?
+                .flatten(),
+        };
+        let shown = match shown_hash {
+            Some(hash) => stored_artwork(&self.connection, &hash)?,
+            None => None,
+        };
+        let proposed = self.proposed_artwork(track_id)?;
+        Ok(TrackArtworkState {
+            shown,
+            proposed,
+            dirty_on_disk,
+        })
+    }
+
+    /// Stored `user_artwork.artwork_hash` for each track in `track_ids` that has one.
+    pub fn user_cover_hashes_by_track_ids(
+        &self,
+        track_ids: &[i64],
+    ) -> Result<HashMap<i64, String>, DbError> {
+        user_cover_hashes(&self.connection, track_ids)
+    }
+
+    /// Batch artwork state (`track_artwork`, `proposed_artwork`, `has_unwritten_artwork`) for
+    /// `track_ids`, loaded in chunked `IN` queries.
+    pub fn artwork_states_by_track_ids(
+        &self,
+        track_ids: &[i64],
+    ) -> Result<HashMap<i64, TrackArtworkState>, DbError> {
+        if track_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let mut unique_ids = track_ids.to_vec();
+        unique_ids.sort_unstable();
+        unique_ids.dedup();
+
+        let mut user_by_track: HashMap<i64, (String, bool)> = HashMap::new();
+        let mut proposed_raw_by_track: HashMap<i64, (String, String, String, bool)> =
+            HashMap::new();
+        let mut primary_hash_by_track: HashMap<i64, String> = HashMap::new();
+
+        for chunk in unique_ids.chunks(IN_CHUNK) {
+            let in_list = placeholders(chunk.len());
+
+            let user_sql = format!(
+                "SELECT track_id, artwork_hash, dirty_on_disk
+                 FROM user_artwork WHERE track_id IN ({in_list})"
+            );
+            let mut user_stmt = self.connection.prepare(&user_sql)?;
+            let mut user_rows =
+                user_stmt.query(rusqlite::params_from_iter(chunk.iter().copied()))?;
+            while let Some(row) = user_rows.next()? {
+                user_by_track.insert(row.get(0)?, (row.get(1)?, row.get(2)?));
+            }
+
+            let asset_sql = format!(
+                "SELECT track_id, artwork_hash
+                 FROM asset WHERE track_id IN ({in_list})
+                 ORDER BY track_id ASC, included DESC, is_primary DESC, id ASC"
+            );
+            let mut asset_stmt = self.connection.prepare(&asset_sql)?;
+            let mut asset_rows =
+                asset_stmt.query(rusqlite::params_from_iter(chunk.iter().copied()))?;
+            let mut prev_track: Option<i64> = None;
+            while let Some(row) = asset_rows.next()? {
+                let track_id: i64 = row.get(0)?;
+                if prev_track != Some(track_id) {
+                    prev_track = Some(track_id);
+                    if let Some(hash) = row.get::<_, Option<String>>(1)? {
+                        primary_hash_by_track.insert(track_id, hash);
+                    }
+                }
+            }
+
+            let prop_sql = format!(
+                "SELECT track_id, artwork_hash, provider, source_url, status
+                 FROM proposed_artwork WHERE track_id IN ({in_list})"
+            );
+            let mut prop_stmt = self.connection.prepare(&prop_sql)?;
+            let mut prop_rows =
+                prop_stmt.query(rusqlite::params_from_iter(chunk.iter().copied()))?;
+            while let Some(row) = prop_rows.next()? {
+                let status: String = row.get(4)?;
+                proposed_raw_by_track.insert(
+                    row.get(0)?,
+                    (row.get(1)?, row.get(2)?, row.get(3)?, status == "pending"),
+                );
+            }
+        }
+
+        let mut needed_hashes: Vec<String> = Vec::new();
+        for track_id in &unique_ids {
+            if let Some((hash, _)) = user_by_track.get(track_id) {
+                needed_hashes.push(hash.clone());
+            } else if let Some(hash) = primary_hash_by_track.get(track_id) {
+                needed_hashes.push(hash.clone());
+            }
+            if let Some((hash, _, _, _)) = proposed_raw_by_track.get(track_id) {
+                needed_hashes.push(hash.clone());
+            }
+        }
+        needed_hashes.sort_unstable();
+        needed_hashes.dedup();
+
+        let mut stored_by_hash: HashMap<String, StoredArtwork> =
+            HashMap::with_capacity(needed_hashes.len());
+        for chunk in needed_hashes.chunks(IN_CHUNK) {
+            let in_list = placeholders(chunk.len());
+            let sql = format!("SELECT hash, mime, byte_len FROM artwork WHERE hash IN ({in_list})");
+            let mut stmt = self.connection.prepare(&sql)?;
+            let mut rows =
+                stmt.query(rusqlite::params_from_iter(chunk.iter().map(String::as_str)))?;
+            while let Some(row) = rows.next()? {
+                let hash: String = row.get(0)?;
+                let mime: String = row.get(1)?;
+                let byte_len: u64 = row.get(2)?;
+                let kind = ImageKind::from_mime(&mime).ok_or(DbError::UnknownName {
+                    column: "artwork.mime",
+                    name: mime,
+                })?;
+                stored_by_hash.insert(
+                    hash.clone(),
+                    StoredArtwork {
+                        hash,
+                        kind,
+                        byte_len,
+                    },
+                );
+            }
+        }
+
+        let mut out = HashMap::with_capacity(unique_ids.len());
+        for track_id in unique_ids {
+            let user_entry = user_by_track.remove(&track_id);
+            let dirty_on_disk = user_entry.as_ref().is_some_and(|(_, dirty)| *dirty);
+            let shown_hash = user_entry
+                .map(|(hash, _)| hash)
+                .or_else(|| primary_hash_by_track.remove(&track_id));
+            let shown = shown_hash.and_then(|hash| stored_by_hash.get(&hash).cloned());
+            let proposed = proposed_raw_by_track.remove(&track_id).and_then(
+                |(hash, provider, source_url, pending)| {
+                    stored_by_hash
+                        .get(&hash)
+                        .cloned()
+                        .map(|artwork| ProposedArtwork {
+                            artwork,
+                            provider,
+                            source_url,
+                            pending,
+                        })
+                },
+            );
+            out.insert(
+                track_id,
+                TrackArtworkState {
+                    shown,
+                    proposed,
+                    dirty_on_disk,
+                },
+            );
+        }
+        Ok(out)
+    }
+
+    /// Cached cover outcome for every address in `source_urls`, resolved in chunked queries.
+    pub fn cached_artwork_sources(
+        &self,
+        source_urls: &[&str],
+        max_negative_age: Duration,
+    ) -> Result<HashMap<String, CachedArtworkSource>, DbError> {
+        if source_urls.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let mut unique_urls: Vec<&str> = source_urls.to_vec();
+        unique_urls.sort_unstable();
+        unique_urls.dedup();
+
+        let max_ns = i64::try_from(max_negative_age.as_nanos()).unwrap_or(i64::MAX);
+        let fresh_since = now_unix_ns().saturating_sub(max_ns);
+        let mut resolved: HashMap<String, CachedArtworkSource> =
+            HashMap::with_capacity(unique_urls.len());
+        let mut fallback_urls: Vec<&str> = Vec::new();
+
+        for chunk in unique_urls.chunks(IN_CHUNK) {
+            let in_list = placeholders(chunk.len());
+            let sql = format!(
+                "SELECT s.source_url, s.artwork_hash, s.fetched_ns, a.mime, a.byte_len
+                 FROM artwork_source s
+                 LEFT JOIN artwork a ON a.hash = s.artwork_hash
+                 WHERE s.source_url IN ({in_list})"
+            );
+            let mut stmt = self.connection.prepare(&sql)?;
+            let mut rows = stmt.query(rusqlite::params_from_iter(chunk.iter().copied()))?;
+            while let Some(row) = rows.next()? {
+                let url: String = row.get(0)?;
+                let hash: Option<String> = row.get(1)?;
+                let fetched_ns: i64 = row.get(2)?;
+                let mime: Option<String> = row.get(3)?;
+                let byte_len: Option<u64> = row.get(4)?;
+                match (hash, mime, byte_len) {
+                    (Some(hash), Some(mime), Some(byte_len)) => {
+                        let kind = ImageKind::from_mime(&mime).ok_or(DbError::UnknownName {
+                            column: "artwork.mime",
+                            name: mime,
+                        })?;
+                        resolved.insert(
+                            url,
+                            CachedArtworkSource::Stored(StoredArtwork {
+                                hash,
+                                kind,
+                                byte_len,
+                            }),
+                        );
+                    }
+                    (None, _, _) if !max_negative_age.is_zero() && fetched_ns >= fresh_since => {
+                        resolved.insert(url, CachedArtworkSource::Unavailable);
+                    }
+                    _ => {}
+                }
+            }
+            for &url in chunk {
+                if !resolved.contains_key(url) {
+                    fallback_urls.push(url);
+                }
+            }
+        }
+
+        if !fallback_urls.is_empty() {
+            for chunk in fallback_urls.chunks(IN_CHUNK) {
+                let in_list = placeholders(chunk.len());
+                let sql = format!(
+                    "SELECT p.source_url, p.artwork_hash, a.mime, a.byte_len
+                     FROM proposed_artwork p
+                     JOIN artwork a ON a.hash = p.artwork_hash
+                     WHERE p.source_url IN ({in_list})"
+                );
+                let mut stmt = self.connection.prepare(&sql)?;
+                let mut rows = stmt.query(rusqlite::params_from_iter(chunk.iter().copied()))?;
+                while let Some(row) = rows.next()? {
+                    let url: String = row.get(0)?;
+                    let hash: String = row.get(1)?;
+                    let mime: String = row.get(2)?;
+                    let byte_len: u64 = row.get(3)?;
+                    let kind = ImageKind::from_mime(&mime).ok_or(DbError::UnknownName {
+                        column: "artwork.mime",
+                        name: mime,
+                    })?;
+                    resolved.insert(
+                        url,
+                        CachedArtworkSource::Stored(StoredArtwork {
+                            hash,
+                            kind,
+                            byte_len,
+                        }),
+                    );
+                }
+            }
+        }
+
+        Ok(resolved)
+    }
+
+    /// Records the result of fetching `source_url` into `artwork_source` (`None` marks 404 or
+    /// unsupported bytes so candidate previews do not keep retrying the same dead URL).
+    pub fn record_fetched_artwork(
+        &mut self,
+        source_url: &str,
+        artwork: Option<&StoredArtwork>,
+    ) -> Result<(), DbError> {
+        let tx = self.connection.transaction()?;
+        if let Some(artwork) = artwork {
+            insert_artwork(&tx, artwork)?;
+        }
+        record_artwork_source_in_tx(&tx, source_url, artwork.map(|art| art.hash.as_str()))?;
+        tx.commit()?;
+        Ok(())
     }
 
     /// Stages a release picture for the track. A decision already taken on the same picture is
@@ -382,39 +753,94 @@ impl Database {
             source_url,
             now_unix_ns()
         ])?;
+        record_artwork_source_in_tx(&tx, source_url, Some(&artwork.hash))?;
         tx.commit()?;
+        Ok(())
+    }
+
+    /// Removes a pending cover proposal without marking an existing hash as user-skipped.
+    pub fn clear_pending_proposed_artwork(&mut self, track_id: i64) -> Result<(), DbError> {
+        self.connection.execute(
+            "DELETE FROM proposed_artwork WHERE track_id = ?1 AND status = 'pending'",
+            [track_id],
+        )?;
         Ok(())
     }
 
     /// Copies the pending proposal into the user layer. Returns false when there was none.
     pub fn accept_proposed_artwork(&mut self, track_id: i64) -> Result<bool, DbError> {
         let tx = self.connection.transaction()?;
-        let hash: Option<String> = tx
-            .prepare_cached(
-                "SELECT artwork_hash FROM proposed_artwork
-                 WHERE track_id = ?1 AND status = 'pending'",
-            )?
-            .query_row([track_id], |row| row.get(0))
-            .optional()?;
-        let Some(artwork) = hash
-            .map(|hash| stored_artwork(&tx, &hash))
-            .transpose()?
-            .flatten()
-        else {
+        let accepted = accept_proposed_artwork_in_tx(&tx, track_id)?;
+        if !accepted {
             return Ok(false);
-        };
-        set_user_artwork_in_tx(&tx, track_id, &artwork)?;
-        decide(&tx, track_id, "accepted")?;
+        }
         tx.commit()?;
         Ok(true)
     }
 
     pub fn skip_proposed_artwork(&mut self, track_id: i64) -> Result<bool, DbError> {
         let tx = self.connection.transaction()?;
-        let skipped = decide(&tx, track_id, "skipped")?;
+        let skipped = skip_proposed_artwork_in_tx(&tx, track_id)?;
         tx.commit()?;
         Ok(skipped)
     }
+
+    pub fn has_unwritten_artwork(&self, track_id: i64) -> Result<bool, DbError> {
+        let dirty: Option<i64> = self
+            .connection
+            .prepare_cached(
+                "SELECT 1 FROM user_artwork WHERE track_id = ?1 AND dirty_on_disk = 1 LIMIT 1",
+            )?
+            .query_row([track_id], |row| row.get(0))
+            .optional()?;
+        Ok(dirty.is_some())
+    }
+}
+
+pub(crate) fn accept_proposed_artwork_in_tx(
+    tx: &Transaction<'_>,
+    track_id: i64,
+) -> Result<bool, DbError> {
+    let hash: Option<String> = tx
+        .prepare_cached(
+            "SELECT artwork_hash FROM proposed_artwork
+             WHERE track_id = ?1 AND status = 'pending'",
+        )?
+        .query_row([track_id], |row| row.get(0))
+        .optional()?;
+    let Some(artwork) = hash
+        .map(|hash| stored_artwork(tx, &hash))
+        .transpose()?
+        .flatten()
+    else {
+        return Ok(false);
+    };
+    set_user_artwork_in_tx(tx, track_id, &artwork)?;
+    decide(tx, track_id, "accepted")?;
+    Ok(true)
+}
+
+pub(crate) fn skip_proposed_artwork_in_tx(
+    tx: &Transaction<'_>,
+    track_id: i64,
+) -> Result<bool, DbError> {
+    decide(tx, track_id, "skipped")
+}
+
+fn record_artwork_source_in_tx(
+    tx: &Transaction<'_>,
+    source_url: &str,
+    hash: Option<&str>,
+) -> Result<(), DbError> {
+    tx.prepare_cached(
+        "INSERT INTO artwork_source (source_url, artwork_hash, fetched_ns)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT (source_url) DO UPDATE SET
+             artwork_hash = excluded.artwork_hash,
+             fetched_ns = excluded.fetched_ns",
+    )?
+    .execute(params![source_url, hash, now_unix_ns()])?;
+    Ok(())
 }
 
 fn decide(tx: &Transaction<'_>, track_id: i64, status: &str) -> Result<bool, DbError> {

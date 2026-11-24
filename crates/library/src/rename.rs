@@ -319,6 +319,7 @@ pub fn apply_renames(
     template_text: &str,
     mut stop: impl FnMut(u64, u64) -> bool,
 ) -> Result<RenameReport, RenameError> {
+    let _operation = crate::file_operation();
     let planned = preview_renames(&locked(database), asset_ids, template)?;
     let ready: Vec<&PlannedRename> = planned
         .iter()
@@ -377,6 +378,7 @@ pub fn undo_renames(
     database: &Mutex<Database>,
     operation_id: i64,
 ) -> Result<UndoReport, RenameError> {
+    let _operation = crate::file_operation();
     let (operation, steps) = {
         let library = locked(database);
         let operation = library

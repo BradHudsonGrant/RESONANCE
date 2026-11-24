@@ -114,6 +114,72 @@ fn parse_hash(
     }
 }
 
+const PENDING_IDENTITY_CONDITION: &str = "asset.included = 1
+   AND asset.missing_since IS NULL
+   AND (
+       asset.identity_size_bytes IS NULL
+       OR asset.identity_size_bytes != asset.size_bytes
+       OR asset.identity_modified_ns IS NULL
+       OR asset.identity_modified_ns != asset.modified_ns
+       OR (
+           asset.format IN ('mp3', 'm4a')
+           AND asset.audio_decoder IS NOT NULL
+           AND asset.audio_decoder != ?
+       )
+   )";
+
+#[allow(clippy::type_complexity)]
+fn read_pending_asset_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<(i64, i64, i64, String, String, String, u64, i64, bool)> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+        row.get(8)?,
+    ))
+}
+
+#[allow(clippy::type_complexity)]
+fn map_pending_assets(
+    rows: Vec<(i64, i64, i64, String, String, String, u64, i64, bool)>,
+) -> Result<Vec<PendingAsset>, DbError> {
+    rows.into_iter()
+        .map(
+            |(
+                asset_id,
+                track_id,
+                source_id,
+                source_folder,
+                path,
+                format_name,
+                size_bytes,
+                modified_ns,
+                is_new,
+            )| {
+                Ok(PendingAsset {
+                    asset_id,
+                    track_id,
+                    source_id: SourceId(source_id),
+                    source_folder,
+                    path,
+                    format: parse_format(format_name)?,
+                    stamp: FileStamp {
+                        size_bytes,
+                        modified_ns,
+                    },
+                    is_new,
+                })
+            },
+        )
+        .collect()
+}
+
 impl Database {
     /// True once at least one asset in the database carries a computed `byte_hash` or `audio_hash`.
     pub fn has_identified_assets(&self) -> Result<bool, DbError> {
@@ -130,25 +196,10 @@ impl Database {
 
     /// Number of present included assets whose identity needs computing.
     pub fn count_pending_identity_assets(&self, current_decoder: &str) -> Result<u64, DbError> {
-        Ok(self.connection.query_row(
-            "SELECT count(*)
-             FROM asset
-             WHERE asset.included = 1
-               AND asset.missing_since IS NULL
-               AND (
-                   asset.identity_size_bytes IS NULL
-                   OR asset.identity_size_bytes != asset.size_bytes
-                   OR asset.identity_modified_ns IS NULL
-                   OR asset.identity_modified_ns != asset.modified_ns
-                   OR (
-                       asset.format IN ('mp3', 'm4a')
-                       AND asset.audio_decoder IS NOT NULL
-                       AND asset.audio_decoder != ?1
-                   )
-               )",
-            [current_decoder],
-            |row| row.get(0),
-        )?)
+        let sql = format!("SELECT count(*) FROM asset WHERE {PENDING_IDENTITY_CONDITION}");
+        Ok(self
+            .connection
+            .query_row(&sql, [current_decoder], |row| row.get(0))?)
     }
 
     /// Assets with `id > after_asset_id` whose identity needs computing: new files, modified
@@ -159,74 +210,66 @@ impl Database {
         current_decoder: &str,
         limit: u32,
     ) -> Result<Vec<PendingAsset>, DbError> {
-        let mut stmt = self.connection.prepare(
+        let sql = format!(
             "SELECT asset.id, asset.track_id, asset.source_id, source.folder, asset.path,
                  asset.format, asset.size_bytes, asset.modified_ns,
                  asset.identity_size_bytes IS NULL
              FROM asset
              JOIN source ON source.id = asset.source_id
-             WHERE asset.id > ?1
-               AND asset.included = 1
-               AND asset.missing_since IS NULL
-               AND (
-                   asset.identity_size_bytes IS NULL
-                   OR asset.identity_size_bytes != asset.size_bytes
-                   OR asset.identity_modified_ns IS NULL
-                   OR asset.identity_modified_ns != asset.modified_ns
-                   OR (
-                       asset.format IN ('mp3', 'm4a')
-                       AND asset.audio_decoder IS NOT NULL
-                       AND asset.audio_decoder != ?2
-                   )
-               )
+             WHERE asset.id > ?
+               AND {PENDING_IDENTITY_CONDITION}
              ORDER BY asset.id
-             LIMIT ?3",
-        )?;
+             LIMIT ?"
+        );
+        let mut stmt = self.connection.prepare(&sql)?;
         let rows = stmt
-            .query_map(params![after_asset_id, current_decoder, limit], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, u64>(6)?,
-                    row.get::<_, i64>(7)?,
-                    row.get::<_, bool>(8)?,
-                ))
-            })?
+            .query_map(
+                params![after_asset_id, current_decoder, limit],
+                read_pending_asset_row,
+            )?
             .collect::<Result<Vec<_>, _>>()?;
+        map_pending_assets(rows)
+    }
 
-        rows.into_iter()
-            .map(
-                |(
-                    asset_id,
-                    track_id,
-                    source_id,
-                    source_folder,
-                    path,
-                    format_name,
-                    size_bytes,
-                    modified_ns,
-                    is_new,
-                )| {
-                    Ok(PendingAsset {
-                        asset_id,
-                        track_id,
-                        source_id: SourceId(source_id),
-                        source_folder,
-                        path,
-                        format: parse_format(format_name)?,
-                        stamp: FileStamp {
-                            size_bytes,
-                            modified_ns,
-                        },
-                        is_new,
-                    })
-                },
-            )
-            .collect()
+    /// Pending assets belonging to `track_ids` (used for targeted single-track or small-batch
+    /// online lookup without waiting behind a full-library identity sweep).
+    pub fn pending_identity_assets_for_tracks(
+        &self,
+        track_ids: &[i64],
+        current_decoder: &str,
+    ) -> Result<Vec<PendingAsset>, DbError> {
+        if track_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        const CHUNK_SIZE: usize = 500;
+        let mut combined = Vec::new();
+        for chunk in track_ids.chunks(CHUNK_SIZE) {
+            let placeholders = vec!["?"; chunk.len()].join(", ");
+            let sql = format!(
+                "SELECT asset.id, asset.track_id, asset.source_id, source.folder, asset.path,
+                     asset.format, asset.size_bytes, asset.modified_ns,
+                     asset.identity_size_bytes IS NULL
+                 FROM asset
+                 JOIN source ON source.id = asset.source_id
+                 WHERE asset.track_id IN ({placeholders})
+                   AND {PENDING_IDENTITY_CONDITION}
+                 ORDER BY asset.id"
+            );
+            let mut stmt = self.connection.prepare(&sql)?;
+            let mut values: Vec<rusqlite::types::Value> = chunk
+                .iter()
+                .map(|&id| rusqlite::types::Value::Integer(id))
+                .collect();
+            values.push(rusqlite::types::Value::Text(current_decoder.to_owned()));
+            let rows = stmt
+                .query_map(rusqlite::params_from_iter(values), read_pending_asset_row)?
+                .collect::<Result<Vec<_>, _>>()?;
+            combined.extend(map_pending_assets(rows)?);
+        }
+        if track_ids.len() > CHUNK_SIZE {
+            combined.sort_unstable_by_key(|asset| asset.asset_id);
+        }
+        Ok(combined)
     }
 
     /// Assets matching `byte_hash` (via the `asset_byte_hash` index).
