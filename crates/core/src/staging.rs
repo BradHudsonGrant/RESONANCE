@@ -161,7 +161,14 @@ pub fn title_with_mix(title: &str, mix: Option<&str>) -> String {
     let Some(mix) = mix.map(str::trim).filter(|mix| !mix.is_empty()) else {
         return title.to_owned();
     };
-    if title.to_lowercase().contains(&mix.to_lowercase()) {
+    // Only a title that already ends with the mix in brackets has it; "Dub Siren" with the mix
+    // "Dub" still needs "(Dub)".
+    let lower = title.to_lowercase();
+    let wanted = mix.to_lowercase();
+    if [format!("({wanted})"), format!("[{wanted}]")]
+        .iter()
+        .any(|bracketed| lower.ends_with(bracketed.as_str()))
+    {
         return title.to_owned();
     }
     format!("{title} ({mix})")
@@ -548,6 +555,8 @@ mod tests {
             "Low Tide (Harbour Remix)"
         );
         assert_eq!(title_with_mix("Song (Dub)", Some("dub")), "Song (Dub)");
+        assert_eq!(title_with_mix("Song [Dub]", Some("Dub")), "Song [Dub]");
+        assert_eq!(title_with_mix("Dub Siren", Some("Dub")), "Dub Siren (Dub)");
         assert_eq!(title_with_mix(" Song ", Some(" ")), "Song");
         assert_eq!(title_with_mix("Song", None), "Song");
     }

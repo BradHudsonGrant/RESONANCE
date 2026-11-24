@@ -8,6 +8,7 @@ import type { PrepItem } from '../ipc/bindings/PrepItem';
 import type { PrepStageName } from '../ipc/bindings/PrepStageName';
 import type { StagedField } from '../ipc/bindings/StagedField';
 import type { TagName } from '../ipc/bindings/TagName';
+import type { TrackCandidateArtwork } from '../ipc/bindings/TrackCandidateArtwork';
 import Prep, { type PrepClient } from './Prep.svelte';
 import {
   basisSentence,
@@ -159,6 +160,11 @@ function makeClient(items: PrepItem[]) {
     skipItems: vi.fn(async (ids: number[]) => ({ tracks: ids.length, fields: 1 })),
     selectCandidate: vi.fn(async (id: number) => items.find((item) => item.track.id === id)!),
     useCandidateArtwork: vi.fn(async (id: number) => items.find((item) => item.track.id === id)!),
+    candidateArtwork: vi.fn(async (id: number): Promise<TrackCandidateArtwork> => ({
+      track_id: id,
+      candidates: [],
+    })),
+    skipArtwork: vi.fn(async (id: number) => items.find((item) => item.track.id === id)!),
     identifyOnline: vi.fn(async () => ({ active: [], recent: [], mix_backoff_active: false })),
     identifyWithUrl: vi.fn(async (id: number) => ({
       track_id: id,
@@ -244,6 +250,39 @@ describe('Prep', () => {
     );
     expect(client.skipItems).not.toHaveBeenCalled();
     expect(await screen.findByText('Saved to 1 file')).toBeTruthy();
+  });
+
+  it('shows the covers of the matches and keeps the file cover when chosen', async () => {
+    const item = makeItem(0);
+    item.artwork = { ...item.artwork, artwork: 'a'.repeat(64) };
+    item.candidates = [
+      candidate(0, { has_artwork: true, artwork_provider: 'Discogs' }),
+      candidate(1, { has_artwork: true, artwork_provider: 'Bandcamp' }),
+    ];
+    const client = makeClient([item]);
+    client.candidateArtwork.mockImplementation(async (id: number) => ({
+      track_id: id,
+      candidates: [0, 1].map((index) => ({
+        index,
+        has_artwork: true,
+        artwork_provider: 'Discogs',
+        artwork_hash: String(index).repeat(64),
+      })),
+    }));
+    render(Prep, { client });
+    await waitFor(() => expect(client.candidateArtwork).toHaveBeenCalledWith(item.track.id, 0));
+    expect(screen.getByText('3 to choose from')).toBeTruthy();
+    await fireEvent.click(screen.getByRole('button', { name: /Use cover from Bandcamp/ }));
+    await waitFor(() =>
+      expect(client.useCandidateArtwork).toHaveBeenCalledWith(
+        item.track.id,
+        1,
+        false,
+        'review-' + item.track.id,
+      ),
+    );
+    await fireEvent.click(screen.getByRole('button', { name: /In the file/ }));
+    await waitFor(() => expect(client.skipArtwork).toHaveBeenCalledWith(item.track.id));
   });
 
   it('shows every tag, marking the missing ones', async () => {

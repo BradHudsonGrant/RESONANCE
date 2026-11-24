@@ -62,7 +62,7 @@ pub(crate) fn placeholders(count: usize) -> String {
 
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
-const MIGRATIONS: [&str; 21] = [
+const MIGRATIONS: [&str; 22] = [
     include_str!("../migrations/0001_library.sql"),
     include_str!("../migrations/0002_sources.sql"),
     include_str!("../migrations/0003_identity.sql"),
@@ -84,6 +84,7 @@ const MIGRATIONS: [&str; 21] = [
     include_str!("../migrations/0019_prep_indexes.sql"),
     include_str!("../migrations/0020_operation_tag_decisions.sql"),
     include_str!("../migrations/0021_prep_query_indexes.sql"),
+    include_str!("../migrations/0022_reread_unreadable_files.sql"),
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

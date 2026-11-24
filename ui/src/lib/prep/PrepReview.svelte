@@ -30,6 +30,9 @@
     linkBusy: boolean;
     compact: boolean;
     chosenCover: number | undefined;
+    /** The fetched cover of a match the summary has no picture for yet. */
+    artFor: (index: number) => string | null;
+    onkeepcover: () => void;
     canUndo: boolean;
     onaccept: (fields: TagName[], includeArtwork: boolean) => void;
     onskip: () => void;
@@ -52,6 +55,8 @@
     linkBusy,
     compact,
     chosenCover,
+    artFor,
+    onkeepcover,
     canUndo,
     onaccept,
     onskip,
@@ -85,18 +90,21 @@
   const cover = $derived(item.artwork.proposed);
   const covers = $derived(item.candidates.filter((candidate) => candidate.has_artwork));
   const activeCover = $derived(resolveActiveCoverIndex(item, chosenCover, covers));
+  const keepingFileCover = $derived(!cover && !!item.artwork.artwork);
   const total = $derived(suggested.length + (cover ? 1 : 0));
   const source = $derived(match ? null : localSource(item));
   const needsKey = $derived(item.steps.some((step) => step.outcome.kind === 'skipped_missing_key'));
   const evidence = $derived(match?.evidence ?? item.evidence);
 
-  const heroArt = $derived(cover?.artwork ?? item.artwork.artwork ?? match?.artwork_hash ?? null);
+  const heroArt = $derived(
+    cover?.artwork ?? item.artwork.artwork ?? (match ? matchArt(match) : null),
+  );
   const heroCaption = $derived(
     cover
       ? 'Suggested cover · ' + formatProviderName(cover.provider)
       : item.artwork.artwork
         ? 'Cover in the file'
-        : match?.artwork_hash
+        : match && matchArt(match)
           ? 'Cover of this match'
           : 'No cover',
   );
@@ -153,6 +161,10 @@
     if (await onlookup(link)) url = '';
   }
 
+  function matchArt(candidate: MatchCandidateSummary) {
+    return candidate.artwork_hash ?? artFor(candidate.index);
+  }
+
   function coverLabel(candidate: MatchCandidateSummary) {
     return (
       'Use cover from ' +
@@ -167,15 +179,15 @@
     {#if compact}
       <span class="back-to-tracks"><Button size="sm" onclick={onback}>Back to tracks</Button></span>
     {/if}
-    <header class="hero">
+    <header class="hero" class:compact>
       <figure>
         <Thumb
           seed={item.track.id}
-          size="xl"
+          size={compact ? 'md' : 'xl'}
           src={heroArt ? artworkUrl(heroArt) : null}
           alt={heroCaption}
         />
-        <figcaption>{heroCaption}</figcaption>
+        {#if !compact}<figcaption>{heroCaption}</figcaption>{/if}
       </figure>
       <div class="identity">
         <h2 title={item.track.title}>{item.track.title}</h2>
@@ -231,7 +243,7 @@
                 <Thumb
                   seed={candidate.index + item.track.id}
                   size="sm"
-                  src={candidate.artwork_hash ? artworkUrl(candidate.artwork_hash) : null}
+                  src={matchArt(candidate) ? artworkUrl(matchArt(candidate)!) : null}
                   alt=""
                 />
                 <span class="match-text">
@@ -244,7 +256,7 @@
                 </span>
                 <span class="match-side">
                   <span class="numeric">{percent(candidate.confidence)}</span>
-                  <span class="in-use" class:shown={active}>In use</span>
+                  <span class="in-use" class:shown={active}>{active ? 'In use' : 'Use'}</span>
                 </span>
               </button>
             </li>
@@ -252,22 +264,6 @@
         </ol>
       </section>
     {/if}
-
-    <form class="link" onsubmit={lookup}>
-      <label for="prep-release-link">
-        {item.candidates.length ? 'Not the right release?' : 'Know the release?'}
-      </label>
-      <input
-        id="prep-release-link"
-        type="url"
-        bind:value={url}
-        placeholder="Paste a release link"
-        autocomplete="off"
-      />
-      <Button type="submit" size="sm" disabled={busy || linkBusy || !url.trim()}
-        >{linkBusy ? 'Looking up' : 'Look up'}</Button
-      >
-    </form>
 
     <section class="group" aria-labelledby="prep-tags">
       <div class="group-head">
@@ -304,28 +300,7 @@
               {:else}<span class="missing">Missing</span>{/if}
             </td>
             <td>
-              {#if covers.length > 1 && cover}
-                <span class="covers">
-                  {#each covers as candidate (candidate.index)}
-                    <button
-                      type="button"
-                      class="cover-choice"
-                      aria-pressed={candidate.index === activeCover}
-                      aria-label={coverLabel(candidate)}
-                      title={coverLabel(candidate)}
-                      disabled={busy}
-                      onclick={() => oncover(candidate.index)}
-                    >
-                      <Thumb
-                        seed={candidate.index}
-                        size="sm"
-                        src={candidate.artwork_hash ? artworkUrl(candidate.artwork_hash) : null}
-                        alt=""
-                      />
-                    </button>
-                  {/each}
-                </span>
-              {:else if cover}
+              {#if cover}
                 <Thumb
                   seed={item.track.id + 1}
                   size="sm"
@@ -378,6 +353,71 @@
         </tbody>
       </table>
     </section>
+
+    {#if covers.length}
+      <section class="group" aria-labelledby="prep-covers">
+        <h3 id="prep-covers">
+          Cover <span class="numeric"
+            >{(covers.length + (item.artwork.artwork ? 1 : 0)).toLocaleString('en-GB')} to choose from</span
+          >
+        </h3>
+        <div class="cover-grid" role="group" aria-labelledby="prep-covers">
+          {#if item.artwork.artwork}
+            <button
+              type="button"
+              class="cover-tile"
+              aria-pressed={keepingFileCover}
+              disabled={busy}
+              onclick={onkeepcover}
+            >
+              <Thumb seed={item.track.id} size="lg" src={artworkUrl(item.artwork.artwork)} alt="" />
+              <span class="cover-name">In the file</span>
+              <span class="cover-state">{keepingFileCover ? 'Kept' : 'Keep'}</span>
+            </button>
+          {/if}
+          {#each covers as candidate (candidate.index)}
+            {@const chosen = !!cover && candidate.index === activeCover}
+            {@const art = matchArt(candidate)}
+            <button
+              type="button"
+              class="cover-tile"
+              aria-pressed={chosen}
+              aria-label={coverLabel(candidate)}
+              title={coverLabel(candidate)}
+              disabled={busy}
+              onclick={() => oncover(candidate.index)}
+            >
+              <Thumb
+                seed={candidate.index + item.track.id}
+                size="lg"
+                src={art ? artworkUrl(art) : null}
+                alt=""
+              />
+              <span class="cover-name"
+                >{formatProviderName(candidate.artwork_provider ?? candidate.provider)}</span
+              >
+              <span class="cover-state">{chosen ? 'Suggested' : 'Use'}</span>
+            </button>
+          {/each}
+        </div>
+      </section>
+    {/if}
+
+    <form class="link" onsubmit={lookup}>
+      <label for="prep-release-link">
+        {item.candidates.length ? 'Not the right release?' : 'Know the release?'}
+      </label>
+      <input
+        id="prep-release-link"
+        type="url"
+        bind:value={url}
+        placeholder="Paste a release link"
+        autocomplete="off"
+      />
+      <Button type="submit" size="sm" disabled={busy || linkBusy || !url.trim()}
+        >{linkBusy ? 'Looking up' : 'Look up'}</Button
+      >
+    </form>
 
     <div class="details">
       <MatchEvidenceHeader evidence={item.evidence} steps={item.steps} {onopenproviders} />
@@ -448,6 +488,11 @@
     grid-template-columns: var(--thumb-xl) minmax(0, 1fr);
     gap: var(--space-5);
     align-items: start;
+  }
+  /* A track opened on its own in a small window keeps its tags in view. */
+  .hero.compact {
+    grid-template-columns: var(--thumb-md) minmax(0, 1fr);
+    gap: var(--space-4);
   }
   figure {
     display: grid;
@@ -558,10 +603,6 @@
     background: var(--color-surface-2);
   }
   .match:focus-visible,
-  .cover-choice:focus-visible {
-    outline: var(--focus-ring-width) solid var(--color-text);
-    outline-offset: 1px;
-  }
   .keycap {
     display: inline-grid;
     place-items: center;
@@ -597,11 +638,13 @@
   }
   .in-use {
     font-size: var(--text-xs);
-    color: var(--color-text);
-    opacity: 0;
+    color: var(--color-muted);
   }
   .in-use.shown {
-    opacity: 1;
+    color: var(--color-text);
+  }
+  .match:hover:not(:disabled) .in-use {
+    color: var(--color-text);
   }
   .link {
     display: grid;
@@ -670,25 +713,51 @@
   .action {
     text-align: right;
   }
-  .covers {
+  .cover-grid {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-2);
+    gap: var(--space-3);
   }
-  .tags td:has(.covers) {
-    white-space: normal;
-    padding-block: var(--space-2);
-  }
-  .cover-choice {
-    padding: 0;
+  .cover-tile {
+    display: grid;
+    justify-items: start;
+    gap: var(--space-1);
+    width: calc(var(--thumb-lg) + 2 * var(--space-2));
+    padding: var(--space-2);
+    font: inherit;
+    text-align: left;
+    color: inherit;
+    background: transparent;
     border: var(--border-width) solid transparent;
     border-radius: var(--radius-md);
-    background: transparent;
     cursor: pointer;
-    line-height: 0;
+    transition:
+      background-color var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out);
   }
-  .cover-choice[aria-pressed='true'] {
+  .cover-tile:hover:not(:disabled) {
+    background: var(--color-surface-2);
+  }
+  .cover-tile[aria-pressed='true'] {
     border-color: var(--color-text);
+  }
+  .cover-tile:focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-text);
+    outline-offset: 1px;
+  }
+  .cover-name {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--text-sm);
+  }
+  .cover-state {
+    font-size: var(--text-xs);
+    color: var(--color-muted);
+  }
+  .cover-tile[aria-pressed='true'] .cover-state {
+    color: var(--color-text);
   }
   .details {
     margin-top: auto;
@@ -722,7 +791,7 @@
   }
   @media (forced-colors: active) {
     .match[aria-pressed='true'],
-    .cover-choice[aria-pressed='true'] {
+    .cover-tile[aria-pressed='true'] {
       outline: 2px solid Highlight;
     }
     .tags tr.suggested {

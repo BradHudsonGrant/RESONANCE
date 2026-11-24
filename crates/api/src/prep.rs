@@ -861,6 +861,17 @@ impl Api {
         })
     }
 
+    pub(crate) fn skip_prep_artwork(&self, track_id: i64) -> Result<PrepItem, ApiError> {
+        let skipped = self
+            .locked_library()
+            .skip_proposed_artwork(track_id)
+            .map_err(ApiError::library_unreadable)?;
+        if skipped {
+            self.library_edited();
+        }
+        self.prep_item_for(track_id)
+    }
+
     pub(crate) fn skip_prep_items(
         &self,
         track_ids: &[i64],

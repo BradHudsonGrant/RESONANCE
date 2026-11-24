@@ -244,6 +244,57 @@ fn tag(tags: &[(TagField, String)], field: TagField) -> Option<&str> {
         .map(|(_, value)| value.as_str())
 }
 
+/// An ID3v2.3 text frame in ISO-8859-1.
+fn text_frame(id: &[u8; 4], text: &str) -> Vec<u8> {
+    let mut frame = id.to_vec();
+    frame.extend(
+        u32::try_from(text.len() + 1)
+            .expect("short frame")
+            .to_be_bytes(),
+    );
+    frame.extend([0, 0, 0]);
+    frame.extend(text.as_bytes());
+    frame
+}
+
+#[test]
+fn a_file_with_a_year_that_is_not_a_number_is_read_and_written() {
+    let folder = test_folder("write_tags_bad_year");
+    let path = folder.join("Ada Marsh - Blue Hour.mp3");
+    write_silent_mp3(&path, 1.0).expect("mp3");
+    // Rips often carry frames like this one, which the strict reader refuses outright.
+    let frames = [
+        text_frame(b"TIT2", "Blue Hour"),
+        text_frame(b"TPE1", "Ada Marsh"),
+        text_frame(b"TYER", "10 A"),
+    ]
+    .concat();
+    let size = u32::try_from(frames.len()).expect("short tag");
+    let mut file = b"ID3\x03\x00\x00".to_vec();
+    file.extend([21, 14, 7, 0].map(|shift| ((size >> shift) & 0x7f) as u8));
+    file.extend(frames);
+    file.extend(fs::read(&path).expect("audio"));
+    fs::write(&path, file).expect("tagged");
+
+    let tags = read_tags(&path);
+    assert_eq!(tag(&tags, TagField::Title), Some("Blue Hour"));
+    assert_eq!(tag(&tags, TagField::Artist), Some("Ada Marsh"));
+
+    let (mut database, track_id) = library_of(&folder);
+    database
+        .set_user_tags(
+            &[track_id],
+            &[(TagField::Title, Some("Blue Hour (Late Edit)".to_owned()))],
+        )
+        .expect("user value set");
+    let report = apply_tag_writes(&Mutex::new(database), &[]).expect("apply");
+    assert_eq!(report.written, 1, "{:?}", report.failed);
+    assert_eq!(
+        tag(&read_tags(&path), TagField::Title),
+        Some("Blue Hour (Late Edit)")
+    );
+}
+
 fn writes_and_undoes(file_name: &str, make: impl Fn(&Path)) {
     let folder = test_folder(&format!("write_tags_{file_name}"));
     let path = folder.join(file_name);

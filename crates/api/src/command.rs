@@ -426,6 +426,11 @@ pub enum Request {
         track_id: i64,
         candidate_index: u32,
     },
+    /// Sets aside the suggested cover on one track and keeps the file's own.
+    SkipPrepArtwork {
+        #[ts(type = "number")]
+        track_id: i64,
+    },
     /// Skips pending proposals on one or more tracks in one transaction.
     SkipPrepItems {
         #[ts(type = "Array<number>")]
@@ -557,6 +562,7 @@ pub enum Response {
     SelectPrepCandidate(Box<PrepItem>),
     UsePrepCandidateArtwork(Box<PrepItem>),
     FetchPrepCandidateArtwork(TrackCandidateArtwork),
+    SkipPrepArtwork(Box<PrepItem>),
     SkipPrepItems(AcceptedProposals),
     PreviewBatchTag(AcceptedProposals),
     ApplyBatchTag(AcceptedProposals),

@@ -148,20 +148,25 @@ const GENERIC_MIX_NAMES: [&str; 8] = [
 
 /// Most Bandcamp pages a track's names are allowed to point at, so an unmatched track costs a
 /// few page reads at most.
-pub const MAX_GUESSED_BANDCAMP_PAGES: usize = 6;
+pub const MAX_GUESSED_BANDCAMP_PAGES: usize = 8;
 
 /// Bandcamp track pages the file's names point at. Bandcamp builds a seller's address from
 /// their name and a track's address from its title, so a self-released edit sold there can be
 /// read directly from its page without searching Bandcamp. Tried in order: the remixer, the
-/// name in the mix ("Will & Batty Edit"), then the artist, each with the title alone and with
-/// "Artist - Title", the form self-released edits use.
+/// name in the mix ("Will & Batty Edit"), the artist, then the label, each with the title alone
+/// and with "Artist - Title", the form self-released edits and label compilations use.
 pub fn guessed_bandcamp_pages(known: &super::KnownTags) -> Vec<ReleaseUrl> {
     let (Some(artist), Some(title)) = (known.artist.as_deref(), known.title.as_deref()) else {
         return Vec::new();
     };
     let full_title = crate::staging::title_with_mix(title, known.mix.as_deref());
     let mix_name = known.mix.as_deref().and_then(mix_maker);
-    let sellers = [known.remixer.as_deref(), mix_name.as_deref(), Some(artist)];
+    let sellers = [
+        known.remixer.as_deref(),
+        mix_name.as_deref(),
+        Some(artist),
+        known.label.as_deref(),
+    ];
     let slugs = [
         bandcamp_slug(&full_title),
         bandcamp_slug(&format!("{artist} - {full_title}")),
@@ -344,6 +349,17 @@ mod tests {
                 "https://adamarsh.bandcamp.com/track/ada-marsh-blue-hour-kit-rowe-edit",
             ]
             .map(|url| ReleaseUrl::Bandcamp(url.to_owned()))
+        );
+
+        let labelled = super::super::KnownTags {
+            mix: None,
+            label: Some("Night Owl Records".to_owned()),
+            ..known.clone()
+        };
+        assert!(
+            guessed_bandcamp_pages(&labelled).contains(&ReleaseUrl::Bandcamp(
+                "https://nightowlrecords.bandcamp.com/track/ada-marsh-blue-hour".to_owned()
+            ))
         );
 
         let extended = super::super::KnownTags {

@@ -577,6 +577,10 @@ impl Api {
             } => self
                 .fetch_prep_candidate_artwork(track_id, candidate_index)
                 .map(Response::FetchPrepCandidateArtwork),
+            Request::SkipPrepArtwork { track_id } => self
+                .skip_prep_artwork(track_id)
+                .map(Box::new)
+                .map(Response::SkipPrepArtwork),
             Request::SkipPrepItems { track_ids, fields } => self
                 .skip_prep_items(&track_ids, &fields)
                 .map(Response::SkipPrepItems),

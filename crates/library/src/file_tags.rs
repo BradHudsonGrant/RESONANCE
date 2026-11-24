@@ -3,7 +3,9 @@ use std::fs::File;
 use std::io::{self, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
+use lofty::config::{ParseOptions, ParsingMode};
 use lofty::error::FileParseError;
+use lofty::file::TaggedFile;
 use lofty::picture::PictureType;
 use lofty::prelude::{AudioFile, ItemKey, TaggedFileExt};
 use lofty::probe::Probe;
@@ -167,12 +169,26 @@ pub(crate) fn open_audio_reader(path: &Path) -> io::Result<OffsetFile> {
 /// Reads tags and file facts through a handle opened for reading only, so nothing here can
 /// change the file.
 pub fn read(path: &Path) -> Result<FileContents, FileReadError> {
-    let audio_file = open_audio_reader(path).map_err(FileReadError::Open)?;
-    let tagged = Probe::new(audio_file)
-        .guess_file_type()
-        .map_err(FileReadError::Open)?
-        .read()
-        .map_err(FileReadError::NotAudio)?;
+    let probe = |options: ParseOptions| -> Result<TaggedFile, FileReadError> {
+        let audio_file = open_audio_reader(path).map_err(FileReadError::Open)?;
+        Probe::new(audio_file)
+            .options(options)
+            .guess_file_type()
+            .map_err(FileReadError::Open)?
+            .read()
+            .map_err(FileReadError::NotAudio)
+    };
+    // Rips and re-encodes often carry something the default reader rejects, such as padding
+    // after the first MPEG frame, while the audio and tags are sound. Those files are read again
+    // leniently rather than left out of the library with no tags to search with.
+    let tagged = match probe(ParseOptions::new()) {
+        Ok(tagged) => tagged,
+        Err(FileReadError::NotAudio(first)) => {
+            probe(ParseOptions::new().parsing_mode(ParsingMode::Relaxed))
+                .map_err(|_| FileReadError::NotAudio(first))?
+        }
+        Err(error) => return Err(error),
+    };
 
     let properties = tagged.properties();
     let audio = AudioFacts {

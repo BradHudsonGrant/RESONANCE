@@ -535,6 +535,15 @@ fn staging_queue_zero_limit_counts_pending_artwork_only_tracks() {
     };
     assert_eq!(page.total, 1);
     assert!(page.items.is_empty());
+
+    let Response::SkipPrepArtwork(item) = api
+        .handle(Request::SkipPrepArtwork { track_id: id })
+        .unwrap()
+    else {
+        panic!("expected SkipPrepArtwork");
+    };
+    assert!(item.artwork.proposed.is_none(), "the file's cover is kept");
+    assert_eq!(item.track.title, "Cover Only");
 }
 
 #[test]

@@ -130,6 +130,9 @@
         accept,
         expected_review,
       }),
+    candidateArtwork: (track_id, candidate_index) =>
+      core.call('fetch_prep_candidate_artwork', { track_id, candidate_index }),
+    skipArtwork: (track_id) => core.call('skip_prep_artwork', { track_id }),
     identifyOnline: (track_ids, only_selected) =>
       core.call('identify_online', { track_ids, only_selected }),
     identifyWithUrl: (track_id, url) => core.call('identify_with_url', { track_id, url }),

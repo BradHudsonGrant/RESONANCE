@@ -22,7 +22,7 @@ The rule that places a track in a stage lives in `crates/core/src/prep.rs` (`Pre
 
 **Find matches** searches every track in the current tab, or only the ticked tracks when any are ticked. The button names how many tracks it will search. While a search runs, a strip under the toolbar shows how many tracks are done, the rows being searched say Searching, and the rest of Prep stays usable. When it ends, the strip says how many tracks are ready to review and how many found nothing.
 
-A track the catalogues do not know, such as an edit sold only on Bandcamp, is looked up on the Bandcamp page its names point at: the remixer or the name in the mix, then the artist, with the title as Bandcamp writes it in the address.
+A track the catalogues do not know, such as an edit sold only on Bandcamp, is looked up on the Bandcamp page its names point at: the remixer or the name in the mix, the artist, then the label, with the title as Bandcamp writes it in the address.
 
 The checkboxes are for working on many tracks at once. Moving between tabs keeps the ticks. Changing the filter or the Library selection clears them.
 
@@ -37,7 +37,8 @@ The review pane answers one question first: is this the right release?
 - The cover sits at the top, larger than anything else, beside the title, artist and release.
 - Under them, the confidence and the evidence in plain words: whether the audio fingerprint matches, how the length compares and which providers agree. A match on names alone says to listen before saving.
 - **Tags** lists every tag a file can hold, the file's value beside the suggested one, with Missing where the file has none. Each suggestion has its own **Accept**, and **Accept all** takes every one. The mix is part of the title, as stores and DJ software write it, so a remix or edit never leaves the title. A suggestion that differs from the file only in letter case is not offered. Fields the user typed are never offered and are listed as kept.
-- **Matches** lists every release the search found, numbered. Choosing another one, or pressing its number, updates the changes. When there are several covers, the artwork row shows each one to choose from.
+- **Matches** lists every release the search found, numbered, each with its cover. The one in use says so and the others say Use. Choosing another one, or pressing its number, updates the suggestions.
+- **Cover** shows the file's cover and each match's cover at a size worth judging. Choosing a match's cover suggests it; choosing the file's keeps it. Match covers are fetched for viewing when the track opens and are not suggested until chosen.
 - **Not the right release?** takes a pasted release page and looks the track up from it.
 - **Search details** shows what each provider returned, and links to provider settings when a key is missing.
 

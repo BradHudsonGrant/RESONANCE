@@ -20,6 +20,7 @@
   import type { TagName } from '../ipc/bindings/TagName';
   import type { TagWriteReport } from '../ipc/bindings/TagWriteReport';
   import type { TrackQuery } from '../ipc/bindings/TrackQuery';
+  import type { TrackCandidateArtwork } from '../ipc/bindings/TrackCandidateArtwork';
   import type { TrackIdentification } from '../ipc/bindings/TrackIdentification';
   import type { UndoReport } from '../ipc/bindings/UndoReport';
   import BatchTagSheet from './BatchTagSheet.svelte';
@@ -81,6 +82,9 @@
       accept: boolean,
       expectedReview: string,
     ) => Promise<PrepItem>;
+    /** Fetches a match's cover for viewing, without suggesting it. */
+    candidateArtwork: (trackId: number, index: number) => Promise<TrackCandidateArtwork>;
+    skipArtwork: (trackId: number) => Promise<PrepItem>;
     identifyOnline: (trackIds: number[], onlySelected: boolean) => Promise<ActivitySnapshot>;
     identifyWithUrl: (trackId: number, url: string) => Promise<TrackIdentification>;
     previewBatchTag: (trackIds: number[], tool: BatchTagTool) => Promise<AcceptedProposals>;
@@ -652,6 +656,53 @@
       updateItem(updated);
     });
   }
+  function keepFileCover(item: PrepItem) {
+    if (reloading || activeId !== item.track.id) return;
+    void run(async () => {
+      markOwnWrite();
+      const updated = await client.skipArtwork(item.track.id);
+      chosenCoverByTrack = Object.fromEntries(
+        Object.entries(chosenCoverByTrack).filter(([id]) => Number(id) !== item.track.id),
+      );
+      updateItem(updated);
+    });
+  }
+
+  // Covers of the matches on the open track, fetched for viewing as soon as it opens. Keyed by
+  // track and match, so moving between tracks keeps what was already fetched.
+  let matchArt = $state.raw<Record<string, string | null>>({});
+  // Plain bookkeeping for requests already sent; nothing renders from it.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const artRequested = new Set<string>();
+  $effect(() => {
+    const item = current;
+    if (!item) return;
+    const wanted = item.candidates
+      .filter((candidate) => candidate.has_artwork && !candidate.artwork_hash)
+      .map((candidate) => candidate.index)
+      .filter((index) => !artRequested.has(item.track.id + ':' + index))
+      .slice(0, 8);
+    if (!wanted.length) return;
+    untrack(() => void loadMatchArt(item.track.id, wanted));
+  });
+
+  async function loadMatchArt(trackId: number, indexes: number[]) {
+    for (const index of indexes) {
+      const key = trackId + ':' + index;
+      if (artRequested.has(key)) continue;
+      artRequested.add(key);
+      try {
+        const result = await client.candidateArtwork(trackId, index);
+        const found: Record<string, string | null> = {};
+        for (const state of result.candidates) {
+          found[trackId + ':' + state.index] = state.artwork_hash;
+        }
+        matchArt = { ...matchArt, ...found };
+      } catch {
+        // A cover that cannot be fetched leaves the placeholder. The match itself still works.
+      }
+    }
+  }
   async function lookupLink(item: PrepItem, link: string): Promise<boolean> {
     if (busy || linkBusy) return false;
     linkBusy = true;
@@ -1097,6 +1148,8 @@
           {linkBusy}
           {compact}
           chosenCover={chosenCoverByTrack[item.track.id]}
+          artFor={(index) => matchArt[item.track.id + ':' + index] ?? null}
+          onkeepcover={() => keepFileCover(item)}
           canUndo={lastAction !== null && lastAction.track === item.track.id}
           onaccept={(fields, artwork) => acceptTrack(item, fields, artwork)}
           onskip={() => skipTrack(item)}

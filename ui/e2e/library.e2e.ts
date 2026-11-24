@@ -1365,7 +1365,19 @@ test('a batch of 50 mixed files goes from untagged to tagged in Prep using the k
         await firstTrack.press('Enter');
         await expect(prep.getByRole('button', { name: 'Back to tracks' })).toBeFocused();
       }
-      await expect(prep.getByRole('button', { name: 'Accept Artist' })).toBeInViewport();
+      const acceptArtist = prep.getByRole('button', { name: 'Accept Artist' });
+      if (width === 760) {
+        // A short window scrolls the review; Tab reaches the suggestion and brings it into view.
+        for (
+          let step = 0;
+          step < 20 && !(await acceptArtist.evaluate((el) => el === document.activeElement));
+          step++
+        ) {
+          await page.keyboard.press('Tab');
+        }
+        await expect(acceptArtist).toBeFocused();
+      }
+      await expect(acceptArtist).toBeInViewport();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       );
