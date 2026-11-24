@@ -238,48 +238,47 @@ export function localSource(item: PrepItem): string | null {
 }
 
 export interface RowStatus {
+  /** One plain phrase for where the track stands. */
   primary: string;
+  /** What is waiting, in a few words, or empty. */
   secondary: string;
-  confidence: string | null;
+}
+
+function count(n: number, one: string, many: string): string {
+  return n.toLocaleString('en-GB') + ' ' + (n === 1 ? one : many);
 }
 
 export function rowStatus(item: PrepItem): RowStatus {
-  const changes = reviewableFields(item).length + (item.artwork.proposed ? 1 : 0);
-  const changeText = changes === 1 ? '1 change' : `${changes.toLocaleString('en-GB')} changes`;
+  const waiting = reviewableFields(item).length + (item.artwork.proposed ? 1 : 0);
+  // Without an online match, waiting suggestions are tidy-ups read from the file itself.
+  const source = localSource(item);
+  const fixes = waiting
+    ? count(waiting, 'fix', 'fixes') + (source ? ' from ' + source.toLowerCase() : '')
+    : '';
   switch (item.stage) {
     case 'review': {
       const match = selectedCandidate(item);
-      if (match) {
-        return {
-          primary: match.audio_matched ? 'Audio match' : 'Name match',
-          secondary: changeText,
-          confidence: percent(match.confidence),
-        };
-      }
-      const source = localSource(item);
       return {
-        primary: source ? 'From ' + source.toLowerCase() : 'Suggested',
-        secondary: changeText,
-        confidence: null,
+        primary: match ? (match.audio_matched ? 'Audio match' : 'Name match') : 'Match',
+        secondary:
+          (match ? percent(match.confidence) + ' · ' : '') +
+          count(waiting, 'to accept', 'to accept'),
       };
     }
     case 'not_searched':
-      return { primary: 'Not searched', secondary: '', confidence: null };
+      return { primary: 'Not searched', secondary: fixes };
     case 'no_match':
       return {
         primary: 'No match',
-        secondary: item.needs_url ? 'Needs a release link' : '',
-        confidence: null,
+        secondary: fixes || (item.needs_url ? 'Paste a release link' : ''),
       };
     case 'done':
       return {
         primary: item.has_unwritten ? 'Edits not written' : 'Done',
         secondary: '',
-        confidence: null,
       };
   }
 }
-
 export function resolveActiveCoverIndex(
   item: PrepItem,
   chosenCover: number | undefined,

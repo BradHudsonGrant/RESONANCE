@@ -477,8 +477,7 @@ describe('prep view', () => {
   it('describes each row by its stage', () => {
     expect(rowStatus(makeItem(0))).toEqual({
       primary: 'Audio match',
-      secondary: '3 changes',
-      confidence: '94%',
+      secondary: '94% · 3 to accept',
     });
     const base = makeItem(1);
     const local = {
@@ -487,11 +486,13 @@ describe('prep view', () => {
       evidence: null,
       fields: base.fields.map((field) => ({ ...field, provider: field.provider && 'filename' })),
     };
-    expect(rowStatus(local).primary).toBe('From filename');
+    expect(rowStatus({ ...local, stage: 'not_searched', online_checked: false })).toEqual({
+      primary: 'Not searched',
+      secondary: '3 fixes from filename',
+    });
     expect(rowStatus({ ...makeItem(2, 'no_match'), needs_url: true })).toEqual({
       primary: 'No match',
-      secondary: 'Needs a release link',
-      confidence: null,
+      secondary: 'Paste a release link',
     });
   });
 

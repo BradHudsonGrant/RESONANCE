@@ -1513,7 +1513,8 @@ fn prep_page_paginates_and_accept_reports_reverted_fields() {
         panic!("expected review page");
     };
     assert_eq!(review.total, counts.review);
-    assert!(review.items.iter().any(|item| item.track.id == first_id));
+    // Searched with no stored match: its waiting suggestion does not make it a match to review.
+    assert!(!review.items.iter().any(|item| item.track.id == first_id));
     let Response::PrepTrackIds(no_match) = api
         .handle(Request::PrepTrackIds {
             query: None,
@@ -1524,7 +1525,7 @@ fn prep_page_paginates_and_accept_reports_reverted_fields() {
     else {
         panic!("expected track ids");
     };
-    assert!(!no_match.contains(&first_id));
+    assert!(no_match.contains(&first_id));
 
     let Response::AcceptAndWrite(reverted) = api
         .handle(Request::AcceptAndWrite {

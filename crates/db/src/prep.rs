@@ -78,7 +78,7 @@ impl Database {
             // A search that ran but had a provider fail is stored as not complete, so the next
             // pass retries it. It has still been searched, and the stage says so.
             "SELECT track_id, best_json IS NOT NULL FROM track_identification
-             WHERE online = 1 OR steps_json LIKE '%\"step\":\"text_search\"%'",
+             WHERE online = 1 OR best_json IS NOT NULL OR steps_json LIKE '%\"step\":\"text_search\"%'",
         )?;
         for row in online.query_map([], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, bool>(1)?))

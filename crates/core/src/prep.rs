@@ -286,27 +286,31 @@ fn collapse_spaces_and_empty_brackets(text: &str) -> String {
 /// Where a track stands in Prep. The order is the order a user works through them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PrepStage {
-    /// Suggestions are waiting for a decision, from a search or from the file's own name.
+    /// An online match's suggestions are waiting for a decision.
     Review,
-    /// No online search has run for the track yet.
+    /// No online search has run for the track yet. Tidy-ups read from its own tags or name may
+    /// be waiting, but nothing has been matched.
     NotSearched,
-    /// An online search ran and found nothing usable.
+    /// An online search ran and found nothing usable. Tidy-ups from the file may be waiting.
     NoMatch,
     /// Matched online and every suggestion has been saved or skipped.
     Done,
 }
 
 impl PrepStage {
-    /// Waiting suggestions come first, because they are the only stage with a decision to make.
+    /// Only an online match puts a track up for review. Tidy-ups read from the file alone do
+    /// not: a track with nothing but those is still waiting to be searched, and the list says so.
     pub fn of(has_pending: bool, searched_online: bool, matched_online: bool) -> Self {
-        if has_pending {
-            Self::Review
-        } else if !searched_online {
-            Self::NotSearched
-        } else if matched_online {
-            Self::Done
-        } else {
+        if matched_online {
+            if has_pending {
+                Self::Review
+            } else {
+                Self::Done
+            }
+        } else if searched_online {
             Self::NoMatch
+        } else {
+            Self::NotSearched
         }
     }
 }
@@ -593,8 +597,8 @@ mod tests {
 
     #[test]
     fn prep_stage_puts_waiting_suggestions_first() {
-        assert_eq!(PrepStage::of(true, false, false), PrepStage::Review);
-        assert_eq!(PrepStage::of(true, true, false), PrepStage::Review);
+        assert_eq!(PrepStage::of(true, false, false), PrepStage::NotSearched);
+        assert_eq!(PrepStage::of(true, true, false), PrepStage::NoMatch);
         assert_eq!(PrepStage::of(true, true, true), PrepStage::Review);
         assert_eq!(PrepStage::of(false, false, false), PrepStage::NotSearched);
         assert_eq!(PrepStage::of(false, true, false), PrepStage::NoMatch);

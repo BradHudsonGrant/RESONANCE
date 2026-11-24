@@ -4,12 +4,12 @@ Prep is where new tracks get their tags. Every track in the view sits in one lis
 
 ## Status
 
-| Status       | What it means                                                                      |
-| ------------ | ---------------------------------------------------------------------------------- |
-| To review    | Suggestions are waiting for a decision, from an online match or from the file name |
-| Not searched | No online search has run for the track                                             |
-| No match     | An online search ran and found nothing usable                                      |
-| Done         | The track was matched and its suggestions have all been saved or skipped           |
+| Status       | What it means                                                                          |
+| ------------ | -------------------------------------------------------------------------------------- |
+| To review    | An online match's suggestions are waiting for a decision                               |
+| Not searched | No online search has run for the track. Fixes from its own tags or name may be waiting |
+| No match     | An online search ran and found nothing usable. Fixes from the file may be waiting      |
+| Done         | The track was matched and its suggestions have all been saved or skipped               |
 
 The rule that gives a track its status lives in `crates/core/src/prep.rs` (`PrepStage`). The toolbar sums the statuses up in a line, such as "36 to review · 395 not searched". Sorting by the Status column lists them in the order above, then the other way round.
 
@@ -29,7 +29,7 @@ The checkboxes are for working on many tracks at once. Sorting keeps the ticks. 
 
 ## The list
 
-Each row shows the cover (the suggested one if there is one), title and artist, then Genre, Label and Year, then where the track stands: the match confidence and whether the audio or only the names matched, the number of changes waiting, or Not searched, No match or Done. An empty column shows a dash, and a missing artist, title or cover is named under the artist. Clicking a column header sorts by it, A to Z, then Z to A, then back to Prep's order. Status sorts by stage. As the list narrows, Label goes first, then Genre and Year, and the missing tags move into the line under the artist. The order is fixed when the list loads or is sorted. Saving, skipping or searching changes a track's status in place, so nothing moves while the user works; sorting again brings the new order. There are no pages: more tracks load as the list scrolls.
+Each row shows the cover (the suggested one if there is one), title and artist, then Genre, Label and Year, then its status in two short lines. A match says whether the audio or only the names matched, then its confidence and how many suggestions wait, such as `100% · 3 to accept`. A track with only fixes read from its own tags or name says Not searched, then `2 fixes from filename`, so a tidy-up is never mistaken for a match. An empty column shows a dash, and a missing artist, title or cover is named under the artist. Clicking a column header sorts by it, A to Z, then Z to A, then back to Prep's order. Status sorts by stage. As the list narrows, Label goes first, then Genre and Year, and the missing tags move into the line under the artist. The order is fixed when the list loads or is sorted. Saving, skipping or searching changes a track's status in place, so nothing moves while the user works; sorting again brings the new order. There are no pages. The list is as tall as every track in the view from the start, and only the rows in sight are drawn and fetched, so the scrollbar stays put and a long library stays quick.
 
 ## Review
 
@@ -59,7 +59,7 @@ If a file has changed or cannot be written, Prep lists it with the reason and ke
 | `X`                    | Tick or untick this track                                             |
 | `Ctrl+A`               | Tick or untick every track in the list                                |
 | `Enter`                | Accept every suggestion, or search a track that has not been searched |
-| `S`                    | Skip this track's suggestions                                         |
+| `S`                    | Skip this track's suggestions or fixes                                |
 | `1` to `9`             | Choose that match                                                     |
 | `F`                    | Find matches for the ticked tracks, or this track                     |
 | `Shift+A`              | Save every suggestion for the ticked tracks                           |

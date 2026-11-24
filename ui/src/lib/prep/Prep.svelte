@@ -41,6 +41,7 @@
     intersectSelection,
     missingNow,
     pruneSelection,
+    reviewableFields,
     rowStatus,
     stageSummary,
     type ListColumn,
@@ -123,8 +124,8 @@
     onfocustrack,
   }: Props = $props();
 
-  // Rows load as the list scrolls, this many at a time.
-  const chunkSize = 50;
+  // Rows beyond the visible ones that are drawn and fetched, so a short scroll shows no gaps.
+  const overscan = 15;
   const noCounts: PrepStageCounts = { review: 0, not_searched: 0, no_match: 0, done: 0 };
   let missing = $state<MissingField | ''>('');
   let counts = $state<PrepStageCounts>(noCounts);
@@ -132,8 +133,20 @@
   // searching refreshes rows in place, so a track never jumps while it is being worked on.
   let order = $state.raw<number[]>([]);
   const totalCount = $derived(order.length);
-  let items = $state.raw<PrepItem[]>([]);
-  let loadingMore = $state(false);
+  // Tracks fetched so far, by ID. Only the rows in view are drawn, and the list is as tall as the
+  // whole view from the start, so the scrollbar never jumps as more rows arrive.
+  let byId = $state.raw<Readonly<Record<number, PrepItem>>>({});
+  let scrollTop = $state(0);
+  let viewHeight = $state(0);
+  let rowHeight = $state(56);
+  const windowStart = $derived(Math.max(0, Math.floor(scrollTop / rowHeight) - overscan));
+  const windowEnd = $derived(
+    Math.min(order.length, Math.ceil((scrollTop + viewHeight) / rowHeight) + overscan),
+  );
+  const visibleIds = $derived(order.slice(windowStart, windowEnd));
+  // Plain bookkeeping for rows already requested; nothing renders from it.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const fetching = new Set<number>();
   let activeId = $state<number | null>(null);
   const selected = createSelectionSet();
   let selectionVersion = $state(0);
@@ -181,7 +194,7 @@
   let listSort = $state<ListSort | null>(null);
   const filterQuery = $derived(withFindText(buildMissingQuery(batchQuery, missing), appliedFind));
   const scopeQuery = $derived(withListSort(filterQuery, listSort));
-  const current = $derived(items.find((item) => item.track.id === activeId) ?? null);
+  const current = $derived(activeId == null ? null : (byId[activeId] ?? null));
   const detailOpen = $derived(compact && reviewing && current !== null);
   const selectedCount = $derived((void selectionVersion, selected.size));
   const searchBusy = $derived(busy || !!activeOnlineJob || selectingAll);
@@ -271,20 +284,24 @@
         selectingAll = false;
         selectAllPromise = null;
         order = [];
-        items = [];
+        byId = {};
         activeId = null;
         reviewing = false;
         chosenCoverByTrack = {};
         loading = true;
         keyboardTarget = null;
-      } else if (!items.length) {
+      } else if (!order.length) {
         loading = true;
       }
       sortKey = sorting;
       loadError = '';
     });
 
-    const keep = untrack(() => Math.max(items.length, chunkSize));
+    const shown = untrack(() => ({
+      start: windowStart,
+      end: Math.max(windowEnd, windowStart + 40),
+      active: activeId,
+    }));
     const previous = untrack(() => order);
     const reorder = newScope || newSort || onlyRevisionChanged;
     void (async () => {
@@ -301,19 +318,24 @@
         const known = new Set(kept);
         ids = [...kept, ...nextOrder.filter((id) => !known.has(id))];
       }
-      const loaded = await itemsFor(ids.slice(0, keep));
+      // Saving, searching or sorting refetches only what is in view; the rest loads on scroll.
+      const wanted = ids.slice(shown.start, shown.end);
+      if (shown.active != null && !wanted.includes(shown.active) && ids.includes(shown.active)) {
+        wanted.push(shown.active);
+      }
+      const loaded = await itemsFor(wanted);
       return { ids, loaded, nextCounts };
     })()
       .then(({ ids, loaded, nextCounts }) => {
         if (request !== fetchGeneration) return;
         order = ids;
         counts = nextCounts;
-        items = loaded;
+        byId = Object.fromEntries(loaded.map((item) => [item.track.id, item]));
         if (selected.size > 0 && !selectAllPromise && pruneSelection(selected, ids)) {
           selectionVersion++;
         }
-        if (!items.some((item) => item.track.id === activeId)) {
-          setActive(items[0]?.track.id ?? null);
+        if (activeId == null || !ids.includes(activeId)) {
+          setActive(ids[0] ?? null);
         }
         reloading = false;
         loading = false;
@@ -321,7 +343,7 @@
       })
       .catch((err: unknown) => {
         if (request !== fetchGeneration) return;
-        items = [];
+        byId = {};
         order = [];
         activeId = null;
         loadError = message(err);
@@ -330,25 +352,57 @@
       });
   });
 
-  async function loadMore() {
-    if (loadingMore || reloading || items.length >= order.length) return;
-    loadingMore = true;
+  // Rows that scroll into view are fetched in one request after scrolling settles briefly.
+  let fetchTimer: ReturnType<typeof setTimeout> | undefined;
+  $effect(() => {
+    const ids = visibleIds;
+    const loaded = byId;
+    if (reloading) return;
+    const missing = ids.filter((id) => !(id in loaded) && !fetching.has(id));
+    if (!missing.length) return;
+    clearTimeout(fetchTimer);
+    fetchTimer = setTimeout(() => void fetchRows(missing), 60);
+  });
+
+  async function fetchRows(ids: number[]) {
     const request = fetchGeneration;
+    for (const id of ids) fetching.add(id);
     try {
-      const next = await itemsFor(order.slice(items.length, items.length + chunkSize));
-      if (request === fetchGeneration) items = [...items, ...next];
+      const next = await itemsFor(ids);
+      if (request !== fetchGeneration) return;
+      byId = { ...byId, ...Object.fromEntries(next.map((item) => [item.track.id, item])) };
+      void focusKeyboardRow();
     } catch (err) {
       notice = message(err);
     } finally {
-      loadingMore = false;
+      for (const id of ids) fetching.delete(id);
     }
   }
 
+  // The row height comes from the stylesheet; reading it keeps the drawn window lined up.
+  $effect(() => {
+    void byId;
+    const row = listScroll?.querySelector<HTMLElement>('.row');
+    if (row && row.offsetHeight > 0 && row.offsetHeight !== untrack(() => rowHeight)) {
+      rowHeight = row.offsetHeight;
+    }
+  });
+
   function onListScroll(event: Event) {
-    const list = event.currentTarget as HTMLElement;
-    if (list.scrollTop + list.clientHeight > list.scrollHeight - 600) void loadMore();
+    scrollTop = (event.currentTarget as HTMLElement).scrollTop;
   }
 
+  /** Scrolls the list just enough to show the track at this position. */
+  function revealRow(position: number) {
+    const list = listScroll;
+    if (!list || position < 0) return;
+    const top = position * rowHeight;
+    if (top < list.scrollTop) list.scrollTop = top;
+    else if (top + rowHeight > list.scrollTop + list.clientHeight) {
+      list.scrollTop = top + rowHeight - list.clientHeight;
+    }
+    scrollTop = list.scrollTop;
+  }
   $effect(() => {
     const job = recentOnlineJob;
     if (job && job.id !== finishedJob) {
@@ -421,9 +475,9 @@
       clearTicks();
       return;
     }
-    if (items.length === totalCount) {
+    if (order.length === totalCount) {
       selected.clear();
-      for (const item of items) selected.add(item.track.id);
+      for (const id of order) selected.add(id);
       pendingSelectToggles = [];
       selectionVersion++;
       return;
@@ -458,7 +512,7 @@
   async function resolveSelectedIds() {
     if (selectAllPromise) await selectAllPromise;
     if (!selected.size) return [];
-    if (missing !== '' && totalCount > items.length) {
+    if (missing !== '' && selected.size > 0) {
       const validIds = await client.trackIds(scopeQuery, batchTrackIds, null);
       const kept = intersectSelection(selected, validIds);
       if (kept.length !== selected.size) {
@@ -472,12 +526,12 @@
   }
   async function focusKeyboardRow() {
     const target = keyboardTarget;
-    if (target == null || !items.some((item) => item.track.id === target)) return;
+    if (target == null || !(target in byId)) return;
     await tick();
     if (keyboardTarget !== target || activeId !== target) return;
     keyboardTarget = null;
     workspace.querySelector<HTMLElement>('[data-active="true"] .track-name')?.focus();
-    const row = items.find((item) => item.track.id === target);
+    const row = byId[target];
     if (row) onfocustrack?.(row.track);
   }
 
@@ -505,7 +559,7 @@
     }
   }
   function updateItem(updated: PrepItem) {
-    items = items.map((item) => (item.track.id === updated.track.id ? updated : item));
+    byId = { ...byId, [updated.track.id]: updated };
   }
   async function run(action: () => Promise<void>) {
     if (busy) return;
@@ -755,13 +809,12 @@
       return;
     }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      if (!items.length || detailOpen) return;
-      if (target instanceof HTMLElement && target.closest('[role="tablist"]')) return;
+      if (!order.length || detailOpen) return;
       const offset = event.key === 'ArrowDown' ? 1 : -1;
-      const currentIdx = items.findIndex((item) => item.track.id === activeId);
-      const nextIdx = (currentIdx === -1 ? (offset > 0 ? -1 : items.length) : currentIdx) + offset;
-      if (nextIdx >= 0 && nextIdx < items.length) {
-        const id = items[nextIdx]!.track.id;
+      const currentIdx = activeId == null ? -1 : order.indexOf(activeId);
+      const nextIdx = (currentIdx === -1 ? (offset > 0 ? -1 : order.length) : currentIdx) + offset;
+      if (nextIdx >= 0 && nextIdx < order.length) {
+        const id = order[nextIdx]!;
         event.preventDefault();
         if (event.shiftKey && !selected.has(id)) {
           selected.add(id);
@@ -769,12 +822,8 @@
         }
         setActive(id);
         keyboardTarget = id;
+        revealRow(nextIdx);
         void focusKeyboardRow();
-        return;
-      }
-      if (offset > 0 && items.length < totalCount) {
-        event.preventDefault();
-        void loadMore();
       }
       return;
     }
@@ -796,7 +845,12 @@
       if (compact && !detailOpen) focusItem(current);
       else if (current.stage === 'not_searched') findMatch(current);
       else review?.acceptAll();
-    } else if (key === 's' && !event.shiftKey && current && current.stage === 'review') {
+    } else if (
+      key === 's' &&
+      !event.shiftKey &&
+      current &&
+      (reviewableFields(current).length > 0 || !!current.artwork.proposed)
+    ) {
       event.preventDefault();
       skipTrack(current);
     } else if (key === 'f' && !event.shiftKey) {
@@ -1032,74 +1086,91 @@
             {/each}
           </div>
         </div>
-        <ul class="list-scroll" aria-busy={loading} bind:this={listScroll} onscroll={onListScroll}>
-          {#each items as item (item.track.id)}
-            {@const status = rowStatus(item)}
-            {@const gaps = missingNow(item)}
-            {@const searching = !!activeOnlineJob && searchingIds.has(item.track.id)}
-            {@const art = item.artwork.proposed?.artwork ?? item.artwork.artwork}
-            <li
-              class="row"
-              class:active={item.track.id === activeId}
-              data-active={item.track.id === activeId}
-            >
-              <input
-                type="checkbox"
-                aria-label={'Tick ' + item.track.title}
-                checked={isSelected(item.track.id)}
-                onchange={() => selectOne(item.track.id)}
-              />
-              <button
-                type="button"
-                class="track-name"
-                aria-pressed={item.track.id === activeId}
-                onclick={() => focusItem(item)}
-                title={item.track.location}
-              >
-                <Thumb seed={item.track.id} size="sm" src={art ? artworkUrl(art) : null} alt="" />
-                <span class="names">
-                  <span class="title">{item.track.title}</span>
-                  <span class="artist"
-                    >{#if item.track.artist}{item.track.artist}{/if}{#if gaps.length}<span
-                        class="gaps">{item.track.artist ? ' · ' : ''}Missing {gaps.join(', ')}</span
-                      >{#if gaps.some((gap) => !COLUMN_GAPS.has(gap))}<span class="gaps-wide"
-                          >{item.track.artist ? ' · ' : ''}Missing {gaps
-                            .filter((gap) => !COLUMN_GAPS.has(gap))
-                            .join(', ')}</span
-                        >{/if}{/if}</span
+        <div
+          class="list-scroll"
+          bind:this={listScroll}
+          bind:clientHeight={viewHeight}
+          onscroll={onListScroll}
+        >
+          <ul
+            class="rows"
+            aria-busy={loading}
+            style:padding-top={windowStart * rowHeight + 'px'}
+            style:padding-bottom={(order.length - windowEnd) * rowHeight + 'px'}
+          >
+            {#each visibleIds as id (id)}
+              {@const item = byId[id]}
+              {#if !item}
+                <li class="row placeholder" aria-hidden="true" style:height={rowHeight + 'px'}></li>
+              {:else}
+                {@const status = rowStatus(item)}
+                {@const gaps = missingNow(item)}
+                {@const searching = !!activeOnlineJob && searchingIds.has(item.track.id)}
+                {@const art = item.artwork.proposed?.artwork ?? item.artwork.artwork}
+                <li
+                  class="row"
+                  class:active={item.track.id === activeId}
+                  data-active={item.track.id === activeId}
+                >
+                  <input
+                    type="checkbox"
+                    aria-label={'Tick ' + item.track.title}
+                    checked={isSelected(item.track.id)}
+                    onchange={() => selectOne(item.track.id)}
+                  />
+                  <button
+                    type="button"
+                    class="track-name"
+                    aria-pressed={item.track.id === activeId}
+                    onclick={() => focusItem(item)}
+                    title={item.track.location}
                   >
-                </span>
-                {#each ['genre', 'label', 'year'] as const as column (column)}
-                  {@const value = item.track[column]}
-                  <span
-                    class="cell"
-                    data-column={column}
-                    class:numeric={column === 'year'}
-                    class:empty-cell={!value}
-                    title={value ?? undefined}
-                    >{#if value}{value}{:else}<span aria-label={'No ' + column}>–</span>{/if}</span
-                  >
-                {/each}
-                <span class="status" data-stage={searching ? 'searching' : item.stage}>
-                  {#if searching && item.stage === 'not_searched'}
-                    <span class="status-main">Searching</span>
-                  {:else}
-                    <span class="status-main"
-                      >{#if status.confidence}<span class="numeric">{status.confidence}</span
-                        >{/if}{status.primary}</span
-                    >
-                    {#if status.secondary}<span class="status-sub">{status.secondary}</span>{/if}
-                  {/if}
-                </span>
-              </button>
-            </li>
-          {/each}
-        </ul>
-        {#if items.length < totalCount}
-          <p class="more" role="status">
-            {loadingMore ? 'Loading more tracks…' : 'Scroll for more tracks'}
-          </p>
-        {/if}
+                    <Thumb
+                      seed={item.track.id}
+                      size="sm"
+                      src={art ? artworkUrl(art) : null}
+                      alt=""
+                    />
+                    <span class="names">
+                      <span class="title">{item.track.title}</span>
+                      <span class="artist"
+                        >{#if item.track.artist}{item.track.artist}{/if}{#if gaps.length}<span
+                            class="gaps"
+                            >{item.track.artist ? ' · ' : ''}Missing {gaps.join(', ')}</span
+                          >{#if gaps.some((gap) => !COLUMN_GAPS.has(gap))}<span class="gaps-wide"
+                              >{item.track.artist ? ' · ' : ''}Missing {gaps
+                                .filter((gap) => !COLUMN_GAPS.has(gap))
+                                .join(', ')}</span
+                            >{/if}{/if}</span
+                      >
+                    </span>
+                    {#each ['genre', 'label', 'year'] as const as column (column)}
+                      {@const value = item.track[column]}
+                      <span
+                        class="cell"
+                        data-column={column}
+                        class:numeric={column === 'year'}
+                        class:empty-cell={!value}
+                        title={value ?? undefined}
+                        >{#if value}{value}{:else}<span aria-label={'No ' + column}>–</span
+                          >{/if}</span
+                      >
+                    {/each}
+                    <span class="status" data-stage={searching ? 'searching' : item.stage}>
+                      {#if searching && item.stage === 'not_searched'}
+                        <span class="status-main">Searching</span>
+                      {:else}
+                        <span class="status-main">{status.primary}</span>
+                        {#if status.secondary}<span class="status-sub">{status.secondary}</span
+                          >{/if}
+                      {/if}
+                    </span>
+                  </button>
+                </li>
+              {/if}
+            {/each}
+          </ul>
+        </div>
       </section>
 
       {#if current}
@@ -1417,12 +1488,19 @@
     min-width: 0;
     min-height: 0;
     overflow-y: auto;
+    /* Rows are swapped as the list scrolls; anchoring would nudge the position each time. */
+    overflow-anchor: none;
+  }
+  .rows {
     list-style: none;
     margin: 0;
     padding: 0;
   }
   .row {
     position: relative;
+    box-sizing: border-box;
+    /* Every row is the same height, so the list can place rows it has not drawn. */
+    height: calc(var(--thumb-sm) + var(--space-5));
     display: grid;
     grid-template-columns: var(--checkbox-size) minmax(0, 1fr);
     align-items: center;
@@ -1493,9 +1571,6 @@
     overflow: hidden;
     white-space: nowrap;
   }
-  .status-main .numeric {
-    color: var(--color-text);
-  }
   .status[data-stage='review'] .status-main {
     color: var(--color-text);
   }
@@ -1507,12 +1582,9 @@
     color: var(--color-muted);
     white-space: nowrap;
   }
-  .more {
-    margin: 0;
-    padding: var(--space-3) var(--space-4);
-    text-align: center;
-    font-size: var(--text-sm);
-    color: var(--color-muted);
+  .placeholder {
+    display: block;
+    border-bottom: var(--border-width) solid var(--color-border);
   }
   .empty {
     display: grid;
