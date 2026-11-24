@@ -720,8 +720,6 @@ impl Database {
         Ok(())
     }
 
-    /// Stages a release picture for the track. A decision already taken on the same picture is
-    /// kept; a different picture is pending again.
     /// Makes a set-aside cover suggestion wait for a decision again, as when the user picks the
     /// same cover after choosing to keep the file's own.
     pub fn reopen_proposed_artwork(&mut self, track_id: i64) -> Result<bool, DbError> {
@@ -732,6 +730,8 @@ impl Database {
         )? > 0)
     }
 
+    /// Stages a release picture for the track. A decision already taken on the same picture is
+    /// kept; a different picture is pending again.
     pub fn store_proposed_artwork(
         &mut self,
         track_id: i64,

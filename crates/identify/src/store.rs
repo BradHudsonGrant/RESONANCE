@@ -190,6 +190,7 @@ pub(crate) fn ranked_candidate_json(ranked: &RankedCandidate) -> Value {
         "audio_source": c.audio_source.map(audio_source_str),
         "user_supplied": c.user_supplied,
         "from_embedded_url": c.from_embedded_url,
+        "artist_is_seller": c.artist_is_seller,
         "field_providers": field_providers,
         "evidence": {
             "basis": basis_str(ranked.evidence.basis),
@@ -276,6 +277,10 @@ fn ranked_from_json(v: &Value) -> Option<RankedCandidate> {
             .unwrap_or(false),
         from_embedded_url: v
             .get("from_embedded_url")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        artist_is_seller: v
+            .get("artist_is_seller")
             .and_then(Value::as_bool)
             .unwrap_or(false),
         field_providers,

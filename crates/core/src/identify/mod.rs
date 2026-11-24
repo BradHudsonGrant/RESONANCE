@@ -25,8 +25,8 @@ pub use score::{
     mix_search_hint, rank, score, score_confidence,
 };
 pub use url::{
-    MAX_GUESSED_BANDCAMP_PAGES, ReleaseUrl, UrlRejected, bandcamp_seller, extract_release_urls,
-    guessed_bandcamp_pages, mix_maker, parse_release_url,
+    MAX_GUESSED_BANDCAMP_PAGES, MatchedPage, ReleaseUrl, UrlRejected, bandcamp_seller,
+    extract_release_urls, guessed_bandcamp_pages, learned_sellers, mix_maker, parse_release_url,
 };
 
 use crate::library::TagField;
@@ -304,6 +304,9 @@ pub struct Candidate {
     pub user_supplied: bool,
     /// From a release link stored in the file's own comments.
     pub from_embedded_url: bool,
+    /// The artist is the name of the account selling the release, which may be a label, so it is
+    /// never suggested in place of the file's artist.
+    pub artist_is_seller: bool,
     /// Per-field winning provider recorded by fusion.
     pub field_providers: Vec<(TagField, String)>,
 }

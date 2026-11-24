@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{IN_CHUNK, placeholders};
+use resonance_core::identify::MatchedPage;
 use resonance_core::identity::{Chromaprint, ContentHash};
 use resonance_core::library::TagField;
 use resonance_core::staging::{Proposal, ProposalStatus, StoredProposal};
@@ -24,15 +25,6 @@ pub struct IdentificationInput {
     pub tags: Vec<(TagField, String)>,
     /// Bandcamp sellers other tracks by the same artist were matched to.
     pub bandcamp_sellers: Vec<String>,
-}
-
-/// A Bandcamp page a track was matched to, with the names the track was known by.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BandcampPageNames {
-    pub artist: Option<String>,
-    pub remixer: Option<String>,
-    pub mix: Option<String>,
-    pub url: String,
 }
 
 /// Lazy audio identity loaded only when a track runs preview verification or AudD.
@@ -190,7 +182,7 @@ type IdentificationWriteRef<'a> = (
 impl Database {
     /// Every matched Bandcamp page with the names its track was known by: artist, remixer and
     /// mix, as the file gave them.
-    pub fn bandcamp_pages_with_names(&self) -> Result<Vec<BandcampPageNames>, DbError> {
+    pub fn bandcamp_pages_with_names(&self) -> Result<Vec<MatchedPage>, DbError> {
         let mut statement = self.connection.prepare_cached(
             "SELECT json_extract(known_json, '$.artist'), json_extract(known_json, '$.remixer'),
                     json_extract(known_json, '$.mix'), json_extract(best_json, '$.url')
@@ -198,7 +190,7 @@ impl Database {
              WHERE json_extract(best_json, '$.url') LIKE '%.bandcamp.com/%'",
         )?;
         let rows = statement.query_map([], |row| {
-            Ok(BandcampPageNames {
+            Ok(MatchedPage {
                 artist: row.get(0)?,
                 remixer: row.get(1)?,
                 mix: row.get(2)?,

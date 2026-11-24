@@ -183,8 +183,12 @@ pub fn proposals_from(best: &RankedCandidate) -> Vec<Proposal> {
         .title
         .as_deref()
         .map(|title| title_with_mix(title, candidate.mix.as_deref()));
+    let artist = candidate
+        .artist
+        .as_deref()
+        .filter(|_| !candidate.artist_is_seller);
     [
-        (TagField::Artist, candidate.artist.as_deref()),
+        (TagField::Artist, artist),
         (TagField::Title, title.as_deref()),
         (TagField::Album, candidate.album.as_deref()),
         (TagField::Genre, candidate.genre.as_deref()),
@@ -546,6 +550,27 @@ mod tests {
         assert!(proposals.iter().all(|proposal| {
             proposal.provider == "discogs" && proposal.confidence == 0.92 && !proposal.audio_matched
         }));
+    }
+
+    #[test]
+    fn an_artist_that_names_the_seller_is_not_proposed() {
+        let best = RankedCandidate {
+            candidate: Candidate {
+                provider: "bandcamp".to_owned(),
+                artist: Some("Kit Records".to_owned()),
+                title: Some("Song".to_owned()),
+                label: Some("Kit Records".to_owned()),
+                artist_is_seller: true,
+                ..Candidate::default()
+            },
+            confidence: 0.95,
+            audio_matched: false,
+            duration_delta_ms: None,
+            providers: vec!["bandcamp".to_owned()],
+            evidence: crate::identify::MatchEvidence::default(),
+        };
+        let fields: Vec<TagField> = proposals_from(&best).iter().map(|p| p.field).collect();
+        assert_eq!(fields, [TagField::Title, TagField::Label]);
     }
 
     #[test]

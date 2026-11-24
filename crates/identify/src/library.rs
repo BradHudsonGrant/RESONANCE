@@ -6,14 +6,12 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
 
-use resonance_core::identify::{
-    KnownTags, RankedCandidate, ReleaseUrl, bandcamp_seller, mix_maker,
-};
+use resonance_core::identify::{RankedCandidate, ReleaseUrl, learned_sellers};
 use resonance_core::prep::local_proposals;
 use resonance_core::staging::proposals_from;
 use resonance_db::{
-    ArtworkError, BandcampPageNames, CachedArtworkSource, Database, IdentificationInput,
-    IdentificationPass, StoredArtwork,
+    ArtworkError, CachedArtworkSource, Database, IdentificationInput, IdentificationPass,
+    StoredArtwork,
 };
 
 use crate::pipeline::{Identification, Pipeline, identify_locally};
@@ -278,12 +276,13 @@ fn run_pass_inner(
         }
 
         let mut batch = batch;
+        // Read again for every batch, so a seller learned from an earlier batch helps the next.
         let sellers = database
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .bandcamp_pages_with_names()?;
         for input in &mut batch {
-            input.bandcamp_sellers = sellers_for(&identify_locally(input).known, &sellers);
+            input.bandcamp_sellers = learned_sellers(&identify_locally(input).known, &sellers);
         }
         let identified = pipeline.identify(&batch, abort);
         if abort.load(Ordering::Acquire) {
@@ -329,43 +328,6 @@ fn run_pass_inner(
     Ok(report)
 }
 
-/// The Bandcamp sellers earlier matches point at for this track: any matched track that shares
-/// its artist, remixer or the name in its mix. Remixers and edit makers often sell their work
-/// for many artists from one account.
-fn sellers_for(known: &KnownTags, pages: &[BandcampPageNames]) -> Vec<String> {
-    let names = |artist: Option<&str>, remixer: Option<&str>, mix: Option<&str>| {
-        [
-            artist.map(str::to_owned),
-            remixer.map(str::to_owned),
-            mix.and_then(mix_maker),
-        ]
-        .into_iter()
-        .flatten()
-        .map(|name| name.trim().to_lowercase())
-        .filter(|name| !name.is_empty())
-        .collect::<Vec<_>>()
-    };
-    let own = names(
-        known.artist.as_deref(),
-        known.remixer.as_deref(),
-        known.mix.as_deref(),
-    );
-    let mut sellers: Vec<String> = Vec::new();
-    for page in pages {
-        let theirs = names(
-            page.artist.as_deref(),
-            page.remixer.as_deref(),
-            page.mix.as_deref(),
-        );
-        if theirs.iter().any(|name| own.contains(name))
-            && let Some(seller) = bandcamp_seller(&page.url)
-            && !sellers.iter().any(|held| held == seller)
-        {
-            sellers.push(seller.to_owned());
-        }
-    }
-    sellers
-}
 /// Step 6 for one track, stored over any earlier result.
 pub fn identify_track_with_url(
     database: &Mutex<Database>,
@@ -690,45 +652,5 @@ fn fetch_or_load_artwork(
             Ok(None)
         }
         Err(ArtworkError::Io(_)) => Ok(None),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sellers_come_from_earlier_bandcamp_matches_sharing_a_name() {
-        let page = |artist: &str, mix: Option<&str>, url: &str| BandcampPageNames {
-            artist: Some(artist.to_owned()),
-            remixer: None,
-            mix: mix.map(str::to_owned),
-            url: url.to_owned(),
-        };
-        let pages = [
-            page(
-                "Ada Marsh",
-                None,
-                "https://kitsounds.bandcamp.com/track/one",
-            ),
-            page(
-                "Ada Marsh",
-                None,
-                "https://kitsounds.bandcamp.com/track/two",
-            ),
-            page(
-                "Someone",
-                Some("Rowe Edit"),
-                "https://roweshop.bandcamp.com/track/x",
-            ),
-            page("Nobody", None, "https://other.bandcamp.com/track/y"),
-        ];
-        let known = KnownTags {
-            artist: Some(" Ada Marsh ".to_owned()),
-            mix: Some("Rowe Remix".to_owned()),
-            ..KnownTags::default()
-        };
-        assert_eq!(sellers_for(&known, &pages), ["kitsounds", "roweshop"]);
-        assert!(sellers_for(&KnownTags::default(), &pages).is_empty());
     }
 }

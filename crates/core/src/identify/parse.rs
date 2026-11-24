@@ -939,7 +939,7 @@ pub fn release_seller(release: &str) -> Option<String> {
             .trim_matches(|c: char| !c.is_alphanumeric())
             .to_lowercase();
         let stem = token.trim_end_matches(|c: char| c.is_numeric() || c == '.');
-        if RELEASE_WORDS.contains(&stem) || token.starts_with("vol") {
+        if RELEASE_WORDS.contains(&stem) {
             break;
         }
         words.push(word);
@@ -1343,27 +1343,69 @@ fn parse_year(text: &str) -> Option<u16> {
 /// and catalogue number have their own tags, so both come off when they match.
 pub fn clean_release_title(title: &str, artist: Option<&str>, catno: Option<&str>) -> String {
     let mut name = title.trim().to_owned();
+    // "(Incl. X Remix)" advertises what the release contains; it is not part of its name.
+    if name.ends_with(')')
+        && let Some(start) = name.rfind('(')
+        && name[start + 1..].to_lowercase().starts_with("incl")
+        && start > 0
+    {
+        name.truncate(start);
+        name = name.trim().to_owned();
+    }
     if let Some(catno) = catno.map(str::trim).filter(|catno| !catno.is_empty()) {
-        let lower = name.to_lowercase();
-        let wanted = catno.to_lowercase();
-        for suffix in [
-            format!(" - {wanted}"),
-            format!(" [{wanted}]"),
-            format!(" ({wanted})"),
+        for prefix in [
+            format!("[{catno}] "),
+            format!("{catno} - "),
+            format!("({catno}) "),
         ] {
-            if lower.ends_with(&suffix) {
-                name.truncate(name.len() - suffix.len());
+            if let Some(rest) = strip_prefix_ignoring_case(&name, &prefix) {
+                name = rest.to_owned();
+                break;
+            }
+        }
+        for suffix in [
+            format!(" - {catno}"),
+            format!(" [{catno}]"),
+            format!(" ({catno})"),
+        ] {
+            if let Some(rest) = strip_suffix_ignoring_case(&name, &suffix) {
+                name = rest.to_owned();
                 break;
             }
         }
     }
-    if let Some(artist) = artist.map(str::trim).filter(|artist| !artist.is_empty()) {
-        let prefix = format!("{} - ", artist.to_lowercase());
-        if name.to_lowercase().starts_with(&prefix) && name.len() > prefix.len() {
-            name = name[prefix.len()..].to_owned();
-        }
+    if let Some(artist) = artist.map(str::trim).filter(|artist| !artist.is_empty())
+        && let Some(rest) = strip_prefix_ignoring_case(&name, &format!("{artist} - "))
+        && !rest.trim().is_empty()
+    {
+        name = rest.to_owned();
     }
     name.trim().to_owned()
+}
+
+/// `text` without `prefix` at its start, ignoring case. Compared a character at a time, since
+/// lower-casing can change how many bytes a character takes.
+fn strip_prefix_ignoring_case<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    let mut rest = text.char_indices();
+    for wanted in prefix.chars() {
+        let (_, found) = rest.next()?;
+        if !found.to_lowercase().eq(wanted.to_lowercase()) {
+            return None;
+        }
+    }
+    Some(rest.as_str())
+}
+
+/// `text` without `suffix` at its end, ignoring case.
+fn strip_suffix_ignoring_case<'a>(text: &'a str, suffix: &str) -> Option<&'a str> {
+    let mut rest = text.char_indices();
+    for wanted in suffix.chars().rev() {
+        let (_, found) = rest.next_back()?;
+        if !found.to_lowercase().eq(wanted.to_lowercase()) {
+            return None;
+        }
+    }
+    Some(rest.as_str())
 }
 #[cfg(test)]
 mod tests {
@@ -1387,6 +1429,18 @@ mod tests {
             release_seller("kit sounds Vol.4").as_deref(),
             Some("kit sounds")
         );
+        assert_eq!(
+            release_seller("Volt Sounds Vol.3").as_deref(),
+            Some("Volt Sounds")
+        );
+        assert_eq!(
+            clean_release_title(
+                "İSTANBUL - Night EP [İST001]",
+                Some("İstanbul"),
+                Some("İST001")
+            ),
+            "Night EP"
+        );
         assert_eq!(release_seller("Night Owl EP").as_deref(), Some("Night Owl"));
         let known = normalise_tags(&[
             (TagField::Artist, "Ada Marsh".to_owned()),
@@ -1408,6 +1462,14 @@ mod tests {
         assert_eq!(
             clean_release_title("The EP [CAT009]", None, Some("CAT009")),
             "The EP"
+        );
+        assert_eq!(
+            clean_release_title(
+                "[KIT003] Blue Hour EP (Incl. Rowe Remix)",
+                None,
+                Some("KIT003")
+            ),
+            "Blue Hour EP"
         );
         assert_eq!(
             clean_release_title("Ada Marsh - Live", Some("Someone"), None),

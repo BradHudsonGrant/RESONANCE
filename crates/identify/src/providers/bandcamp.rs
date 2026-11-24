@@ -1,5 +1,5 @@
-//! A Bandcamp album or track page the user pasted or stored in file comments. Only structured
-//! JSON-LD published for search engines is read; no search scraping.
+//! A Bandcamp album or track page: pasted, stored in file comments, or guessed from the file's
+//! names. Only the JSON-LD published for search engines is read, and search is never scraped.
 
 use resonance_core::identify::{
     Candidate, ReleaseKind, ReleaseUrl, clean_release_title, find_catno, is_placeholder_artist,
@@ -73,7 +73,8 @@ fn candidates(data: &Value, url: &str) -> Vec<Candidate> {
         .filter(|publisher| Some(publisher) != artist.as_ref());
     let artwork_url = image_url(data);
     let artwork_provider = artwork_url.as_ref().map(|_| ID.to_owned());
-    let (genre, subgenre) = keywords_genres(data);
+    let places = seller_places(data);
+    let (genre, subgenre) = keywords_genres(data, &places);
 
     let base = Candidate {
         provider: ID.to_owned(),
@@ -100,6 +101,10 @@ fn candidates(data: &Value, url: &str) -> Vec<Candidate> {
                 .get("byArtist")
                 .and_then(|artist| text(artist, "name"))
                 .or_else(|| base.artist.clone());
+            // A page with no artist of its own names its seller, which may be a label.
+            let artist_is_seller = raw_artist.is_some()
+                && raw_artist.as_deref() == publisher_name.as_deref()
+                && split_artist_from_title(&clean_raw).is_none();
             let (artist, title, mix, track_label) = if let Some((left, right)) =
                 split_artist_from_title(&clean_raw)
                 && (raw_artist.is_none()
@@ -122,7 +127,7 @@ fn candidates(data: &Value, url: &str) -> Vec<Candidate> {
             let artist = artist.filter(|name| !is_placeholder_artist(name));
             let item_art = image_url(item).or_else(|| base.artwork_url.clone());
             let item_art_provider = item_art.as_ref().map(|_| ID.to_owned());
-            let (item_genre, item_subgenre) = keywords_genres(item);
+            let (item_genre, item_subgenre) = keywords_genres(item, &places);
             let album = album
                 .as_deref()
                 .map(|name| clean_release_title(name, artist.as_deref(), catno.as_deref()));
@@ -139,6 +144,7 @@ fn candidates(data: &Value, url: &str) -> Vec<Candidate> {
                 artwork_url: item_art,
                 artwork_provider: item_art_provider,
                 release_kind: kind,
+                artist_is_seller,
                 duration_ms: text(item, "duration").as_deref().and_then(iso_duration),
                 ..base.clone()
             })
@@ -202,19 +208,35 @@ fn image_url(value: &Value) -> Option<String> {
     }
 }
 
-fn keywords_genres(value: &Value) -> (Option<String>, Option<String>) {
+/// The seller's home town, which Bandcamp lists among a page's tags.
+fn seller_places(data: &Value) -> Vec<String> {
+    ["publisher", "byArtist"]
+        .into_iter()
+        .filter_map(|key| {
+            data.get(key)?
+                .get("foundingLocation")?
+                .get("name")?
+                .as_str()
+        })
+        .flat_map(|place| place.split(','))
+        .map(|part| part.trim().to_lowercase())
+        .filter(|part| !part.is_empty())
+        .collect()
+}
+
+fn keywords_genres(value: &Value, places: &[String]) -> (Option<String>, Option<String>) {
     let tags: Vec<String> = match value.get("keywords") {
         Some(Value::Array(arr)) => arr
             .iter()
             .filter_map(|entry| entry.as_str())
             .map(str::trim)
-            .filter(|s| !s.is_empty())
+            .filter(|s| !s.is_empty() && !places.contains(&s.to_lowercase()))
             .map(str::to_owned)
             .collect(),
         Some(Value::String(s)) => s
             .split(',')
             .map(str::trim)
-            .filter(|part| !part.is_empty())
+            .filter(|part| !part.is_empty() && !places.contains(&part.to_lowercase()))
             .map(str::to_owned)
             .collect(),
         _ => Vec::new(),
@@ -297,6 +319,26 @@ mod tests {
         assert_eq!(found[0].title.as_deref(), Some("Night Cut"));
     }
 
+    #[test]
+    fn a_label_page_naming_itself_gives_the_label_and_no_place_as_genre() {
+        let page = r#"<html><script type="application/ld+json">
+            {"@type":"MusicRecording","name":"Night Cut (Rowe Remix)","duration":"P00H06M00S",
+             "byArtist":{"name":"Kit Records"},
+             "publisher":{"name":"Kit Records","foundingLocation":{"name":"Leeds, UK"}},
+             "keywords":["Leeds"],
+             "inAlbum":{"name":"[KIT003] Night Cut EP (Incl. Rowe Remix)"}}
+            </script></html>"#;
+        let data = parse_json(ID, structured_data(page).unwrap()).unwrap();
+        let found = candidates(
+            &data,
+            "https://kitrecords.bandcamp.com/track/night-cut-rowe-remix",
+        );
+        assert_eq!(found.len(), 1);
+        assert!(found[0].artist_is_seller);
+        assert_eq!(found[0].genre, None);
+        assert_eq!(found[0].album.as_deref(), Some("Night Cut EP"));
+        assert_eq!(found[0].catno.as_deref(), Some("KIT003"));
+    }
     #[test]
     fn bandcamp_label_page_extracts_artist_title_mix_label_and_catno() {
         let page = r#"<html><script type="application/ld+json">
