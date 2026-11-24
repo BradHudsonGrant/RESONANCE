@@ -3,30 +3,25 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
 import { fakeTrack } from '../library/fake-library';
-import type { ActivityJob } from '../ipc/bindings/ActivityJob';
+import type { MatchCandidateSummary } from '../ipc/bindings/MatchCandidateSummary';
 import type { PrepItem } from '../ipc/bindings/PrepItem';
+import type { PrepStageName } from '../ipc/bindings/PrepStageName';
 import type { StagedField } from '../ipc/bindings/StagedField';
 import type { TagName } from '../ipc/bindings/TagName';
 import Prep, { type PrepClient } from './Prep.svelte';
+import {
+  basisSentence,
+  firstWorkingTab,
+  formatSaveNotice,
+  lengthDifference,
+  rowStatus,
+  stillMissing,
+} from './prep-view';
 
 HTMLElement.prototype.showPopover ??= () => {};
 HTMLElement.prototype.hidePopover ??= () => {};
 
-const STAGED_ORDER: TagName[] = [
-  'title',
-  'artist',
-  'mix',
-  'album',
-  'genre',
-  'subgenre',
-  'label',
-  'catno',
-  'year',
-  'bpm',
-  'key',
-  'track_number',
-  'comment',
-];
+const STAGED_ORDER: TagName[] = ['title', 'artist', 'mix', 'album', 'genre', 'label', 'year'];
 
 function makeFields(overrides: Partial<Record<TagName, Partial<StagedField>>>): StagedField[] {
   return STAGED_ORDER.map((field) => {
@@ -47,96 +42,124 @@ function makeFields(overrides: Partial<Record<TagName, Partial<StagedField>>>): 
   });
 }
 
-function makePrepItem(index: number, confidence = 0.96, audioMatched = true): PrepItem {
+function proposal(value: string, provider = 'musicbrainz'): Partial<StagedField> {
+  return {
+    proposed_value: value,
+    provider,
+    confidence: 0.94,
+    audio_matched: true,
+    status: 'pending',
+    changes: true,
+  };
+}
+
+function candidate(index: number, over: Partial<MatchCandidateSummary> = {}) {
+  const evidence = {
+    basis: 'audio_fingerprint' as const,
+    providers: ['acoustid', 'musicbrainz'],
+    primary_provider: 'musicbrainz',
+    duration_delta_ms: 400,
+    preview_similarity: null,
+    catno_matched: false,
+    isrc_matched: false,
+    url: null,
+  };
+  return {
+    index,
+    provider: 'musicbrainz',
+    providers: ['musicbrainz'],
+    confidence: 0.94,
+    audio_matched: true,
+    artist: 'Kaden',
+    title: 'Horizon',
+    mix: null,
+    album: 'Horizon EP',
+    label: 'Vector Recordings',
+    catno: 'VEC001',
+    year: 2024,
+    genre: null,
+    subgenre: null,
+    track_number: null,
+    duration_delta_ms: 400,
+    url: null,
+    has_artwork: false,
+    artwork_provider: null,
+    artwork_hash: null,
+    evidence,
+    ...over,
+  } satisfies MatchCandidateSummary;
+}
+
+function makeItem(index: number, stage: PrepStageName = 'review'): PrepItem {
   const track = fakeTrack(index);
-  const fields = makeFields({
-    title: {
-      current_value: null,
-      proposed_value: `Track ${index + 1}`,
-      provider: 'musicbrainz',
-      confidence,
-      audio_matched: audioMatched,
-      status: 'pending',
-      changes: true,
-    },
-    artist: {
-      current_value: null,
-      proposed_value: 'Kaden',
-      provider: 'musicbrainz',
-      confidence,
-      audio_matched: audioMatched,
-      status: 'pending',
-      changes: true,
-    },
-    label: {
-      current_value: null,
-      proposed_value: 'Vector Recordings',
-      provider: 'musicbrainz',
-      confidence,
-      audio_matched: audioMatched,
-      status: 'pending',
-      changes: true,
-    },
-  });
+  const review = stage === 'review';
   return {
     track,
     review_token: 'review-' + track.id,
-    fields,
+    fields: makeFields(
+      review
+        ? {
+            title: proposal(`Track ${index + 1}`),
+            artist: proposal('Kaden'),
+            label: proposal('Vector Recordings'),
+          }
+        : {},
+    ),
     artwork: { track_id: track.id, artwork: null, proposed: null, dirty_on_disk: false },
-    pending_fields: 3,
-    provider: 'musicbrainz',
-    confidence,
-    audio_matched: audioMatched,
+    pending_fields: review ? 3 : 0,
+    provider: review ? 'musicbrainz' : null,
+    confidence: review ? 0.94 : 0,
+    audio_matched: review,
     needs_url: false,
-    changeable_confidences: [confidence, confidence, confidence],
-    release: {
-      key: 'release:vec001:horizon ep',
-      title: 'Horizon EP',
-      subtitle: 'Vector Recordings · VEC001 · 2024',
-    },
-    evidence: {
-      basis: audioMatched ? 'audio_fingerprint' : 'tags_and_duration',
-      providers: ['musicbrainz'],
-      primary_provider: 'musicbrainz',
-      duration_delta_ms: 400,
-      preview_similarity: null,
-      catno_matched: false,
-      isrc_matched: false,
-      url: 'https://musicbrainz.org/release/rel-1',
-    },
-    candidates: [],
+    changeable_confidences: [],
+    release: null,
+    evidence: review ? candidate(0).evidence : null,
+    candidates: review ? [candidate(0), candidate(1, { confidence: 0.7, album: 'Remixes' })] : [],
     selected_candidate: 0,
     candidates_expanded: false,
     steps: [],
     has_unwritten: false,
-    online_checked: true,
+    online_checked: stage !== 'not_searched',
+    stage,
   };
 }
 
-function makeClient(items: PrepItem[]): PrepClient {
-  return {
-    trackIds: vi.fn(async () => items.map((item) => item.track.id)),
-    prepPage: vi.fn(async (_query, ids, offset, limit) => {
-      const scoped = ids ? items.filter((item) => ids.includes(item.track.id)) : items;
+function makeClient(items: PrepItem[]) {
+  const inStage = (stage: PrepStageName | null) =>
+    items.filter((item) => stage === null || item.stage === stage);
+  const count = (stage: PrepStageName) => items.filter((item) => item.stage === stage).length;
+  const client = {
+    trackIds: vi.fn(async (_query, _ids, stage: PrepStageName | null) =>
+      inStage(stage).map((item) => item.track.id),
+    ),
+    prepPage: vi.fn(async (_query, _ids, stage: PrepStageName | null, offset, limit) => {
+      const shown = inStage(stage);
       return {
-        total: scoped.length,
+        total: shown.length,
         offset,
-        items: scoped.slice(offset, offset + limit),
+        stages: {
+          review: count('review'),
+          not_searched: count('not_searched'),
+          no_match: count('no_match'),
+          done: count('done'),
+        },
+        items: shown.slice(offset, offset + limit),
         unwritten_tracks: 0,
         last_operation: null,
       };
     }),
-    selectCandidate: vi.fn(async (id) => items.find((item) => item.track.id === id)!),
-    useCandidateArtwork: vi.fn(async (id) => items.find((item) => item.track.id === id)!),
-    acceptAndWrite: vi.fn(async (ids) => ({
+    acceptAndWrite: vi.fn(async (ids: number[]) => ({
       written: ids.length,
       library_fields: 0,
       reverted_fields: 0,
-      operation_id: 45,
-      failed: [],
+      operation_id: 45 as number | null,
+      failed: [] as { track_id: number; path: string; reason: string }[],
     })),
+    skipItems: vi.fn(async (ids: number[]) => ({ tracks: ids.length, fields: 1 })),
+    selectCandidate: vi.fn(async (id: number) => items.find((item) => item.track.id === id)!),
+    useCandidateArtwork: vi.fn(async (id: number) => items.find((item) => item.track.id === id)!),
     identifyOnline: vi.fn(async () => ({ active: [], recent: [], mix_backoff_active: false })),
-    identifyWithUrl: vi.fn(async (id) => ({
+    identifyWithUrl: vi.fn(async (id: number) => ({
       track_id: id,
       steps: [],
       best: null,
@@ -146,7 +169,7 @@ function makeClient(items: PrepItem[]): PrepClient {
     applyBatchTag: vi.fn(async () => ({ tracks: 0, fields: 0 })),
     previewTagWrites: vi.fn(async () => []),
     applyTagWrites: vi.fn(async () => ({ written: 0, operation_id: null, failed: [] })),
-    undoOperation: vi.fn(async (id) => ({
+    undoOperation: vi.fn(async (id: number) => ({
       restored: 1,
       operation: {
         id,
@@ -160,32 +183,165 @@ function makeClient(items: PrepItem[]): PrepClient {
       },
     })),
   };
+  return client satisfies PrepClient;
 }
 
 describe('Prep', () => {
-  it('lists tracks before a search and limits search to checked tracks', async () => {
-    const items = [makePrepItem(0), makePrepItem(1)];
+  it('opens on the first tab with work in it and shows a count on every tab', async () => {
+    const items = [makeItem(0, 'not_searched'), makeItem(1), makeItem(2, 'no_match')];
     const client = makeClient(items);
     render(Prep, { client });
-    await screen.findByRole('button', { name: 'Accept all' });
-    const search = screen.getByRole('button', { name: 'Search online' }) as HTMLButtonElement;
-    expect(search.disabled).toBe(true);
-    expect(screen.queryByRole('slider')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Open release' })).toBeNull();
-    const id = items[1]!.track.id;
-    await fireEvent.click(
-      screen.getByRole('checkbox', { name: 'Select ' + items[1]!.track.title }),
-    );
-    await fireEvent.click(search);
-    expect(client.identifyOnline).toHaveBeenCalledWith([id], true);
+    const review = await screen.findByRole('tab', { name: /To review/ });
+    await waitFor(() => expect(review.getAttribute('aria-selected')).toBe('true'));
+    expect(client.prepPage).toHaveBeenLastCalledWith(null, null, 'review', 0, 50);
+    expect(screen.getByRole('tab', { name: /Not searched/ }).textContent).toContain('1');
+    expect(screen.getByRole('tab', { name: /All/ }).textContent).toContain('3');
+    expect(await screen.findByText('94%', { selector: '.confidence' })).toBeTruthy();
+    expect(screen.getByText(/The audio fingerprint matches/)).toBeTruthy();
   });
 
-  it('retains Library filters when filtering for missing artwork and clears old selection', async () => {
-    const client = makeClient([makePrepItem(0)]);
-    const linked = { text: 'crate' };
-    render(Prep, { client, batchQuery: linked, batchTrackIds: [1, 2] });
+  it('finds matches for every track in the tab without ticking any', async () => {
+    const items = [makeItem(0, 'not_searched'), makeItem(1, 'not_searched'), makeItem(2, 'done')];
+    const client = makeClient(items);
+    render(Prep, { client });
+    await fireEvent.click(await screen.findByRole('button', { name: 'Find matches for 2' }));
+    await waitFor(() =>
+      expect(client.identifyOnline).toHaveBeenCalledWith(
+        [items[0]!.track.id, items[1]!.track.id],
+        true,
+      ),
+    );
+    expect(client.trackIds).toHaveBeenCalledWith(null, null, 'not_searched');
+  });
+
+  it('finds matches for the ticked tracks only', async () => {
+    const items = [makeItem(0, 'not_searched'), makeItem(1, 'not_searched')];
+    const client = makeClient(items);
+    render(Prep, { client });
+    await fireEvent.click(
+      await screen.findByRole('checkbox', { name: 'Tick ' + items[1]!.track.title }),
+    );
+    expect(screen.getByText('1 ticked')).toBeTruthy();
+    await fireEvent.click(screen.getByRole('button', { name: 'Find matches' }));
+    await waitFor(() =>
+      expect(client.identifyOnline).toHaveBeenCalledWith([items[1]!.track.id], true),
+    );
+  });
+
+  it('saves only the ticked changes and sets the rest aside', async () => {
+    const items = [makeItem(0), makeItem(1)];
+    const client = makeClient(items);
+    render(Prep, { client });
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Label' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Save 2 changes' }));
+    await waitFor(() =>
+      expect(client.acceptAndWrite).toHaveBeenCalledWith(
+        [items[0]!.track.id],
+        ['title', 'artist'],
+        false,
+        'review-' + items[0]!.track.id,
+      ),
+    );
+    await waitFor(() => expect(client.skipItems).toHaveBeenCalledWith([items[0]!.track.id], []));
+    expect(await screen.findByText('Saved to 1 file')).toBeTruthy();
+  });
+
+  it('saves every change with Enter and leaves nothing to skip', async () => {
+    const items = [makeItem(0)];
+    const client = makeClient(items);
+    render(Prep, { client });
+    await screen.findByRole('button', { name: 'Save 3 changes' });
+    await fireEvent.keyDown(window, { key: 'Enter' });
+    await waitFor(() =>
+      expect(client.acceptAndWrite).toHaveBeenCalledWith(
+        [items[0]!.track.id],
+        ['title', 'artist', 'label'],
+        false,
+        'review-' + items[0]!.track.id,
+      ),
+    );
+    expect(client.skipItems).not.toHaveBeenCalled();
+  });
+
+  it('keeps the rest of a failed save waiting and lists the file', async () => {
+    const items = [makeItem(0)];
+    const client = makeClient(items);
+    client.acceptAndWrite.mockResolvedValueOnce({
+      written: 0,
+      library_fields: 0,
+      reverted_fields: 0,
+      operation_id: null,
+      failed: [{ track_id: items[0]!.track.id, path: 'a.mp3', reason: 'File is read-only' }],
+    });
+    render(Prep, { client });
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Title' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Save 2 changes' }));
+    expect(await screen.findByText('1 file needs attention')).toBeTruthy();
+    expect(client.skipItems).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Undo save' })).toBeNull();
+  });
+
+  it('skips a track with S and undoes a save with Ctrl+Z', async () => {
+    const items = [makeItem(0), makeItem(1)];
+    const client = makeClient(items);
+    render(Prep, { client });
+    await screen.findByRole('button', { name: 'Save 3 changes' });
+    await fireEvent.keyDown(window, { key: 's' });
+    await waitFor(() => expect(client.skipItems).toHaveBeenCalledWith([items[0]!.track.id], []));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Save 3 changes' }));
+    await screen.findByText('Saved to 1 file');
+    await fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+    await waitFor(() => expect(client.undoOperation).toHaveBeenCalledWith(45));
+    expect(await screen.findByText('Restored 1 file')).toBeTruthy();
+  });
+
+  it('chooses another match with its number key', async () => {
+    const items = [makeItem(0)];
+    const client = makeClient(items);
+    render(Prep, { client });
+    await screen.findByRole('button', { name: 'Save 3 changes' });
+    await fireEvent.keyDown(window, { key: '2' });
+    await waitFor(() =>
+      expect(client.selectCandidate).toHaveBeenCalledWith(
+        items[0]!.track.id,
+        1,
+        'review-' + items[0]!.track.id,
+      ),
+    );
+  });
+
+  it('searches the focused track with Enter when it has not been searched', async () => {
+    const items = [makeItem(0, 'not_searched')];
+    const client = makeClient(items);
+    render(Prep, { client });
+    await screen.findByText('Not searched online yet');
+    await fireEvent.keyDown(window, { key: 'Enter' });
+    await waitFor(() =>
+      expect(client.identifyOnline).toHaveBeenCalledWith([items[0]!.track.id], true),
+    );
+  });
+
+  it('ticks every track in the tab across pages', async () => {
+    const items = Array.from({ length: 120 }, (_, i) => makeItem(i));
+    const client = makeClient(items);
+    render(Prep, { client });
     await fireEvent.click(await screen.findByRole('checkbox', { name: 'Select all tracks' }));
-    await fireEvent.change(screen.getByRole('combobox', { name: 'Filter tracks' }), {
+    await waitFor(() => expect(client.trackIds).toHaveBeenCalledWith(null, null, 'review'));
+    expect(await screen.findByText('120 ticked')).toBeTruthy();
+    await fireEvent.click(screen.getByRole('button', { name: 'Save ticked' }));
+    await waitFor(() =>
+      expect(client.acceptAndWrite).toHaveBeenCalledWith(
+        items.map((item) => item.track.id),
+        null,
+        true,
+      ),
+    );
+  });
+
+  it('keeps Library filters when filtering for a missing tag', async () => {
+    const client = makeClient([makeItem(0)]);
+    render(Prep, { client, batchQuery: { text: 'crate' }, batchTrackIds: [1, 2] });
+    await fireEvent.change(await screen.findByRole('combobox', { name: 'Filter tracks' }), {
       target: { value: 'artwork' },
     });
     await waitFor(() =>
@@ -195,658 +351,52 @@ describe('Prep', () => {
           filters: [{ any_of: [{ column: 'artwork', condition: { op: 'missing' } }] }],
         },
         [1, 2],
+        expect.anything(),
         0,
         50,
       ),
     );
+  });
+});
+
+describe('prep view', () => {
+  it('opens on review, then unsearched, then no match', () => {
+    const none = { review: 0, not_searched: 0, no_match: 0, done: 4 };
+    expect(firstWorkingTab({ ...none, review: 1, not_searched: 2 })).toBe('review');
+    expect(firstWorkingTab({ ...none, not_searched: 2, no_match: 1 })).toBe('not_searched');
+    expect(firstWorkingTab({ ...none, no_match: 1 })).toBe('no_match');
+    expect(firstWorkingTab(none)).toBe('all');
+  });
+
+  it('describes each row by its stage', () => {
+    expect(rowStatus(makeItem(0))).toEqual({
+      primary: 'Audio match',
+      secondary: '3 changes',
+      confidence: '94%',
+    });
+    const local = { ...makeItem(1), candidates: [], evidence: null };
+    expect(rowStatus(local).primary).toBe('From filename');
+    expect(rowStatus({ ...makeItem(2, 'no_match'), needs_url: true })).toEqual({
+      primary: 'No match',
+      secondary: 'Needs a release link',
+      confidence: null,
+    });
+  });
+
+  it('words the evidence for a DJ', () => {
+    expect(basisSentence('tags_only')).toBe('Only the names match. Listen before saving');
+    expect(lengthDifference(400)).toBe('Same length');
+    expect(lengthDifference(-2500)).toBe('2.5 s shorter');
+    expect(lengthDifference(null)).toBe('');
+  });
+
+  it('lists only the core tags still missing after the suggestions', () => {
+    expect(stillMissing(makeItem(0))).toEqual(['Artwork', 'Genre', 'Year']);
+  });
+
+  it('formats save notices with digits', () => {
     expect(
-      (screen.getByRole('button', { name: 'Search online' }) as HTMLButtonElement).disabled,
-    ).toBe(true);
-  });
-
-  it('selects every filtered track across pages and respects individual exclusions', async () => {
-    const items = Array.from({ length: 505 }, (_, i) => makePrepItem(i));
-    const ids = items.map((item) => item.track.id);
-    const client = makeClient(items);
-    render(Prep, { client });
-    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Select all tracks' }));
-    await waitFor(() => expect(client.trackIds).toHaveBeenCalledOnce());
-    await fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await fireEvent.click(
-      await screen.findByRole('checkbox', { name: 'Select ' + items[50]!.track.title }),
-    );
-    await fireEvent.click(screen.getByRole('button', { name: 'Accept selected' }));
-    await waitFor(() =>
-      expect(client.acceptAndWrite).toHaveBeenCalledWith(
-        ids.filter((id) => id !== items[50]!.track.id),
-        null,
-        true,
-        undefined,
-      ),
-    );
-    await fireEvent.click(await screen.findByRole('button', { name: 'Undo save' }));
-    expect(client.undoOperation).toHaveBeenCalledWith(45);
-  });
-
-  it('saves just the accepted field and offers undo beside that field', async () => {
-    const item = makePrepItem(0);
-    const client = makeClient([item]);
-    render(Prep, { client });
-    await fireEvent.click(await screen.findByRole('button', { name: 'Accept Artist' }));
-    expect(client.acceptAndWrite).toHaveBeenCalledWith(
-      [item.track.id],
-      ['artist'],
-      false,
-      item.review_token,
-    );
-    const undo = await screen.findByRole('button', { name: 'Undo save' });
-    expect(undo.closest('tr')?.textContent).toContain('Artist');
-    await fireEvent.click(undo);
-    expect(client.undoOperation).toHaveBeenCalledWith(45);
-  });
-
-  it('exposes failed saves without offering an undo for an unwritten file', async () => {
-    const item = makePrepItem(0);
-    const client = makeClient([item]);
-    vi.mocked(client.acceptAndWrite).mockResolvedValue({
-      written: 0,
-      library_fields: 0,
-      reverted_fields: 0,
-      operation_id: null,
-      failed: [{ track_id: item.track.id, path: 'example.wav', reason: 'File changed since scan' }],
-    });
-    render(Prep, { client });
-    await fireEvent.click(await screen.findByRole('button', { name: 'Accept all' }));
-    expect(client.acceptAndWrite).toHaveBeenCalledWith(
-      [item.track.id],
-      ['title', 'artist', 'label'],
-      false,
-      item.review_token,
-    );
-    await screen.findByText('Save failed');
-    expect(screen.queryByRole('button', { name: 'Undo save' })).toBeNull();
-  });
-
-  it('restores keyboard focus when the next track is on another page', async () => {
-    const items = Array.from({ length: 51 }, (_, index) => makePrepItem(index));
-    const client = makeClient(items);
-    render(Prep, { client });
-    const last = await screen.findByRole('button', { name: /^Track 49 Ada Marsh/ });
-    await fireEvent.click(last);
-    last.focus();
-    await fireEvent.keyDown(last, { key: 'ArrowDown' });
-    const next = await screen.findByRole('button', { name: /^Track 50 Ada Marsh/ });
-    await waitFor(() => expect(document.activeElement).toBe(next));
-  });
-
-  it('accepts and undoes a library-only field without reporting a file write', async () => {
-    const item = makePrepItem(0);
-    item.fields = makeFields({ mix: { changes: true, proposed_value: 'Dub', status: 'pending' } });
-    const client = makeClient([item]);
-    vi.mocked(client.acceptAndWrite).mockResolvedValue({
-      written: 0,
-      library_fields: 1,
-      reverted_fields: 0,
-      operation_id: 68,
-      failed: [],
-    });
-    render(Prep, { client });
-    await fireEvent.click(await screen.findByRole('button', { name: 'Accept Mix' }));
-    expect(client.acceptAndWrite).toHaveBeenCalledWith(
-      [item.track.id],
-      ['mix'],
-      false,
-      item.review_token,
-    );
-    await screen.findByText('1 field saved to library');
-    await fireEvent.click(screen.getByRole('button', { name: 'Undo save' }));
-    expect(client.undoOperation).toHaveBeenCalledWith(68);
-  });
-
-  it('keeps the selected batch fixed when another track arrives', async () => {
-    const first = makePrepItem(0);
-    const second = makePrepItem(1);
-    const client = makeClient([first, second]);
-    vi.mocked(client.prepPage)
-      .mockResolvedValueOnce({
-        total: 1,
-        offset: 0,
-        items: [first],
-        unwritten_tracks: 0,
-        last_operation: null,
-      })
-      .mockResolvedValue({
-        total: 2,
-        offset: 0,
-        items: [first, second],
-        unwritten_tracks: 0,
-        last_operation: null,
-      });
-    const view = render(Prep, { client });
-    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Select all tracks' }));
-    await view.rerender({ client, revision: 1 });
-    await screen.findByRole('checkbox', { name: 'Select ' + second.track.title });
-    await fireEvent.click(screen.getByRole('button', { name: 'Search online' }));
-    expect(client.identifyOnline).toHaveBeenCalledWith([first.track.id], true);
-  });
-
-  it('refreshes the presented suggestions when a reviewed value has changed', async () => {
-    const item = makePrepItem(0);
-    const changed = {
-      ...item,
-      review_token: 'different-review',
-      fields: makeFields({
-        artist: { changes: true, proposed_value: 'Updated artist', status: 'pending' },
-      }),
-    };
-    const client = makeClient([item]);
-    vi.mocked(client.prepPage)
-      .mockResolvedValueOnce({
-        total: 1,
-        offset: 0,
-        items: [item],
-        unwritten_tracks: 0,
-        last_operation: null,
-      })
-      .mockResolvedValue({
-        total: 1,
-        offset: 0,
-        items: [changed],
-        unwritten_tracks: 0,
-        last_operation: null,
-      });
-    vi.mocked(client.acceptAndWrite).mockRejectedValueOnce(new Error('Suggestions have changed'));
-    render(Prep, { client });
-    await fireEvent.click(await screen.findByRole('button', { name: 'Accept Artist' }));
-    await screen.findByText('Updated artist');
-    expect(screen.queryByRole('button', { name: 'Undo save' })).toBeNull();
-    expect(client.acceptAndWrite).toHaveBeenCalledOnce();
-    expect(client.acceptAndWrite).toHaveBeenCalledWith(
-      [item.track.id],
-      ['artist'],
-      false,
-      item.review_token,
-    );
-    await fireEvent.click(screen.getByRole('button', { name: 'Accept Artist' }));
-    expect(client.acceptAndWrite).toHaveBeenLastCalledWith(
-      [item.track.id],
-      ['artist'],
-      false,
-      changed.review_token,
-    );
-  });
-
-  it('passes explicit artwork flag on single-track Accept all and null fields on bulk Accept selected', async () => {
-    const item = makePrepItem(0);
-    item.artwork = {
-      track_id: item.track.id,
-      artwork: 'existing-hash',
-      proposed: { artwork: 'proposed-hash', provider: 'discogs' },
-      dirty_on_disk: false,
-    };
-    const client = makeClient([item]);
-    render(Prep, { client });
-    await fireEvent.click(await screen.findByRole('button', { name: 'Accept all' }));
-    expect(client.acceptAndWrite).toHaveBeenLastCalledWith(
-      [item.track.id],
-      ['title', 'artist', 'label'],
-      true,
-      item.review_token,
-    );
-    await fireEvent.click(screen.getByRole('checkbox', { name: 'Select ' + item.track.title }));
-    await fireEvent.click(screen.getByRole('button', { name: 'Accept selected' }));
-    expect(client.acceptAndWrite).toHaveBeenLastCalledWith([item.track.id], null, true, undefined);
-  });
-
-  it('keeps Undo in the review header in compact detail view when the saved track leaves a filter', async () => {
-    const first = makePrepItem(0);
-    const second = makePrepItem(1);
-    const client = makeClient([first, second]);
-    const observers: ResizeObserverCallback[] = [];
-    const origObserver = globalThis.ResizeObserver;
-    const origWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
-    globalThis.ResizeObserver = class {
-      constructor(cb: ResizeObserverCallback) {
-        observers.push(cb);
-      }
-      observe() {}
-      disconnect() {}
-      unobserve() {}
-    } as unknown as typeof ResizeObserver;
-    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
-      configurable: true,
-      get() {
-        return 640;
-      },
-    });
-    vi.mocked(client.prepPage)
-      .mockResolvedValueOnce({
-        total: 2,
-        offset: 0,
-        items: [first, second],
-        unwritten_tracks: 0,
-        last_operation: null,
-      })
-      .mockResolvedValue({
-        total: 1,
-        offset: 0,
-        items: [second],
-        unwritten_tracks: 0,
-        last_operation: null,
-      });
-
-    try {
-      const { container } = render(Prep, { client });
-      for (const cb of observers) cb([], {} as ResizeObserver);
-      await fireEvent.click(await screen.findByRole('button', { name: /^Track 0 Ada Marsh/ }));
-      expect(container.querySelector('.workspace')?.classList.contains('detail-open')).toBe(true);
-      await fireEvent.click(await screen.findByRole('button', { name: 'Accept Artist' }));
-      await screen.findByRole('heading', { name: second.track.title });
-      const undo = await screen.findByRole('button', { name: 'Undo save' });
-      expect(undo.closest('.review-head')).not.toBeNull();
-    } finally {
-      globalThis.ResizeObserver = origObserver;
-      if (origWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', origWidth);
-      else delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
-    }
-  });
-
-  it('updates stale manual-edits notice after WriteTagsSheet writes and passes focused track scope', async () => {
-    const item = makePrepItem(0);
-    const client = makeClient([item]);
-    const onrename = vi.fn();
-    vi.mocked(client.previewTagWrites).mockResolvedValue([
-      {
-        track_id: item.track.id,
-        path: 'Music/track0.flac',
-        fields: [{ field: 'title', from: 'Old', to: 'New' }],
-        cover: false,
-        blocked: null,
-      },
-    ]);
-    vi.mocked(client.applyTagWrites).mockResolvedValue({
-      written: 1,
-      operation_id: 91,
-      failed: [],
-    });
-    render(Prep, { client, onrename });
-    const summary = await screen.findByText('Track tools');
-    await fireEvent.click(summary);
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit tags' }));
-    await screen.findByText(`Focused track: ${item.track.title}`);
-    await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Write manual edits' }));
-    await screen.findByText(`Focused track: ${item.track.title}`);
-    await fireEvent.click(await screen.findByRole('button', { name: 'Write tags to 1 file' }));
-    await screen.findByText('Wrote tags to 1 file');
-    expect(screen.queryByText('Manual edits are ready to write')).toBeNull();
-
-    await fireEvent.click(screen.getByRole('button', { name: 'Rename files' }));
-    expect(onrename).toHaveBeenCalledWith(
-      { kind: 'tracks', track_ids: [item.track.id] },
-      `Focused track: ${item.track.title}`,
-    );
-  });
-
-  it('keeps Track tools open and reports feedback when Find match finds no release', async () => {
-    const item = makePrepItem(0);
-    const client = makeClient([item]);
-    let resolveLookup!: (value: Awaited<ReturnType<PrepClient['identifyWithUrl']>>) => void;
-    vi.mocked(client.identifyWithUrl).mockReturnValue(
-      new Promise((resolve) => {
-        resolveLookup = resolve;
-      }),
-    );
-    render(Prep, { client });
-    await fireEvent.click(await screen.findByText('Track tools'));
-    const input = screen.getByLabelText('Release link');
-    await fireEvent.input(input, { target: { value: 'https://discogs.com/release/99' } });
-    await fireEvent.click(screen.getByRole('button', { name: 'Find match' }));
-    await screen.findByRole('button', { name: 'Searching…' });
-    resolveLookup({
-      track_id: item.track.id,
-      best: null,
-      needs_url: true,
-      steps: [],
-    });
-    await screen.findByText('No match found at that release link');
-    expect((screen.getByLabelText('Release link') as HTMLInputElement).value).toBe(
-      'https://discogs.com/release/99',
-    );
-  });
-
-  it('displays cover provider when sources differ and keeps selected cover option', async () => {
-    const item = makePrepItem(0);
-    item.artwork = {
-      track_id: item.track.id,
-      artwork: null,
-      proposed: { artwork: 'art-hash-2', provider: 'Discogs' },
-      dirty_on_disk: false,
-    };
-    item.selected_candidate = 5;
-    item.candidates = [
-      {
-        index: 2,
-        provider: 'musicbrainz',
-        providers: ['musicbrainz'],
-        confidence: 0.96,
-        audio_matched: true,
-        artist: 'Kaden',
-        title: 'Track 1',
-        mix: null,
-        album: 'Horizon EP',
-        label: 'Vector',
-        catno: null,
-        year: 2024,
-        genre: null,
-        subgenre: null,
-        track_number: null,
-        duration_delta_ms: null,
-        url: null,
-        has_artwork: true,
-        artwork_provider: 'MusicBrainz',
-        artwork_hash: 'art-hash-1',
-        evidence: item.evidence!,
-      },
-      {
-        index: 5,
-        provider: 'discogs',
-        providers: ['discogs'],
-        confidence: 0.91,
-        audio_matched: false,
-        artist: 'Kaden',
-        title: 'Track 1',
-        mix: null,
-        album: 'Vinyl Edition',
-        label: 'Vector',
-        catno: null,
-        year: 2024,
-        genre: null,
-        subgenre: null,
-        track_number: null,
-        duration_delta_ms: null,
-        url: null,
-        has_artwork: true,
-        artwork_provider: 'Discogs',
-        artwork_hash: 'art-hash-2',
-        evidence: item.evidence!,
-      },
-    ];
-    const client = makeClient([item]);
-    render(Prep, { client });
-    const coverSelect = (await screen.findByRole('combobox', {
-      name: 'Choose suggested cover',
-    })) as HTMLSelectElement;
-    expect(coverSelect.value).toBe('5');
-    const artworkRow = coverSelect.closest('tr')!;
-    expect(artworkRow.textContent).toContain('Discogs');
-    await fireEvent.change(coverSelect, { target: { value: '2' } });
-    expect(client.useCandidateArtwork).toHaveBeenCalledWith(
-      item.track.id,
-      2,
-      false,
-      item.review_token,
-    );
-    await waitFor(() => expect(coverSelect.value).toBe('2'));
-  });
-
-  it('prefers exact artwork hash over same-provider fallback for active cover selection', async () => {
-    const item = makePrepItem(0);
-    item.artwork = {
-      track_id: item.track.id,
-      artwork: null,
-      proposed: { artwork: 'art-hash-1', provider: 'Discogs' },
-      dirty_on_disk: false,
-    };
-    item.selected_candidate = 5;
-    item.candidates = [
-      {
-        index: 2,
-        provider: 'discogs',
-        providers: ['discogs'],
-        confidence: 0.96,
-        audio_matched: true,
-        artist: 'Kaden',
-        title: 'Track 1',
-        mix: null,
-        album: 'Pressing A',
-        label: 'Vector',
-        catno: null,
-        year: 2024,
-        genre: null,
-        subgenre: null,
-        track_number: null,
-        duration_delta_ms: null,
-        url: null,
-        has_artwork: true,
-        artwork_provider: 'Discogs',
-        artwork_hash: 'art-hash-1',
-        evidence: item.evidence!,
-      },
-      {
-        index: 5,
-        provider: 'discogs',
-        providers: ['discogs'],
-        confidence: 0.91,
-        audio_matched: false,
-        artist: 'Kaden',
-        title: 'Track 1',
-        mix: null,
-        album: 'Pressing B',
-        label: 'Vector',
-        catno: null,
-        year: 2024,
-        genre: null,
-        subgenre: null,
-        track_number: null,
-        duration_delta_ms: null,
-        url: null,
-        has_artwork: true,
-        artwork_provider: 'Discogs',
-        artwork_hash: 'art-hash-2',
-        evidence: item.evidence!,
-      },
-    ];
-    const client = makeClient([item]);
-    render(Prep, { client });
-    const coverSelect = (await screen.findByRole('combobox', {
-      name: 'Choose suggested cover',
-    })) as HTMLSelectElement;
-    expect(coverSelect.value).toBe('2');
-  });
-
-  it('deduplicates raw and display provider names and hides cover picker after sole cover accept', async () => {
-    const item = makePrepItem(0);
-    item.artwork = {
-      track_id: item.track.id,
-      artwork: null,
-      proposed: { artwork: 'art-hash-mb', provider: 'MusicBrainz' },
-      dirty_on_disk: false,
-    };
-    item.selected_candidate = 0;
-    item.candidates = [
-      {
-        index: 0,
-        provider: 'musicbrainz',
-        providers: ['musicbrainz'],
-        confidence: 0.96,
-        audio_matched: true,
-        artist: 'Kaden',
-        title: 'Track 1',
-        mix: null,
-        album: 'Horizon EP',
-        label: 'Vector',
-        catno: null,
-        year: 2024,
-        genre: null,
-        subgenre: null,
-        track_number: null,
-        duration_delta_ms: null,
-        url: null,
-        has_artwork: true,
-        artwork_provider: 'MusicBrainz',
-        artwork_hash: 'art-hash-mb',
-        evidence: item.evidence!,
-      },
-    ];
-    const acceptedItem: PrepItem = {
-      ...item,
-      artwork: {
-        track_id: item.track.id,
-        artwork: 'art-hash-mb',
-        proposed: null,
-        dirty_on_disk: false,
-      },
-    };
-    const client = makeClient([item]);
-    vi.mocked(client.prepPage)
-      .mockResolvedValueOnce({
-        total: 1,
-        offset: 0,
-        items: [item],
-        unwritten_tracks: 0,
-        last_operation: null,
-      })
-      .mockResolvedValue({
-        total: 1,
-        offset: 0,
-        items: [acceptedItem],
-        unwritten_tracks: 0,
-        last_operation: null,
-      });
-
-    render(Prep, { client });
-    const acceptArt = await screen.findByRole('button', { name: 'Accept artwork' });
-    const table = acceptArt.closest('table')!;
-    expect(table.querySelector('thead')?.textContent).toContain('MusicBrainz');
-    expect(table.querySelectorAll('tbody small')).toHaveLength(0);
-
-    await fireEvent.click(acceptArt);
-    await screen.findByRole('button', { name: 'Undo save' });
-    expect(screen.queryByRole('combobox', { name: 'Choose suggested cover' })).toBeNull();
-  });
-
-  it('keeps single-track review and accept enabled while showing save notice during an online job', async () => {
-    const item = makePrepItem(0);
-    const client = makeClient([item]);
-    const activeOnlineJob: ActivityJob = {
-      id: 7,
-      kind: 'identify_online',
-      tier: 'on_demand',
-      status: 'running',
-      label: 'Searching online',
-      done_items: 1,
-      total_items: 10,
-      paused_for_mix: false,
-      paused: false,
-      error_message: null,
-      created_ms: 0,
-      started_ms: 1,
-      finished_ms: null,
-    };
-    render(Prep, { client, activeOnlineJob });
-    const acceptBtn = (await screen.findByRole('button', {
-      name: 'Accept Artist',
-    })) as HTMLButtonElement;
-    expect(acceptBtn.disabled).toBe(false);
-    await fireEvent.click(acceptBtn);
-    expect(client.acceptAndWrite).toHaveBeenCalledWith(
-      [item.track.id],
-      ['artist'],
-      false,
-      item.review_token,
-    );
-    await waitFor(() => {
-      const status = screen.getByRole('status').textContent ?? '';
-      expect(status).toContain('Searching online');
-      expect(status).toContain('1 / 10');
-      expect(status).toContain('Saved to 1 file');
-    });
-  });
-
-  it('omits Accept all when compact fallback undo renders on a track with no suggestions', async () => {
-    const first = makePrepItem(0);
-    const second = makePrepItem(1);
-    second.fields = makeFields({});
-    second.pending_fields = 0;
-    const client = makeClient([first, second]);
-    const origObserver = globalThis.ResizeObserver;
-    const origWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
-    const observers: ResizeObserverCallback[] = [];
-    globalThis.ResizeObserver = class {
-      constructor(cb: ResizeObserverCallback) {
-        observers.push(cb);
-      }
-      observe() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver;
-    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
-      configurable: true,
-      get() {
-        return 640;
-      },
-    });
-    vi.mocked(client.prepPage)
-      .mockResolvedValueOnce({
-        total: 2,
-        offset: 0,
-        items: [first, second],
-        unwritten_tracks: 0,
-        last_operation: null,
-      })
-      .mockResolvedValue({
-        total: 1,
-        offset: 0,
-        items: [second],
-        unwritten_tracks: 0,
-        last_operation: null,
-      });
-
-    try {
-      render(Prep, { client });
-      for (const cb of observers) cb([], {} as ResizeObserver);
-      await fireEvent.click(await screen.findByRole('button', { name: /^Track 0 Ada Marsh/ }));
-      await fireEvent.click(await screen.findByRole('button', { name: 'Accept Artist' }));
-      await screen.findByRole('heading', { name: second.track.title });
-      const undo = await screen.findByRole('button', { name: 'Undo save' });
-      expect(undo.closest('.review-head')).not.toBeNull();
-      expect(screen.queryByRole('button', { name: 'Accept all' })).toBeNull();
-    } finally {
-      globalThis.ResizeObserver = origObserver;
-      if (origWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', origWidth);
-      else delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
-    }
-  });
-
-  it('supports Prep keyboard selection from outside focus without hijacking outside buttons on Enter', async () => {
-    const items = [makePrepItem(0), makePrepItem(1)];
-    const client = makeClient(items);
-    const outsideClick = vi.fn();
-    const outer = document.createElement('button');
-    outer.textContent = 'Sidebar nav';
-    outer.addEventListener('click', outsideClick);
-    document.body.appendChild(outer);
-    try {
-      render(Prep, { client });
-      await screen.findByRole('button', { name: 'Accept all' });
-      outer.focus();
-      await fireEvent.keyDown(outer, { key: 'ArrowDown' });
-      const secondRowBtn = screen.getByRole('button', { name: /^Track 1 Ada Marsh/ });
-      await waitFor(() => expect(document.activeElement).toBe(secondRowBtn));
-      outer.focus();
-      await fireEvent.keyDown(outer, { key: 'x' });
-      expect(
-        (
-          screen.getByRole('checkbox', {
-            name: 'Select ' + items[1]!.track.title,
-          }) as HTMLInputElement
-        ).checked,
-      ).toBe(true);
-      await fireEvent.keyDown(outer, { key: 'Enter' });
-      expect(client.acceptAndWrite).not.toHaveBeenCalled();
-    } finally {
-      outer.remove();
-    }
+      formatSaveNotice({ written: 2, library_fields: 1, reverted_fields: 0, failed: [] }),
+    ).toBe('Saved to 2 files · 1 field saved to library');
   });
 });

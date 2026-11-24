@@ -283,6 +283,34 @@ fn collapse_spaces_and_empty_brackets(text: &str) -> String {
         .join(" ")
 }
 
+/// Where a track stands in Prep. The order is the order a user works through them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PrepStage {
+    /// Suggestions are waiting for a decision, from a search or from the file's own name.
+    Review,
+    /// No online search has run for the track yet.
+    NotSearched,
+    /// An online search ran and found nothing usable.
+    NoMatch,
+    /// Matched online and every suggestion has been saved or skipped.
+    Done,
+}
+
+impl PrepStage {
+    /// Waiting suggestions come first, because they are the only stage with a decision to make.
+    pub fn of(has_pending: bool, searched_online: bool, matched_online: bool) -> Self {
+        if has_pending {
+            Self::Review
+        } else if !searched_online {
+            Self::NotSearched
+        } else if matched_online {
+            Self::Done
+        } else {
+            Self::NoMatch
+        }
+    }
+}
+
 /// The parent folder of a relative asset path (`"Label - EP/01 Track.wav"` -> `"Label - EP"`).
 pub fn parent_folder(path: &str) -> &str {
     path.rfind(['/', '\\']).map_or("", |index| &path[..index])
@@ -556,6 +584,16 @@ pub fn release_edits_from(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prep_stage_puts_waiting_suggestions_first() {
+        assert_eq!(PrepStage::of(true, false, false), PrepStage::Review);
+        assert_eq!(PrepStage::of(true, true, false), PrepStage::Review);
+        assert_eq!(PrepStage::of(true, true, true), PrepStage::Review);
+        assert_eq!(PrepStage::of(false, false, false), PrepStage::NotSearched);
+        assert_eq!(PrepStage::of(false, true, false), PrepStage::NoMatch);
+        assert_eq!(PrepStage::of(false, true, true), PrepStage::Done);
+    }
 
     #[test]
     fn title_and_sentence_case_keep_dj_acronyms_and_roman_numerals_uppercase() {

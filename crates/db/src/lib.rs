@@ -36,7 +36,7 @@ pub use identity::{
     StoredTrackRelinkTarget,
 };
 pub use operations::StoredOperation;
-pub use prep::BatchTagOperation;
+pub use prep::{BatchTagOperation, PrepStageFacts};
 pub use prep_writes::{FileDecision, FileRevision};
 pub use renames::{RenameTarget, StoredRename};
 use resonance_core::collections::CollectionNameError;

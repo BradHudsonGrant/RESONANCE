@@ -99,15 +99,21 @@
     clearFinished: () => core.call('clear_finished_jobs'),
   };
   const prepClient: PrepClient = {
-    trackIds: (query, track_ids) =>
-      core.call('prep_track_ids', { query, ...(track_ids === null ? {} : { track_ids }) }),
-    prepPage: (query, track_ids, offset, limit) =>
+    trackIds: (query, track_ids, stage) =>
+      core.call('prep_track_ids', {
+        query,
+        ...(track_ids === null ? {} : { track_ids }),
+        ...(stage === null ? {} : { stage }),
+      }),
+    prepPage: (query, track_ids, stage, offset, limit) =>
       core.call('prep_page', {
         query,
         ...(track_ids === null ? {} : { track_ids }),
+        ...(stage === null ? {} : { stage }),
         offset,
         limit,
       }),
+    skipItems: (track_ids, fields) => core.call('skip_prep_items', { track_ids, fields }),
     acceptAndWrite: (track_ids, fields, include_artwork, expected_review) =>
       core.call('accept_and_write', {
         track_ids,

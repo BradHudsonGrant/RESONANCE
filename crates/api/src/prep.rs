@@ -8,7 +8,7 @@ use resonance_core::identify::{
     Candidate, RankedCandidate, has_online_attempt, is_viable_alternative, should_expand_candidates,
 };
 use resonance_core::library::TagField;
-use resonance_core::prep::{TextCase, release_group};
+use resonance_core::prep::{PrepStage, TextCase, release_group};
 use resonance_core::staging::{dirty_file_fields, normalise_value, staging_diff};
 use resonance_db::{
     BatchTagOperation, CachedArtworkSource, Database, IdentificationPass, StoredIdentification,
@@ -25,8 +25,8 @@ use resonance_identify::provider::{CACHE_TTL, IdentifyError, display_name};
 use crate::command::{
     AcceptedProposals, BatchTagTool, CandidateArtworkState, IdentifyStepOutcome,
     MatchCandidateSummary, PrepItem, PrepPageSnapshot, PrepQueueSnapshot, PrepReleaseGroup,
-    ProposedTrackArtwork, StagedField, TagName, TextCaseName, TrackArtwork, TrackCandidateArtwork,
-    TrackQuery,
+    PrepStageCounts, PrepStageName, ProposedTrackArtwork, StagedField, TagName, TextCaseName,
+    TrackArtwork, TrackCandidateArtwork, TrackQuery,
 };
 use crate::error::ApiError;
 use crate::online::{to_command_evidence, to_command_step_reports};
@@ -35,6 +35,24 @@ use crate::tag_writes::journal_operation;
 use crate::{Api, core_track_query, library_track};
 
 const MAX_PREP_ITEMS: u32 = 500;
+
+fn stage_name(stage: PrepStage) -> PrepStageName {
+    match stage {
+        PrepStage::Review => PrepStageName::Review,
+        PrepStage::NotSearched => PrepStageName::NotSearched,
+        PrepStage::NoMatch => PrepStageName::NoMatch,
+        PrepStage::Done => PrepStageName::Done,
+    }
+}
+
+fn core_stage(stage: PrepStageName) -> PrepStage {
+    match stage {
+        PrepStageName::Review => PrepStage::Review,
+        PrepStageName::NotSearched => PrepStage::NotSearched,
+        PrepStageName::NoMatch => PrepStage::NoMatch,
+        PrepStageName::Done => PrepStage::Done,
+    }
+}
 
 fn map_identify_error(error: IdentifyError) -> ApiError {
     match error {
@@ -402,6 +420,11 @@ fn build_prep_items(
             steps,
             has_unwritten,
             online_checked,
+            stage: stage_name(PrepStage::of(
+                pending_fields > 0,
+                online_checked,
+                has_online_match,
+            )),
         });
     }
 
@@ -413,18 +436,26 @@ impl Api {
         &self,
         query: Option<TrackQuery>,
         track_ids: Option<Vec<i64>>,
+        stage: Option<PrepStageName>,
     ) -> Result<Vec<i64>, ApiError> {
         let query = core_track_query(query)?;
         if track_ids.as_ref().is_some_and(Vec::is_empty) {
             return Ok(Vec::new());
         }
-        let mut ids = self
-            .locked_library()
+        let library = self.locked_library();
+        let mut ids = library
             .prep_track_ids(&query)
             .map_err(ApiError::library_unreadable)?;
         if let Some(selected) = track_ids {
             let selected: HashSet<_> = selected.into_iter().collect();
             ids.retain(|id| selected.contains(id));
+        }
+        if let Some(stage) = stage {
+            let facts = library
+                .prep_stage_facts()
+                .map_err(ApiError::library_unreadable)?;
+            let wanted = core_stage(stage);
+            ids.retain(|&id| facts.stage(id) == wanted);
         }
         Ok(ids)
     }
@@ -457,17 +488,20 @@ impl Api {
         &self,
         query: Option<TrackQuery>,
         track_ids: Option<Vec<i64>>,
+        stage: Option<PrepStageName>,
         offset: u32,
         limit: u32,
     ) -> Result<PrepPageSnapshot, ApiError> {
         let limit = limit.clamp(1, MAX_PREP_ITEMS);
         let core_query = core_track_query(query)?;
-        let (total, page_ids) = {
+        // Every page counts the stages over the whole view, so the view's IDs are read in full,
+        // and the filename pass runs over all of them first so its suggestions count as Review.
+        let ordered = {
             let library = self.locked_library();
             if let Some(selected) = track_ids {
                 let mut seen = HashSet::with_capacity(selected.len());
                 let unique: Vec<i64> = selected.into_iter().filter(|id| seen.insert(*id)).collect();
-                let ordered = if unique.is_empty() {
+                if unique.is_empty() {
                     Vec::new()
                 } else if core_query.is_narrowed() {
                     let allowed: HashSet<i64> = unique.into_iter().collect();
@@ -478,23 +512,19 @@ impl Api {
                     all
                 } else {
                     unique
-                };
-                let total = ordered.len() as u32;
-                let start = (offset as usize).min(ordered.len());
-                let end = start.saturating_add(limit as usize).min(ordered.len());
-                (total, ordered[start..end].to_vec())
+                }
             } else {
                 library
-                    .prep_track_page(&core_query, offset, limit)
+                    .prep_track_ids(&core_query)
                     .map_err(ApiError::library_unreadable)?
             }
         };
 
         if self.core.local_pass_dirty.load(Ordering::Acquire) {
-            if !page_ids.is_empty() {
+            if !ordered.is_empty() {
                 let _ = run_local_pass_for_tracks(
                     &self.core.library,
-                    &page_ids,
+                    &ordered,
                     &AtomicBool::new(false),
                 );
             }
@@ -508,11 +538,34 @@ impl Api {
         }
 
         let library = self.locked_library();
+        let facts = library
+            .prep_stage_facts()
+            .map_err(ApiError::library_unreadable)?;
+        let mut stages = PrepStageCounts::default();
+        let wanted = stage.map(core_stage);
+        let mut shown = Vec::with_capacity(if wanted.is_some() { 0 } else { ordered.len() });
+        for id in ordered {
+            let track_stage = facts.stage(id);
+            match track_stage {
+                PrepStage::Review => stages.review += 1,
+                PrepStage::NotSearched => stages.not_searched += 1,
+                PrepStage::NoMatch => stages.no_match += 1,
+                PrepStage::Done => stages.done += 1,
+            }
+            if wanted.is_none_or(|wanted| wanted == track_stage) {
+                shown.push(id);
+            }
+        }
+        let total = shown.len() as u32;
+        let start = (offset as usize).min(shown.len());
+        let end = start.saturating_add(limit as usize).min(shown.len());
+        let page_ids = &shown[start..end];
+
         let rows: Vec<TrackRow> = if page_ids.is_empty() {
             Vec::new()
         } else {
             let mut by_id = library
-                .tracks_by_ids(&page_ids)
+                .tracks_by_ids(page_ids)
                 .map_err(ApiError::library_unreadable)?;
             page_ids.iter().filter_map(|id| by_id.remove(id)).collect()
         };
@@ -520,6 +573,7 @@ impl Api {
         Ok(PrepPageSnapshot {
             total,
             offset,
+            stages,
             items: snapshot.items,
             unwritten_tracks: snapshot.unwritten_tracks,
             last_operation: snapshot.last_operation,

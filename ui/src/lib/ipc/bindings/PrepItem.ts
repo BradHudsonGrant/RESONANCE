@@ -4,6 +4,7 @@ import type { LibraryTrack } from "./LibraryTrack";
 import type { MatchCandidateSummary } from "./MatchCandidateSummary";
 import type { MatchEvidence } from "./MatchEvidence";
 import type { PrepReleaseGroup } from "./PrepReleaseGroup";
+import type { PrepStageName } from "./PrepStageName";
 import type { StagedField } from "./StagedField";
 import type { TrackArtwork } from "./TrackArtwork";
 
@@ -15,4 +16,4 @@ export type PrepItem = { track: LibraryTrack, review_token: string, fields: Arra
  * Confidences of every pending unlocked changing field on this track, for live threshold
  * previews.
  */
-changeable_confidences: Array<number>, release: PrepReleaseGroup | null, evidence: MatchEvidence | null, candidates: Array<MatchCandidateSummary>, selected_candidate: number, candidates_expanded: boolean, steps: Array<IdentifyStepReport>, has_unwritten: boolean, online_checked: boolean, };
+changeable_confidences: Array<number>, release: PrepReleaseGroup | null, evidence: MatchEvidence | null, candidates: Array<MatchCandidateSummary>, selected_candidate: number, candidates_expanded: boolean, steps: Array<IdentifyStepReport>, has_unwritten: boolean, online_checked: boolean, stage: PrepStageName, };
