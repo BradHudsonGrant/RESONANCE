@@ -28,8 +28,8 @@ pub use artwork::{
 pub use collections::{CollectionSummary, TrackCollection};
 pub use filters::SmartView;
 pub use identification::{
-    AssetAudioIdentity, CachedResponse, IdentificationBatchItem, IdentificationInput,
-    IdentificationPass, LocalIdentificationItem, StoredIdentification,
+    AssetAudioIdentity, BandcampPageNames, CachedResponse, IdentificationBatchItem,
+    IdentificationInput, IdentificationPass, LocalIdentificationItem, StoredIdentification,
 };
 pub use identity::{
     IdentityMatch, PendingAsset, StoredAssetIdentity, StoredRelinkCandidate,

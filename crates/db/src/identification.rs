@@ -26,6 +26,15 @@ pub struct IdentificationInput {
     pub bandcamp_sellers: Vec<String>,
 }
 
+/// A Bandcamp page a track was matched to, with the names the track was known by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BandcampPageNames {
+    pub artist: Option<String>,
+    pub remixer: Option<String>,
+    pub mix: Option<String>,
+    pub url: String,
+}
+
 /// Lazy audio identity loaded only when a track runs preview verification or AudD.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetAudioIdentity {
@@ -179,19 +188,25 @@ type IdentificationWriteRef<'a> = (
 );
 
 impl Database {
-    /// The Bandcamp page each artist's matched tracks came from, keyed by the artist in lower
-    /// case as the files name them.
-    pub fn bandcamp_pages_by_artist(&self) -> Result<Vec<(String, String)>, DbError> {
+    /// Every matched Bandcamp page with the names its track was known by: artist, remixer and
+    /// mix, as the file gave them.
+    pub fn bandcamp_pages_with_names(&self) -> Result<Vec<BandcampPageNames>, DbError> {
         let mut statement = self.connection.prepare_cached(
-            "SELECT DISTINCT lower(json_extract(known_json, '$.artist')), json_extract(best_json, '$.url')
+            "SELECT json_extract(known_json, '$.artist'), json_extract(known_json, '$.remixer'),
+                    json_extract(known_json, '$.mix'), json_extract(best_json, '$.url')
              FROM track_identification
-             WHERE json_extract(best_json, '$.url') LIKE '%.bandcamp.com/%'
-               AND json_extract(known_json, '$.artist') IS NOT NULL",
+             WHERE json_extract(best_json, '$.url') LIKE '%.bandcamp.com/%'",
         )?;
-        let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        let rows = statement.query_map([], |row| {
+            Ok(BandcampPageNames {
+                artist: row.get(0)?,
+                remixer: row.get(1)?,
+                mix: row.get(2)?,
+                url: row.get(3)?,
+            })
+        })?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
-
     /// Up to `limit` tracks after `after_track_id` that still need `pass`, in track order.
     pub fn identification_inputs(
         &self,

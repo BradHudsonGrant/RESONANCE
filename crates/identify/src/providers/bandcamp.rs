@@ -117,6 +117,9 @@ fn candidates(data: &Value, url: &str) -> Vec<Candidate> {
                 let (title, mix) = split_mix(&clean_raw);
                 (raw_artist, title, mix, base.label.clone())
             };
+            // A seller who leaves the artist as "Unknown Artist" says nothing about it, and that
+            // must never replace the artist the file names.
+            let artist = artist.filter(|name| !is_placeholder_artist(name));
             let item_art = image_url(item).or_else(|| base.artwork_url.clone());
             let item_art_provider = item_art.as_ref().map(|_| ID.to_owned());
             let (item_genre, item_subgenre) = keywords_genres(item);
@@ -279,6 +282,19 @@ mod tests {
         assert_eq!(found[0].artwork_provider.as_deref(), Some("bandcamp"));
         assert_eq!(found[0].year, Some(2019));
         assert_eq!(found[0].duration_ms, Some(300_000));
+    }
+
+    #[test]
+    fn a_placeholder_artist_on_the_page_is_not_offered() {
+        let page = r#"<html><script type="application/ld+json">
+            {"@type":"MusicRecording","name":"Night Cut (kit remix)","duration":"P00H06M00S",
+             "byArtist":{"name":"Unknown Artist"},"publisher":{"name":"kit"}}
+            </script></html>"#;
+        let data = parse_json(ID, structured_data(page).unwrap()).unwrap();
+        let found = candidates(&data, "https://kit.bandcamp.com/track/night-cut-kit-remix");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].artist, None);
+        assert_eq!(found[0].title.as_deref(), Some("Night Cut"));
     }
 
     #[test]

@@ -443,6 +443,11 @@ pub fn normalise_tags(tags: &[(TagField, String)]) -> KnownTags {
         }
         working = clean_text(&without_catno).unwrap_or(without_catno);
         working = strip_vinyl_only_suffix(&working);
+        let (without_hint, release_hint) = take_release_hint(&working);
+        if known.album.is_none() {
+            known.album = release_hint;
+        }
+        working = without_hint;
 
         if let Some(existing_artist) = known.artist.as_deref()
             && let Some((left, right)) = working.split_once(" - ")
@@ -889,6 +894,60 @@ fn is_web_address(word: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
+/// Words that mark bracketed text as the release a track came from, not its mix.
+const RELEASE_WORDS: [&str; 7] = [
+    "vol",
+    "volume",
+    "ep",
+    "lp",
+    "compilation",
+    "sampler",
+    "series",
+];
+
+/// Takes a trailing `[Label Vol.4]` or `(Name EP)` off a title. Downloads from compilations
+/// often carry the release in the title, which hides the track's own name from every search.
+pub fn take_release_hint(title: &str) -> (String, Option<String>) {
+    let trimmed = title.trim();
+    let Some(close) = trimmed.chars().last() else {
+        return (trimmed.to_owned(), None);
+    };
+    let open = match close {
+        ']' => '[',
+        ')' => '(',
+        _ => return (trimmed.to_owned(), None),
+    };
+    let Some(start) = trimmed.rfind(open) else {
+        return (trimmed.to_owned(), None);
+    };
+    let inner = trimmed[start + open.len_utf8()..trimmed.len() - close.len_utf8()].trim();
+    let before = trimmed[..start].trim();
+    let names_release = normalise_tokens(inner)
+        .iter()
+        .any(|token| RELEASE_WORDS.contains(&token.trim_end_matches(char::is_numeric)));
+    if before.is_empty() || inner.is_empty() || is_mix_name(inner) || !names_release {
+        return (trimmed.to_owned(), None);
+    }
+    (before.to_owned(), Some(inner.to_owned()))
+}
+
+/// The seller or label a release name points at: `night owl` from `night owl Vol.2`.
+pub fn release_seller(release: &str) -> Option<String> {
+    let mut words = Vec::new();
+    for word in release.split_whitespace() {
+        let token = word
+            .trim_matches(|c: char| !c.is_alphanumeric())
+            .to_lowercase();
+        let stem = token.trim_end_matches(|c: char| c.is_numeric() || c == '.');
+        if RELEASE_WORDS.contains(&stem) || token.starts_with("vol") {
+            break;
+        }
+        words.push(word);
+    }
+    let name = words.join(" ");
+    (!name.is_empty() && words.len() < 4).then_some(name)
+}
+
 fn is_mix_name(text: &str) -> bool {
     normalise_tokens(text)
         .into_iter()
@@ -1310,6 +1369,32 @@ pub fn clean_release_title(title: &str, artist: Option<&str>, catno: Option<&str
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_release_in_the_title_becomes_an_album_hint() {
+        assert_eq!(
+            take_release_hint("Glow Line [kit sounds Vol.4]"),
+            ("Glow Line".to_owned(), Some("kit sounds Vol.4".to_owned()))
+        );
+        assert_eq!(
+            take_release_hint("Glow Line (Dub)"),
+            ("Glow Line (Dub)".to_owned(), None)
+        );
+        assert_eq!(
+            take_release_hint("Glow Line (feat. Ada)"),
+            ("Glow Line (feat. Ada)".to_owned(), None)
+        );
+        assert_eq!(
+            release_seller("kit sounds Vol.4").as_deref(),
+            Some("kit sounds")
+        );
+        assert_eq!(release_seller("Night Owl EP").as_deref(), Some("Night Owl"));
+        let known = normalise_tags(&[
+            (TagField::Artist, "Ada Marsh".to_owned()),
+            (TagField::Title, "Glow Line [kit sounds Vol.4]".to_owned()),
+        ]);
+        assert_eq!(known.title.as_deref(), Some("Glow Line"));
+        assert_eq!(known.album.as_deref(), Some("kit sounds Vol.4"));
+    }
     #[test]
     fn a_seller_release_title_loses_the_artist_and_catalogue_number() {
         assert_eq!(

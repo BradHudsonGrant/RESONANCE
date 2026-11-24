@@ -22,7 +22,9 @@ The rule that places a track in a stage lives in `crates/core/src/prep.rs` (`Pre
 
 **Find matches** searches every track in the current tab, or only the ticked tracks when any are ticked. The button names how many tracks it will search. While a search runs, a strip under the toolbar shows how many tracks are done, the rows being searched say Searching, and the rest of Prep stays usable. When it ends, the strip says how many tracks are ready to review and how many found nothing.
 
-A track the catalogues do not know, such as an edit sold only on Bandcamp, is looked up on the Bandcamp page its names point at: first the Bandcamp sellers other tracks by the same artist were matched to, then the remixer or the name in the mix, the artist and the label, with the title as Bandcamp writes it in the address. An artist who sells under another name is found once one of their tracks is matched, by search or by a pasted link. Bandcamp's own search is not used: its rules for automated visitors exclude it.
+A track the catalogues do not know, such as an edit sold only on Bandcamp, is looked up on the Bandcamp page its names point at: first the Bandcamp sellers that other tracks sharing its artist, remixer or mix name were matched to, then the remixer or the name in the mix, the artist, the label and the release named in the title, with the title as Bandcamp writes it in the address. An artist who sells under another name is found once one of their tracks is matched, by search or by a pasted link. Bandcamp's own search is not used: its rules for automated visitors exclude it.
+
+A title that ends in the release it came from, such as `Track [Label Vol.4]`, is searched without it, and the release becomes the album hint.
 
 A track counts as searched once a search has run, even if one provider failed. The next search tries it again.
 

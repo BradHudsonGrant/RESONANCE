@@ -16,8 +16,9 @@ pub use fuse::{
 pub use parse::{
     artist_search_terms, clean_release_title, clean_text, extract_isrc, find_catno, fold_latin,
     is_generic_distributor_label, is_placeholder_artist, normalise_catno_tag, normalise_label,
-    normalise_tags, normalise_tokens, parse_path, search_fallback_text, search_title_clean,
-    similarity, split_artist_from_title, split_featured, split_mix, strip_promo_and_catno,
+    normalise_tags, normalise_tokens, parse_path, release_seller, search_fallback_text,
+    search_title_clean, similarity, split_artist_from_title, split_featured, split_mix,
+    strip_promo_and_catno, take_release_hint,
 };
 pub use score::{
     MixFamily, RemixQualifier, classify_mix, confirm_by_fingerprint, mix_family_matches,
@@ -25,7 +26,7 @@ pub use score::{
 };
 pub use url::{
     MAX_GUESSED_BANDCAMP_PAGES, ReleaseUrl, UrlRejected, bandcamp_seller, extract_release_urls,
-    guessed_bandcamp_pages, parse_release_url,
+    guessed_bandcamp_pages, mix_maker, parse_release_url,
 };
 
 use crate::library::TagField;

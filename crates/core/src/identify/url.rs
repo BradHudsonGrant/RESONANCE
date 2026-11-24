@@ -161,11 +161,13 @@ pub fn guessed_bandcamp_pages(known: &super::KnownTags) -> Vec<ReleaseUrl> {
     };
     let full_title = crate::staging::title_with_mix(title, known.mix.as_deref());
     let mix_name = known.mix.as_deref().and_then(mix_maker);
+    let album_seller = known.album.as_deref().and_then(super::release_seller);
     let sellers = [
         known.remixer.as_deref(),
         mix_name.as_deref(),
         Some(artist),
         known.label.as_deref(),
+        album_seller.as_deref(),
     ];
     let slugs = [
         bandcamp_slug(&full_title),
@@ -197,7 +199,7 @@ pub fn guessed_bandcamp_pages(known: &super::KnownTags) -> Vec<ReleaseUrl> {
 }
 
 /// Who made a mix, from its name: "Will & Batty Edit" gives "Will & Batty".
-fn mix_maker(mix: &str) -> Option<String> {
+pub fn mix_maker(mix: &str) -> Option<String> {
     let mut words: Vec<&str> = mix.split_whitespace().collect();
     while words
         .last()
