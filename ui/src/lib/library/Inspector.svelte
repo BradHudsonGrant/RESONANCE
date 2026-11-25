@@ -10,8 +10,11 @@
   import type { LibraryCollection } from '../ipc/bindings/LibraryCollection';
   import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
   import type { TrackArtwork } from '../ipc/bindings/TrackArtwork';
+  import type { TrackCopies } from '../ipc/bindings/TrackCopies';
   import type { TrackQuality } from '../ipc/bindings/TrackQuality';
   import CollectionMenu from './CollectionMenu.svelte';
+  import CopiesAndVersions from './CopiesAndVersions.svelte';
+  import { copyGroup } from './copies';
   import { audioSummary, duration, fileSize, level, tempo, trackSeed } from './format';
   import { keyDetail } from './key-notation.svelte';
   import QualityFlags from './QualityFlags.svelte';
@@ -41,6 +44,8 @@
     onskipartwork?: (trackId: number) => void;
     /** The selected track's quality check. */
     quality?: TrackQuality | null;
+    /** The selected track's other copies and versions. */
+    copies?: TrackCopies | null;
   }
 
   let {
@@ -66,7 +71,16 @@
     onacceptartwork,
     onskipartwork,
     quality = null,
+    copies = null,
   }: Props = $props();
+
+  const related = $derived(
+    copies && track && copies.track_id === track.id
+      ? copyGroup(copies).length > 1 || copies.versions.length > 0
+        ? copies
+        : null
+      : null,
+  );
 
   const checked = $derived(quality && track && quality.track_id === track.id ? quality : null);
 
@@ -374,6 +388,14 @@
           {:else}
             <p class="quality-clean">No problems found</p>
           {/if}
+        </section>
+      {/if}
+
+      {#if related}
+        <ModularDivider />
+
+        <section class="copies" aria-label="Copies and versions">
+          <CopiesAndVersions copies={related} />
         </section>
       {/if}
 
@@ -686,6 +708,7 @@
 
   .details,
   .quality,
+  .copies,
   .collections-section,
   .file-facts {
     display: grid;

@@ -3,6 +3,8 @@ import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CoreError } from '../ipc/client';
+import type { CopyFile } from '../ipc/bindings/CopyFile';
+import type { TrackCopies } from '../ipc/bindings/TrackCopies';
 import type { TrackQuality } from '../ipc/bindings/TrackQuality';
 import type { TrackQuery } from '../ipc/bindings/TrackQuery';
 import { fakeFilters, fakeLibrary, fakeTableLayout, fakeTrack } from './fake-library';
@@ -508,6 +510,52 @@ describe('Inspector and track formatting', () => {
 
     await rerender({ track, quality: { ...quality, flags: [] }, onclose: vi.fn() });
     expect(screen.getByText('No problems found')).toBeTruthy();
+  });
+
+  it('lists the copies and versions of a track without offering to remove anything', () => {
+    const track = fakeTrack(5);
+    const file = (asset_id: number, overrides: Partial<CopyFile>): CopyFile => ({
+      asset_id,
+      track_id: asset_id,
+      kind: 'this_file',
+      relation: 'This file',
+      similarity: null,
+      title: track.title,
+      artist: track.artist,
+      format: 'wav',
+      location: `D:/Music/${asset_id}.wav`,
+      audio: {
+        duration_ms: 361_000,
+        sample_rate: 44_100,
+        channels: null,
+        bit_depth: 16,
+        bitrate_kbps: null,
+      },
+      flagged: false,
+      missing: false,
+      ...overrides,
+    });
+    const copies: TrackCopies = {
+      track_id: track.id,
+      files: [file(track.id, {})],
+      copies: [file(70, { kind: 'byte_identical', relation: 'Same file' })],
+      versions: [
+        file(71, {
+          kind: 'version',
+          relation: 'Different length',
+          title: `${track.title} (Radio Edit)`,
+        }),
+      ],
+      keep_asset_id: track.id,
+      removed: 0,
+    };
+    render(Inspector, { track, copies, onclose: vi.fn() });
+    const section = screen.getByRole('region', { name: 'Copies and versions' });
+    expect(within(section).getByText('Same file')).toBeTruthy();
+    expect(within(section).getByText('Best copy')).toBeTruthy();
+    expect(within(section).getByText(`${track.title} (Radio Edit)`)).toBeTruthy();
+    expect(within(section).getByText('Different length')).toBeTruthy();
+    expect(within(section).queryByRole('button')).toBeNull();
   });
 
   it('leaves the quality section out until the file has been checked', () => {

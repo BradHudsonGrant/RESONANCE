@@ -59,6 +59,7 @@ symphonia = { version = "0.6.1", default-features = false, features = [
     "pcm",
     "wav",
 ] }
+trash = "5.4.0"
 tokio = { version = "1.54.1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-tungstenite = "0.30.0"
 ts-rs = "12.0.1"

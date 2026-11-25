@@ -8,6 +8,9 @@
   import type { PrepItem } from '../ipc/bindings/PrepItem';
   import type { StagedField } from '../ipc/bindings/StagedField';
   import type { TagName } from '../ipc/bindings/TagName';
+  import type { TrackCopies } from '../ipc/bindings/TrackCopies';
+  import CopiesAndVersions from '../library/CopiesAndVersions.svelte';
+  import { copyGroup } from '../library/copies';
   import QualityFlags from '../library/QualityFlags.svelte';
   import MatchEvidenceHeader, { formatProviderName } from './MatchEvidenceHeader.svelte';
   import {
@@ -47,6 +50,10 @@
     onback: () => void;
     onundo: () => void;
     onopenproviders?: () => void;
+    /** The track's copies and versions, once loaded. */
+    copies?: TrackCopies | null;
+    copyBusy?: boolean;
+    onkeepcopy?: (assetId: number) => void;
   }
   let {
     item,
@@ -71,6 +78,9 @@
     onback,
     onundo,
     onopenproviders,
+    copies = null,
+    copyBusy = false,
+    onkeepcopy,
   }: Props = $props();
 
   let url = $state('');
@@ -231,6 +241,12 @@
           Quality <span class="numeric">{item.quality.length.toLocaleString('en-GB')}</span>
         </h3>
         <QualityFlags flags={item.quality} />
+      </section>
+    {/if}
+
+    {#if copies && (copyGroup(copies).length > 1 || copies.versions.length)}
+      <section class="group" aria-label="Copies and versions">
+        <CopiesAndVersions {copies} busy={busy || copyBusy} onkeep={onkeepcopy} />
       </section>
     {/if}
 

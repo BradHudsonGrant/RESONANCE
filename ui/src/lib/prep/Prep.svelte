@@ -16,6 +16,7 @@
   import type { RenameScope } from '../ipc/bindings/RenameScope';
   import type { TagName } from '../ipc/bindings/TagName';
   import type { TagWriteReport } from '../ipc/bindings/TagWriteReport';
+  import type { TrackCopies } from '../ipc/bindings/TrackCopies';
   import type { TrackQuery } from '../ipc/bindings/TrackQuery';
   import type { TrackCandidateArtwork } from '../ipc/bindings/TrackCandidateArtwork';
   import type { TrackIdentification } from '../ipc/bindings/TrackIdentification';
@@ -83,6 +84,10 @@
     previewTagWrites: (trackIds: number[]) => Promise<FileTagWrite[]>;
     applyTagWrites: (trackIds: number[]) => Promise<TagWriteReport>;
     undoOperation: (operationId: number) => Promise<UndoReport>;
+    /** The track's own files, its copies and its versions. */
+    trackCopies: (trackId: number) => Promise<TrackCopies>;
+    /** Keeps one copy and moves the others to the Recycle Bin. */
+    keepCopy: (trackId: number, assetId: number) => Promise<TrackCopies>;
   }
 
   interface Props {
@@ -181,6 +186,44 @@
   const scopeQuery = $derived(withListSort(filterQuery, listSort));
   const current = $derived(activeId == null ? null : (byId[activeId] ?? null));
   const detailOpen = $derived(compact && reviewing && current !== null);
+
+  let copies = $state<TrackCopies | null>(null);
+  let keepingCopy = $state(false);
+
+  // Read again when the library changes, since a scan can bring in another copy.
+  $effect(() => {
+    const trackId = current?.track.id;
+    void revision;
+    if (trackId === undefined) {
+      copies = null;
+      return;
+    }
+    client.trackCopies(trackId).then(
+      (loaded) => {
+        if (current?.track.id === trackId) copies = loaded;
+      },
+      () => {
+        if (current?.track.id === trackId) copies = null;
+      },
+    );
+  });
+
+  async function keepCopy(trackId: number, assetId: number) {
+    keepingCopy = true;
+    notice = '';
+    try {
+      const kept = await client.keepCopy(trackId, assetId);
+      copies = kept;
+      notice =
+        kept.removed === 1
+          ? 'Moved 1 copy to the Recycle Bin'
+          : `Moved ${kept.removed.toLocaleString('en-GB')} copies to the Recycle Bin`;
+    } catch (err) {
+      notice = message(err);
+    } finally {
+      keepingCopy = false;
+    }
+  }
   const selectedCount = $derived((void selectionVersion, selected.size));
   const searchBusy = $derived(busy || !!activeOnlineJob);
   const findCount = $derived(selectedCount || counts.not_searched);
@@ -1005,6 +1048,9 @@
           onback={backToTracks}
           onundo={undo}
           {onopenproviders}
+          copies={copies?.track_id === item.track.id ? copies : null}
+          copyBusy={keepingCopy}
+          onkeepcopy={(assetId) => void keepCopy(item.track.id, assetId)}
         />
       {:else if loading}
         <p class="empty" role="status">Loading tracks…</p>

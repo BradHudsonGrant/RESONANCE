@@ -9,6 +9,7 @@
   import type { RenameScope } from './lib/ipc/bindings/RenameScope';
   import type { SmartView } from './lib/ipc/bindings/SmartView';
   import type { TrackArtwork } from './lib/ipc/bindings/TrackArtwork';
+  import type { TrackCopies } from './lib/ipc/bindings/TrackCopies';
   import type { TrackQuality } from './lib/ipc/bindings/TrackQuality';
   import type { TrackQuery } from './lib/ipc/bindings/TrackQuery';
   import { pictureBase64 } from './lib/ipc/artwork';
@@ -142,6 +143,8 @@
     previewTagWrites: (track_ids) => core.call('preview_tag_writes', { track_ids }),
     applyTagWrites: (track_ids) => core.call('apply_tag_writes', { track_ids }),
     undoOperation: (operation_id) => core.call('undo_operation', { operation_id }),
+    trackCopies: (track_id) => core.call('track_copies', { track_id }),
+    keepCopy: (track_id, asset_id) => core.call('keep_copy', { track_id, asset_id }),
   };
 
   let shell: HTMLDivElement;
@@ -525,6 +528,23 @@
     if (trackQuality?.track_id !== shown?.id) trackQuality = null;
     if (shown) void loadQuality(shown.id);
   });
+
+  let trackCopies = $state<TrackCopies | null>(null);
+
+  async function loadCopies(trackId: number) {
+    try {
+      const loaded = await core.call('track_copies', { track_id: trackId });
+      if (track?.id === trackId) trackCopies = loaded;
+    } catch {
+      if (track?.id === trackId) trackCopies = null;
+    }
+  }
+
+  $effect(() => {
+    const shown = track;
+    if (trackCopies?.track_id !== shown?.id) trackCopies = null;
+    if (shown) void loadCopies(shown.id);
+  });
   const inspectorDocked = $derived(space === 'Library' && !inspectorHidden);
 
   /** What the stylesheet decided, read only when the user asks for the opposite. */
@@ -895,6 +915,7 @@
         oncreatecollectionandadd={createCollectionAndAdd}
         artwork={trackArtwork}
         quality={trackQuality}
+        copies={trackCopies}
         {artworkError}
         onpickartwork={pickArtwork}
         onacceptartwork={acceptArtwork}
@@ -967,6 +988,7 @@
       oncreatecollectionandadd={createCollectionAndAdd}
       artwork={trackArtwork}
       quality={trackQuality}
+      copies={trackCopies}
       {artworkError}
       onpickartwork={pickArtwork}
       onacceptartwork={acceptArtwork}

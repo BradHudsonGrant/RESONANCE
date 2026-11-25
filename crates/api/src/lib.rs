@@ -2,6 +2,7 @@ pub mod artwork;
 mod auto_preview;
 mod collections;
 pub mod command;
+mod copies;
 pub mod data_folder;
 pub mod error;
 mod filters;
@@ -459,6 +460,12 @@ impl Api {
             Request::SkipProposal { track_id, fields } => self
                 .skip_proposal(track_id, &fields)
                 .map(Response::SkipProposal),
+            Request::TrackCopies { track_id } => {
+                self.track_copies(track_id).map(Response::TrackCopies)
+            }
+            Request::KeepCopy { track_id, asset_id } => {
+                self.keep_copy(track_id, asset_id).map(Response::KeepCopy)
+            }
             Request::TrackQuality { track_id } => {
                 self.track_quality(track_id).map(Response::TrackQuality)
             }

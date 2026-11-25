@@ -1,5 +1,6 @@
 mod artwork;
 mod collections;
+mod copies;
 mod filters;
 mod identification;
 mod identification_settings;
@@ -29,6 +30,7 @@ pub use artwork::{
     StoredArtwork, TrackArtworkState,
 };
 pub use collections::{CollectionSummary, TrackCollection};
+pub use copies::StoredCopy;
 pub use filters::SmartView;
 pub use identification::{
     AssetAudioIdentity, CachedResponse, IdentificationBatchItem, IdentificationInput,

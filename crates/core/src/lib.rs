@@ -1,6 +1,7 @@
 pub mod artwork;
 pub mod collections;
 pub mod columns;
+pub mod duplicates;
 pub mod filter;
 pub mod identify;
 pub mod identity;

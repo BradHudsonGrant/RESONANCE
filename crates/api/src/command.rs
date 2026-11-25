@@ -273,6 +273,19 @@ pub enum Request {
         #[serde(default)]
         fields: Vec<TagName>,
     },
+    /// The track's own files, its copies on other tracks and its other versions.
+    TrackCopies {
+        #[ts(type = "number")]
+        track_id: i64,
+    },
+    /// Keeps one copy of the track's recording and moves every other copy to the Recycle Bin.
+    /// Versions are never touched.
+    KeepCopy {
+        #[ts(type = "number")]
+        track_id: i64,
+        #[ts(type = "number")]
+        asset_id: i64,
+    },
     /// What the quality check measured and flagged in the file a track plays.
     TrackQuality {
         #[ts(type = "number")]
@@ -547,6 +560,8 @@ pub enum Response {
     AcceptProposedFields(TrackStagingDiff),
     AcceptAllAboveThreshold(AcceptedProposals),
     SkipProposal(TrackStagingDiff),
+    TrackCopies(TrackCopies),
+    KeepCopy(TrackCopies),
     TrackQuality(TrackQuality),
     TrackArtwork(TrackArtwork),
     AcceptProposedArtwork(TrackArtwork),
@@ -798,6 +813,62 @@ pub struct TrackStagingDiff {
     #[ts(type = "number")]
     pub track_id: i64,
     pub fields: Vec<StagedField>,
+}
+
+/// How a file relates to the track it is listed with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum CopyKind {
+    /// The file the track plays.
+    ThisFile,
+    ByteIdentical,
+    AudioIdentical,
+    /// Another encode of the same master.
+    SameRecording,
+    /// A different version of the song, never a duplicate.
+    Version,
+}
+
+/// One file in a track's copies and versions.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct CopyFile {
+    #[ts(type = "number")]
+    pub asset_id: i64,
+    #[ts(type = "number")]
+    pub track_id: i64,
+    pub kind: CopyKind,
+    /// How it relates, in the words the app shows.
+    pub relation: String,
+    /// Chromaprint agreement from 0 to 1, for another encode.
+    pub similarity: Option<f64>,
+    pub title: String,
+    pub artist: Option<String>,
+    pub format: String,
+    pub location: String,
+    pub audio: TrackAudio,
+    /// The quality check found damage or a likely transcode.
+    pub flagged: bool,
+    pub missing: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct TrackCopies {
+    #[ts(type = "number")]
+    pub track_id: i64,
+    /// The track's own files, the one it plays first.
+    pub files: Vec<CopyFile>,
+    /// Files on other tracks with the same recording, best first.
+    pub copies: Vec<CopyFile>,
+    /// One file for each other track that holds a different version.
+    pub versions: Vec<CopyFile>,
+    /// The copy to keep when the recording has more than one.
+    #[ts(type = "number | null")]
+    pub keep_asset_id: Option<i64>,
+    /// Files moved to the Recycle Bin by the last keep, when this answers one.
+    pub removed: u32,
 }
 
 /// What a quality flag says is wrong.
