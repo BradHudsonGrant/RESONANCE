@@ -1348,6 +1348,9 @@ test('a batch of 50 mixed files goes from untagged to tagged in Prep using the k
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Enter');
     await expect(filter).toHaveValue('artist');
+    // The first load of a view reads every track's filename first, which can take a few seconds.
+    await expect(prep.locator('.column .count')).toHaveText('50', { timeout: 30_000 });
+    await expect(prep.locator('.row:not(.placeholder)').first()).toBeVisible({ timeout: 30_000 });
     const selectAll = prep.getByRole('checkbox', { name: 'Select all tracks' });
     await selectAll.press('Space');
     await expect(prep.getByText('50 ticked')).toBeVisible();
