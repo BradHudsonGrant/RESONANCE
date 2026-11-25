@@ -8,6 +8,7 @@
   import type { PrepItem } from '../ipc/bindings/PrepItem';
   import type { StagedField } from '../ipc/bindings/StagedField';
   import type { TagName } from '../ipc/bindings/TagName';
+  import QualityFlags from '../library/QualityFlags.svelte';
   import MatchEvidenceHeader, { formatProviderName } from './MatchEvidenceHeader.svelte';
   import {
     MISSING_LABELS,
@@ -223,6 +224,15 @@
         </div>
       </div>
     </header>
+
+    {#if item.quality.length}
+      <section class="group" aria-labelledby="prep-quality">
+        <h3 id="prep-quality">
+          Quality <span class="numeric">{item.quality.length.toLocaleString('en-GB')}</span>
+        </h3>
+        <QualityFlags flags={item.quality} />
+      </section>
+    {/if}
 
     {#if item.candidates.length}
       <section class="group" aria-labelledby="prep-matches">

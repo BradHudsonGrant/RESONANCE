@@ -3,6 +3,7 @@ import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CoreError } from '../ipc/client';
+import type { TrackQuality } from '../ipc/bindings/TrackQuality';
 import type { TrackQuery } from '../ipc/bindings/TrackQuery';
 import { fakeFilters, fakeLibrary, fakeTableLayout, fakeTrack } from './fake-library';
 import { audioSummary, trackSeed } from './format';
@@ -466,6 +467,59 @@ describe('Library', () => {
 });
 
 describe('Inspector and track formatting', () => {
+  it('shows the quality check with each flag, how sure it is and why', async () => {
+    const track = fakeTrack(5);
+    const quality: TrackQuality = {
+      track_id: track.id,
+      checked: true,
+      integrated_lufs: -9.84,
+      loudness_range_lu: 7,
+      sample_peak_dbfs: 0,
+      true_peak_dbtp: 0.72,
+      crest_low_db: 11.5,
+      crest_mid_db: 24.7,
+      spectral_cutoff_hz: 16_000,
+      flags: [
+        {
+          kind: 'clipping',
+          label: 'Clipping',
+          certainty: 'confirmed',
+          reason: 'The waveform is flat at full scale in 49 places',
+        },
+        {
+          kind: 'transcode',
+          label: 'Fake lossless',
+          certainty: 'likely',
+          reason: 'The sound stops sharply above 16.0 kHz',
+        },
+      ],
+    };
+    const { rerender } = render(Inspector, { track, quality, onclose: vi.fn() });
+
+    const section = screen.getByRole('region', { name: 'Quality' });
+    expect(section.textContent).toContain('-9.8 LUFS');
+    expect(section.textContent).toContain('7.0 LU');
+    expect(section.textContent).toContain('+0.7 dBTP');
+    const flags = within(section).getAllByRole('listitem');
+    expect(flags.map((flag) => flag.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+      'Clipping Confirmed The waveform is flat at full scale in 49 places',
+      'Fake lossless Likely The sound stops sharply above 16.0 kHz',
+    ]);
+
+    await rerender({ track, quality: { ...quality, flags: [] }, onclose: vi.fn() });
+    expect(screen.getByText('No problems found')).toBeTruthy();
+  });
+
+  it('leaves the quality section out until the file has been checked', () => {
+    const track = fakeTrack(6);
+    render(Inspector, {
+      track,
+      quality: { track_id: track.id, checked: false, flags: [] } as unknown as TrackQuality,
+      onclose: vi.fn(),
+    });
+    expect(screen.queryByRole('region', { name: 'Quality' })).toBeNull();
+  });
+
   it('shows seeded artwork, audio format, two detail rows, favourite button and file facts for a track', async () => {
     const onclose = vi.fn();
     const ontogglefavourite = vi.fn();

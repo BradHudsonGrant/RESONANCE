@@ -109,6 +109,7 @@ function makeItem(index: number, stage: PrepStageName = 'review'): PrepItem {
         : {},
     ),
     artwork: { track_id: track.id, artwork: null, proposed: null, dirty_on_disk: false },
+    quality: [],
     pending_fields: review ? 3 : 0,
     provider: review ? 'musicbrainz' : null,
     confidence: review ? 0.94 : 0,

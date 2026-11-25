@@ -27,6 +27,19 @@ export function sampleRate(hertz: number): string {
   return `${tenthFormat.format(hertz / 1000)} kHz`;
 }
 
+const levelFormat = new Intl.NumberFormat('en-GB', {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
+
+/** A level to one decimal with its unit, such as `-9.8 LUFS`. Peaks carry a plus sign above 0. */
+export function level(value: number | null | undefined, unit: string, signed = false): string {
+  if (value === null || value === undefined) return '';
+  // Rounded first, so a hair over 0 reads `0.0` rather than `+0.0` or `-0.0`.
+  const tenths = Math.round(value * 10) / 10 || 0;
+  return `${signed && tenths > 0 ? '+' : ''}${levelFormat.format(tenths)} ${unit}`;
+}
+
 export function trackCount(total: number): string {
   return total === 1 ? '1 track' : `${integerFormat.format(total)} tracks`;
 }
