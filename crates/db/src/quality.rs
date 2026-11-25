@@ -9,16 +9,16 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::{Database, DbError};
 
 /// The asset's most serious flag as one text value: kind, certainty and reason split by the unit
-/// separator, so a page of tracks reads it in its own query. Kept in step with `worst`.
+/// separator, so a page of tracks reads it in its own query. Each flag is prefixed with a rank
+/// digit kept in step with `worst`, and `min` picks the lowest without sorting.
 macro_rules! worst_flag_sql {
     () => {
-        "(SELECT kind || char(31) || certainty || char(31) || reason
-             FROM quality_flag WHERE quality_flag.asset_id = asset.id
-             ORDER BY certainty = 'confirmed' DESC,
-                 CASE kind WHEN 'damaged' THEN 0 WHEN 'clipping' THEN 1
-                     WHEN 'dropout' THEN 2 ELSE 3 END,
-                 reason
-             LIMIT 1)"
+        "(SELECT substr(min(
+                 (CASE certainty WHEN 'confirmed' THEN 0 ELSE 4 END
+                     + CASE kind WHEN 'damaged' THEN 0 WHEN 'clipping' THEN 1
+                         WHEN 'dropout' THEN 2 ELSE 3 END)
+                 || kind || char(31) || certainty || char(31) || reason), 2)
+             FROM quality_flag WHERE quality_flag.asset_id = asset.id)"
     };
 }
 pub(crate) use worst_flag_sql;
