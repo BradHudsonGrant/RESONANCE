@@ -354,6 +354,9 @@ pub enum Request {
         #[serde(default)]
         #[ts(optional = nullable, type = "Array<number>")]
         track_ids: Option<Vec<i64>>,
+        #[serde(default)]
+        #[ts(optional = nullable)]
+        stage: Option<PrepStageName>,
     },
     /// Total matching tracks and one page of the Prep queue.
     PrepPage {
@@ -363,6 +366,9 @@ pub enum Request {
         #[serde(default)]
         #[ts(optional = nullable, type = "Array<number>")]
         track_ids: Option<Vec<i64>>,
+        #[serde(default)]
+        #[ts(optional = nullable)]
+        stage: Option<PrepStageName>,
         offset: u32,
         limit: u32,
     },
@@ -419,6 +425,11 @@ pub enum Request {
         #[ts(type = "number")]
         track_id: i64,
         candidate_index: u32,
+    },
+    /// Sets aside the suggested cover on one track and keeps the file's own.
+    SkipPrepArtwork {
+        #[ts(type = "number")]
+        track_id: i64,
     },
     /// Skips pending proposals on one or more tracks in one transaction.
     SkipPrepItems {
@@ -551,6 +562,7 @@ pub enum Response {
     SelectPrepCandidate(Box<PrepItem>),
     UsePrepCandidateArtwork(Box<PrepItem>),
     FetchPrepCandidateArtwork(TrackCandidateArtwork),
+    SkipPrepArtwork(Box<PrepItem>),
     SkipPrepItems(AcceptedProposals),
     PreviewBatchTag(AcceptedProposals),
     ApplyBatchTag(AcceptedProposals),
@@ -1767,6 +1779,7 @@ pub struct PrepItem {
     pub steps: Vec<IdentifyStepReport>,
     pub has_unwritten: bool,
     pub online_checked: bool,
+    pub stage: PrepStageName,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -1774,6 +1787,8 @@ pub struct PrepItem {
 pub struct PrepPageSnapshot {
     pub total: u32,
     pub offset: u32,
+    /// How many tracks in the view, before the stage filter, sit in each stage.
+    pub stages: PrepStageCounts,
     pub items: Vec<PrepItem>,
     pub unwritten_tracks: u32,
     pub last_operation: Option<JournalOperation>,
@@ -1785,6 +1800,25 @@ pub struct PrepQueueSnapshot {
     pub items: Vec<PrepItem>,
     pub unwritten_tracks: u32,
     pub last_operation: Option<JournalOperation>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum PrepStageName {
+    Review,
+    NotSearched,
+    NoMatch,
+    Done,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct PrepStageCounts {
+    pub review: u32,
+    pub not_searched: u32,
+    pub no_match: u32,
+    pub done: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

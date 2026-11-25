@@ -2,6 +2,7 @@
   import { tick, untrack } from 'svelte';
   import Button from '../design/Button.svelte';
   import Icon from '../design/Icon.svelte';
+  import SegmentedTabs from '../design/SegmentedTabs.svelte';
   import Thumb from '../design/Thumb.svelte';
   import { artworkUrl } from '../ipc/artwork';
   import type { AcceptedTagWriteReport } from '../ipc/bindings/AcceptedTagWriteReport';
@@ -13,37 +14,57 @@
   import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
   import type { PrepItem } from '../ipc/bindings/PrepItem';
   import type { PrepPageSnapshot } from '../ipc/bindings/PrepPageSnapshot';
+  import type { PrepStageCounts } from '../ipc/bindings/PrepStageCounts';
+  import type { PrepStageName } from '../ipc/bindings/PrepStageName';
   import type { RenameScope } from '../ipc/bindings/RenameScope';
   import type { TagName } from '../ipc/bindings/TagName';
   import type { TagWriteReport } from '../ipc/bindings/TagWriteReport';
   import type { TrackQuery } from '../ipc/bindings/TrackQuery';
+  import type { TrackCandidateArtwork } from '../ipc/bindings/TrackCandidateArtwork';
   import type { TrackIdentification } from '../ipc/bindings/TrackIdentification';
   import type { UndoReport } from '../ipc/bindings/UndoReport';
   import BatchTagSheet from './BatchTagSheet.svelte';
-  import CandidateStrip from './CandidateStrip.svelte';
-  import MatchEvidenceHeader, { formatProviderName } from './MatchEvidenceHeader.svelte';
+  import PrepReview from './PrepReview.svelte';
   import WriteTagsSheet from './WriteTagsSheet.svelte';
   import {
+    LIST_COLUMNS,
     MISSING_FIELDS,
     MISSING_LABELS,
+    STAGE_TABS,
     buildMissingQuery,
+    nextListSort,
+    withFindText,
+    withListSort,
     createSelectionSet,
+    emptyStageText,
+    firstWorkingTab,
     formatSaveNotice,
     formatUrlLookupNotice,
     formatWriteNotice,
     intersectSelection,
-    missingNames,
+    missingNow,
     pruneSelection,
-    resolveActiveCoverIndex,
-    uniqueProviders,
+    rowStatus,
+    stageCount,
+    type ListColumn,
+    type ListSort,
     type MissingField,
+    type StageTab,
   } from './prep-view';
 
+  /** Columns whose gaps the row already shows as an empty cell. */
+  const COLUMN_GAPS = new Set(['genre', 'label', 'year']);
+
   export interface PrepClient {
-    trackIds: (query: TrackQuery | null, trackIds: number[] | null) => Promise<number[]>;
+    trackIds: (
+      query: TrackQuery | null,
+      trackIds: number[] | null,
+      stage: PrepStageName | null,
+    ) => Promise<number[]>;
     prepPage: (
       query: TrackQuery | null,
       trackIds: number[] | null,
+      stage: PrepStageName | null,
       offset: number,
       limit: number,
     ) => Promise<PrepPageSnapshot>;
@@ -53,6 +74,7 @@
       includeArtwork: boolean,
       expectedReview?: string,
     ) => Promise<AcceptedTagWriteReport>;
+    skipItems: (trackIds: number[], fields: TagName[]) => Promise<AcceptedProposals>;
     selectCandidate: (trackId: number, index: number, expectedReview: string) => Promise<PrepItem>;
     useCandidateArtwork: (
       trackId: number,
@@ -60,6 +82,9 @@
       accept: boolean,
       expectedReview: string,
     ) => Promise<PrepItem>;
+    /** Fetches a match's cover for viewing, without suggesting it. */
+    candidateArtwork: (trackId: number, index: number) => Promise<TrackCandidateArtwork>;
+    skipArtwork: (trackId: number) => Promise<PrepItem>;
     identifyOnline: (trackIds: number[], onlySelected: boolean) => Promise<ActivitySnapshot>;
     identifyWithUrl: (trackId: number, url: string) => Promise<TrackIdentification>;
     previewBatchTag: (trackIds: number[], tool: BatchTagTool) => Promise<AcceptedProposals>;
@@ -103,11 +128,17 @@
   }: Props = $props();
 
   const pageSize = 50;
+  const noCounts: PrepStageCounts = { review: 0, not_searched: 0, no_match: 0, done: 0 };
   let missing = $state<MissingField | ''>('');
+  let stage = $state<StageTab>('all');
+  // The first load in a scope opens the tab with work in it; after that the user's choice stands.
+  let stageChosen = false;
+  let counts = $state<PrepStageCounts>(noCounts);
   let totalCount = $state(0);
   let items = $state.raw<PrepItem[]>([]);
   let page = $state(0);
   let activeId = $state<number | null>(null);
+  let activePosition = 0;
   const selected = createSelectionSet();
   let selectionVersion = $state(0);
   let selectingAll = $state(false);
@@ -118,22 +149,23 @@
   let notice = $state('');
   let failures = $state<TagWriteReport['failed']>([]);
   let busy = $state(false);
-  let linkLookingUp = $state(false);
-  let toolsOpen = $state(false);
+  let linkBusy = $state(false);
   let batchOpen = $state(false);
   let writeOpen = $state(false);
   let toolIds = $state.raw<number[]>([]);
-  let url = $state('');
   let refresh = $state(0);
   let chosenCoverByTrack = $state.raw<Record<number, number>>({});
+  // Tracks sent to the running search, so their rows can say so, and what the last one found.
+  let searchingIds = $state.raw<ReadonlySet<number>>(new Set());
+  let searchSummary = $state<{ searched: number; review: number; noMatch: number } | null>(null);
   interface SavedChange {
     operation: number;
     track: number | null;
-    field: MissingField | null;
   }
   let history = $state.raw<SavedChange[]>([]);
   const lastAction = $derived(history.at(-1) ?? null);
   let workspace: HTMLElement;
+  let review = $state<ReturnType<typeof PrepReview>>();
   let width = $state(0);
   let reviewing = $state(false);
   const compact = $derived(width > 0 && width <= 800);
@@ -149,28 +181,48 @@
   let prevRefresh = 0;
   let prevPage = 0;
 
-  const scopeQuery = $derived(buildMissingQuery(batchQuery, missing));
+  const stageFilter = $derived<PrepStageName | null>(stage === 'all' ? null : stage);
+  let findText = $state('');
+  let appliedFind = $state('');
+  let findTimer: ReturnType<typeof setTimeout> | undefined;
+  let listSort = $state<ListSort | null>(null);
+  const filterQuery = $derived(withFindText(buildMissingQuery(batchQuery, missing), appliedFind));
+  const scopeQuery = $derived(withListSort(filterQuery, listSort));
   const current = $derived(items.find((item) => item.track.id === activeId) ?? null);
   const detailOpen = $derived(compact && reviewing && current !== null);
-  const allCount = $derived(totalCount);
   const selectedCount = $derived((void selectionVersion, selected.size));
   const pageCount = $derived(Math.ceil(totalCount / pageSize));
   const searchBusy = $derived(busy || !!activeOnlineJob || selectingAll);
-  const showLocalUndo = $derived(
-    lastAction !== null && lastAction.track !== null && current?.track.id === lastAction.track,
+  const viewCount = $derived(stageCount(counts, 'all'));
+  const tabs = $derived(
+    STAGE_TABS.map((tab) => ({ id: tab.id, label: tab.label, count: stageCount(counts, tab.id) })),
   );
+  const findCount = $derived(selectedCount || (stage === 'done' ? 0 : totalCount));
   const toolsScopeLabel = $derived(
     selectedCount > 0
       ? selectedCount === 1
-        ? '1 selected track'
-        : `${selectedCount.toLocaleString('en-GB')} selected tracks`
+        ? '1 ticked track'
+        : `${selectedCount.toLocaleString('en-GB')} ticked tracks`
       : current
-        ? `Focused track: ${current.track.title}`
-        : 'Focused track',
+        ? current.track.title
+        : 'This track',
   );
   let scopeKey = '';
   let finishedJob = untrack(() => recentOnlineJob?.id ?? null);
-  const contextKey = $derived(JSON.stringify([scopeQuery, batchTrackIds]));
+  // The stage and the sort are left out: moving between tabs or reordering keeps the ticks,
+  // which stay valid across them.
+  const contextKey = $derived(JSON.stringify([filterQuery, batchTrackIds]));
+
+  function typeFind(value: string) {
+    findText = value;
+    clearTimeout(findTimer);
+    findTimer = setTimeout(() => (appliedFind = findText.trim()), 200);
+  }
+
+  function sortBy(column: ListColumn) {
+    listSort = nextListSort(listSort, column);
+    page = 0;
+  }
 
   function markOwnWrite() {
     suppressRevisions++;
@@ -181,6 +233,7 @@
     const key = contextKey;
     const query = scopeQuery;
     const scope = batchTrackIds;
+    const wanted = stageFilter;
     const currentPage = page;
     const currentRefresh = refresh;
     const currentRevision = revision;
@@ -216,6 +269,7 @@
         page = 0;
         prevPage = 0;
         activeId = null;
+        activePosition = 0;
         reviewing = false;
         chosenCoverByTrack = {};
         loading = true;
@@ -230,21 +284,31 @@
 
     const offset = untrack(() => page) * pageSize;
     void client
-      .prepPage(query, scope, offset, pageSize)
+      .prepPage(query, scope, wanted, offset, pageSize)
       .then((result) => {
         if (request !== fetchGeneration) return;
+        counts = result.stages;
+        if (!stageChosen) {
+          stageChosen = true;
+          const opening = firstWorkingTab(result.stages);
+          if (opening !== stage) {
+            stage = opening;
+            return;
+          }
+        }
         totalCount = result.total;
         if (result.total > 0 && offset >= result.total) {
           page = Math.max(0, Math.ceil(result.total / pageSize) - 1);
           return;
         }
         items = result.items;
-        if (result.total === 0) {
+        if (viewCount === 0) {
           if (selected.size > 0) {
             selected.clear();
             selectionVersion++;
           }
         } else if (
+          wanted === null &&
           page === 0 &&
           result.items.length === result.total &&
           selected.size > 0 &&
@@ -267,14 +331,18 @@
               selected.add(edgeItem.track.id);
               selectionVersion++;
             }
-            activeId = edgeItem.track.id;
+            setActive(edgeItem.track.id);
             keyboardTarget = edgeItem.track.id;
           }
         } else {
           pendingEdge = null;
           pendingShiftSelect = false;
           if (!items.some((item) => item.track.id === activeId)) {
-            activeId = items[0]?.track.id ?? null;
+            // A saved track leaves its tab, so the next one moves up into its place.
+            const next = items[Math.min(activePosition, items.length - 1)] ?? null;
+            const hadFocus = workspace.contains(document.activeElement);
+            setActive(next?.track.id ?? null);
+            if (next && hadFocus) keyboardTarget = next.track.id;
           }
         }
         reloading = false;
@@ -303,18 +371,45 @@
           ? (job.error_message ?? 'Search failed')
           : job.status === 'cancelled'
             ? 'Search cancelled'
-            : 'Search finished';
-      untrack(() => refresh++);
+            : '';
+      untrack(() => {
+        if (job.status !== 'failed' && job.status !== 'cancelled') void summariseSearch();
+        refresh++;
+      });
     }
   });
-  $effect(() => {
-    void activeId;
-    toolsOpen = false;
-    url = '';
-  });
 
+  async function summariseSearch() {
+    const searched = [...searchingIds];
+    searchingIds = new Set();
+    if (!searched.length) {
+      notice = 'Search finished';
+      return;
+    }
+    try {
+      const [review, noMatch] = await Promise.all([
+        client.trackIds(scopeQuery, searched, 'review'),
+        client.trackIds(scopeQuery, searched, 'no_match'),
+      ]);
+      searchSummary = { searched: searched.length, review: review.length, noMatch: noMatch.length };
+    } catch (err) {
+      notice = message(err);
+    }
+  }
   function message(err: unknown) {
     return err instanceof Error ? err.message : String(err);
+  }
+  function setActive(id: number | null) {
+    activeId = id;
+    const position = items.findIndex((item) => item.track.id === id);
+    if (position >= 0) activePosition = position;
+  }
+  function chooseStage(id: string) {
+    stageChosen = true;
+    stage = id as StageTab;
+    page = 0;
+    activePosition = 0;
+    reviewing = false;
   }
   function isSelected(id: number) {
     void selectionVersion;
@@ -333,13 +428,18 @@
     else selected.add(id);
     selectionVersion++;
   }
+  function clearTicks() {
+    scopeGeneration++;
+    selectingAll = false;
+    selectAllPromise = null;
+    pendingSelectToggles = [];
+    selected.clear();
+    selectionVersion++;
+  }
   function selectAll() {
     if (!totalCount) return;
-    if (selectedCount === totalCount && !selectAllPromise) {
-      selected.clear();
-      pendingSelectToggles = [];
-      selectionVersion++;
-      selectingAll = false;
+    if ((selectedCount === totalCount && !selectAllPromise) || (selectAllPromise && selectingAll)) {
+      clearTicks();
       return;
     }
     if (page === 0 && items.length === totalCount) {
@@ -349,22 +449,11 @@
       selectionVersion++;
       return;
     }
-    if (selectAllPromise && selectingAll) {
-      scopeGeneration++;
-      selectingAll = false;
-      selectAllPromise = null;
-      pendingSelectToggles = [];
-      selected.clear();
-      selectionVersion++;
-      return;
-    }
     const gen = scopeGeneration;
-    const query = scopeQuery;
-    const scope = batchTrackIds;
     pendingSelectToggles = [];
     selectingAll = true;
     const promise = client
-      .trackIds(query, scope)
+      .trackIds(scopeQuery, batchTrackIds, stageFilter)
       .then((allIds) => {
         if (gen !== scopeGeneration) return;
         selected.clear();
@@ -387,14 +476,11 @@
       });
     selectAllPromise = promise;
   }
-  function canResolveSync() {
-    return !selectAllPromise && (missing === '' || totalCount <= items.length);
-  }
   async function resolveSelectedIds() {
     if (selectAllPromise) await selectAllPromise;
     if (!selected.size) return [];
     if (missing !== '' && totalCount > items.length) {
-      const validIds = await client.trackIds(scopeQuery, batchTrackIds);
+      const validIds = await client.trackIds(scopeQuery, batchTrackIds, null);
       const kept = intersectSelection(selected, validIds);
       if (kept.length !== selected.size) {
         selected.clear();
@@ -415,17 +501,10 @@
     const row = items.find((item) => item.track.id === target);
     if (row) onfocustrack?.(row.track);
   }
-  function trackSubtitle(item: PrepItem) {
-    if (!item.online_checked) return item.track.artist;
-    const count = item.candidates.length;
-    let matches = 'No online match';
-    if (count) matches = count.toLocaleString('en-GB') + (count === 1 ? ' match' : ' matches');
-    return [item.track.artist, matches].filter(Boolean).join(' · ');
-  }
 
   function focusItem(item: PrepItem) {
     keyboardTarget = null;
-    activeId = item.track.id;
+    setActive(item.track.id);
     onfocustrack?.(item.track);
     if (compact) {
       reviewing = true;
@@ -463,46 +542,47 @@
       busy = false;
     }
   }
-  function accept(target: number[], field: MissingField | null, reviewed: PrepItem | null) {
-    const track = reviewed?.track.id ?? null;
-    if (!target.length || reloading || (track !== null && track !== activeId)) return;
-    const fields: TagName[] | null =
-      field !== null
-        ? field === 'artwork'
-          ? []
-          : [field]
-        : reviewed !== null
-          ? reviewed.fields.filter((f) => f.changes && !f.locked_by_user).map((f) => f.field)
-          : null;
-    const includeArtwork =
-      field === null ? (reviewed ? !!reviewed.artwork.proposed : true) : field === 'artwork';
+  function recordSave(report: AcceptedTagWriteReport, track: number | null) {
+    failures = report.failed;
+    if (report.operation_id !== null) {
+      history = [...history, { operation: report.operation_id, track }];
+      if (track !== null) clearChosenCover(track);
+      else chosenCoverByTrack = {};
+    }
+    notice = formatSaveNotice(report);
+  }
+  function acceptTrack(item: PrepItem, fields: TagName[], includeArtwork: boolean) {
+    if (reloading || item.track.id !== activeId || (!fields.length && !includeArtwork)) return;
     void run(async () => {
+      markOwnWrite();
       const report = await client.acceptAndWrite(
-        target,
+        [item.track.id],
         fields,
         includeArtwork,
-        reviewed?.review_token,
+        item.review_token,
       );
-      failures = report.failed;
-      if (report.operation_id !== null) {
-        markOwnWrite();
-        history = [...history, { operation: report.operation_id, track, field }];
-        if (track !== null) clearChosenCover(track);
-        else chosenCoverByTrack = {};
-      }
-      notice = formatSaveNotice(report);
+      recordSave(report, item.track.id);
       refresh++;
     });
   }
-  function acceptSelected() {
-    if (busy || reloading || !!loadError) return;
-    if (canResolveSync()) {
-      const target = [...selected];
-      if (target.length) accept(target, null, null);
-      return;
-    }
+  function skipTrack(item: PrepItem) {
+    if (reloading || busy) return;
+    void run(async () => {
+      markOwnWrite();
+      await client.skipItems([item.track.id], []);
+      notice = 'Skipped ' + item.track.title;
+      refresh++;
+    });
+  }
+  function saveTicked() {
+    if (busy || reloading || !!loadError || !selectedCount) return;
     void resolveSelectedIds().then((target) => {
-      if (target.length) accept(target, null, null);
+      if (!target.length) return;
+      void run(async () => {
+        markOwnWrite();
+        recordSave(await client.acceptAndWrite(target, null, true), null);
+        refresh++;
+      });
     });
   }
   function undo() {
@@ -524,6 +604,8 @@
   }
   function runOnlineSearch(target: number[]) {
     if (!target.length) return;
+    searchingIds = new Set(target);
+    searchSummary = null;
     void run(async () => {
       const result = await client.identifyOnline(target, true);
       const done = result.recent.find((job) => job.kind === 'identify_online');
@@ -531,25 +613,30 @@
       if (!running && done) {
         finishedJob = done.id;
       }
-      notice = running
-        ? 'Searching online'
-        : done?.status === 'failed'
-          ? (done.error_message ?? 'Search failed')
-          : 'Search finished';
-      if (!running) markOwnWrite();
+      notice = running || done?.status !== 'failed' ? '' : (done.error_message ?? 'Search failed');
+      if (!running) {
+        markOwnWrite();
+        await summariseSearch();
+      }
       refresh++;
     });
   }
-  function search() {
-    if (!selectedCount || searchBusy) return;
-    if (canResolveSync()) {
-      runOnlineSearch([...selected]);
+  function findMatches() {
+    if (searchBusy || !!loadError || !findCount) return;
+    if (selectedCount) {
+      void resolveSelectedIds().then(runOnlineSearch);
       return;
     }
-    void resolveSelectedIds().then(runOnlineSearch);
+    void client
+      .trackIds(scopeQuery, batchTrackIds, stageFilter)
+      .then(runOnlineSearch)
+      .catch((err: unknown) => (notice = message(err)));
   }
-  function useMatch(item: PrepItem, index: number) {
-    if (reloading || activeId !== item.track.id) return;
+  function findMatch(item: PrepItem) {
+    if (!searchBusy) runOnlineSearch([item.track.id]);
+  }
+  function chooseMatch(item: PrepItem, index: number) {
+    if (reloading || activeId !== item.track.id || index === item.selected_candidate) return;
     void run(async () => {
       const updated = await client.selectCandidate(item.track.id, index, item.review_token);
       clearChosenCover(item.track.id);
@@ -569,24 +656,71 @@
       updateItem(updated);
     });
   }
-  function lookupLink(item: PrepItem) {
-    const link = url.trim();
-    if (!link || busy) return;
-    linkLookingUp = true;
+  function keepFileCover(item: PrepItem) {
+    if (reloading || activeId !== item.track.id) return;
     void run(async () => {
+      markOwnWrite();
+      const updated = await client.skipArtwork(item.track.id);
+      chosenCoverByTrack = Object.fromEntries(
+        Object.entries(chosenCoverByTrack).filter(([id]) => Number(id) !== item.track.id),
+      );
+      updateItem(updated);
+    });
+  }
+
+  // Covers of the matches on the open track, fetched for viewing as soon as it opens. Keyed by
+  // track and match, so moving between tracks keeps what was already fetched.
+  let matchArt = $state.raw<Record<string, string | null>>({});
+  // Plain bookkeeping for requests already sent; nothing renders from it.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const artRequested = new Set<string>();
+  $effect(() => {
+    const item = current;
+    if (!item) return;
+    const wanted = item.candidates
+      .filter((candidate) => candidate.has_artwork && !candidate.artwork_hash)
+      .map((candidate) => candidate.index)
+      .filter((index) => !artRequested.has(item.track.id + ':' + index))
+      .slice(0, 8);
+    if (!wanted.length) return;
+    untrack(() => void loadMatchArt(item.track.id, wanted));
+  });
+
+  async function loadMatchArt(trackId: number, indexes: number[]) {
+    for (const index of indexes) {
+      const key = trackId + ':' + index;
+      if (artRequested.has(key)) continue;
+      artRequested.add(key);
+      try {
+        const result = await client.candidateArtwork(trackId, index);
+        const found: Record<string, string | null> = {};
+        for (const state of result.candidates) {
+          found[trackId + ':' + state.index] = state.artwork_hash;
+        }
+        matchArt = { ...matchArt, ...found };
+      } catch {
+        // A cover that cannot be fetched leaves the placeholder. The match itself still works.
+      }
+    }
+  }
+  async function lookupLink(item: PrepItem, link: string): Promise<boolean> {
+    if (busy || linkBusy) return false;
+    linkBusy = true;
+    let found = false;
+    await run(async () => {
       try {
         const result = await client.identifyWithUrl(item.track.id, link);
         notice = formatUrlLookupNotice(result);
         if (result.best) {
-          url = '';
-          toolsOpen = false;
+          found = true;
           markOwnWrite();
           refresh++;
         }
       } finally {
-        linkLookingUp = false;
+        linkBusy = false;
       }
     });
+    return found;
   }
   async function editTargets() {
     if (selectedCount > 0) return resolveSelectedIds();
@@ -643,6 +777,7 @@
     }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       if (!items.length || detailOpen) return;
+      if (target instanceof HTMLElement && target.closest('[role="tablist"]')) return;
       const offset = event.key === 'ArrowDown' ? 1 : -1;
       const currentIdx = items.findIndex((item) => item.track.id === activeId);
       const nextIdx = (currentIdx === -1 ? (offset > 0 ? -1 : items.length) : currentIdx) + offset;
@@ -653,7 +788,7 @@
           selected.add(id);
           selectionVersion++;
         }
-        activeId = id;
+        setActive(id);
         keyboardTarget = id;
         void focusKeyboardRow();
         return;
@@ -674,28 +809,41 @@
       }
       return;
     }
-    if (event.key.toLowerCase() === 'x' && current) {
+    const key = event.key.toLowerCase();
+    const plainTarget =
+      !(target instanceof HTMLElement) ||
+      target === document.body ||
+      target === workspace ||
+      target.classList.contains('track-name') ||
+      !target.closest('button,a[href],[role="button"],[role="tab"],summary,input,select,textarea');
+    if (key === 'x' && current) {
       event.preventDefault();
       selectOne(current.track.id);
-    } else if (event.shiftKey && event.key.toLowerCase() === 'a' && selectedCount) {
+    } else if (event.shiftKey && key === 'a' && selectedCount) {
       event.preventDefault();
-      void acceptSelected();
-    } else if (
-      event.key === 'Enter' &&
-      current &&
-      (!(target instanceof HTMLElement) ||
-        target === document.body ||
-        target === workspace ||
-        target.classList.contains('track-name') ||
-        !target.closest('button,a[href],[role="button"],summary,input,select,textarea'))
-    ) {
+      saveTicked();
+    } else if (event.key === 'Enter' && current && plainTarget) {
       event.preventDefault();
       if (compact && !detailOpen) focusItem(current);
-      else accept([current.track.id], null, current);
-    } else if (event.key.toLowerCase() === 'b' || event.key.toLowerCase() === 'e') {
+      else if (current.stage === 'not_searched') findMatch(current);
+      else review?.acceptAll();
+    } else if (key === 's' && !event.shiftKey && current && current.stage === 'review') {
+      event.preventDefault();
+      skipTrack(current);
+    } else if (key === 'f' && !event.shiftKey) {
+      event.preventDefault();
+      if (selectedCount) findMatches();
+      else if (current) findMatch(current);
+    } else if (/^[1-9]$/.test(event.key) && current && current.candidates.length > 1) {
+      const candidate = current.candidates[Number(event.key) - 1];
+      if (candidate) {
+        event.preventDefault();
+        chooseMatch(current, candidate.index);
+      }
+    } else if (key === 'b' || key === 'e') {
       event.preventDefault();
       void showBatch();
-    } else if (event.key.toLowerCase() === 'w') {
+    } else if (key === 'w') {
       event.preventDefault();
       void showWrites();
     } else if (
@@ -718,76 +866,129 @@
   bind:this={workspace}
   bind:clientWidth={width}
 >
-  <div class="bar" hidden={detailOpen} role="toolbar" aria-label="Prep controls">
-    <label class="filter">
+  <div class="bar" hidden={detailOpen}>
+    <div class="stages">
+      <SegmentedTabs items={tabs} value={stage} ariaLabel="Prep stages" onChange={chooseStage} />
+    </div>
+    <div class="tools" role="toolbar" aria-label="Prep controls">
+      <input
+        class="find"
+        type="search"
+        aria-label="Find tracks"
+        placeholder="Find tracks"
+        value={findText}
+        oninput={(event) => typeFind(event.currentTarget.value)}
+        onkeydown={(event) => {
+          if (event.key === 'Escape' && findText) {
+            event.stopPropagation();
+            typeFind('');
+          }
+        }}
+      />
       <select
         aria-label="Filter tracks"
         value={missing}
         onchange={(event) => (missing = event.currentTarget.value as MissingField | '')}
       >
-        <option value="">All tracks</option>
+        <option value="">Any tags</option>
         {#each MISSING_FIELDS as field (field)}
           <option value={field}>Missing {MISSING_LABELS[field].toLowerCase()}</option>
         {/each}
       </select>
-    </label>
-    {#if batchTrackIds !== null || batchQuery !== null}
-      <Button
-        size="sm"
-        onclick={onclearbatch}
-        aria-label="Clear library scope"
-        title={'Clear ' + (batchLabel ?? 'Library selection')}
-        ><span class="scope-label">{batchLabel ?? 'Library selection'}</span>
-        <Icon name="close" size="xs" />
-      </Button>
-    {/if}
-    <span class="count numeric"
-      >{(selectedCount || allCount).toLocaleString('en-GB')}
-      {selectedCount ? 'selected' : allCount === 1 ? 'track' : 'tracks'}</span
-    >
-    <div class="actions">
-      <Button
-        variant="primary"
-        size="sm"
-        disabled={!selectedCount || searchBusy || !!loadError}
-        title={selectedCount ? 'Search only the selected tracks' : 'Select tracks to search online'}
-        onclick={search}
-      >
-        <Icon name="search" size="xs" />Search online</Button
-      >
-      {#if selectedCount > 0}
+      {#if batchTrackIds !== null || batchQuery !== null}
         <Button
           size="sm"
-          disabled={busy || reloading || !!loadError || selectingAll}
-          onclick={() => void acceptSelected()}
-          title="Write all suggestions for the selected tracks (Shift+A)">Accept selected</Button
-        >
+          onclick={onclearbatch}
+          aria-label="Clear library scope"
+          title={'Clear ' + (batchLabel ?? 'Library selection')}
+          ><span class="scope-label">{batchLabel ?? 'Library selection'}</span>
+          <Icon name="close" size="xs" />
+        </Button>
       {/if}
-      {#if lastAction && !showLocalUndo}{@render undoButton()}
+      <span class="spacer"></span>
+      {#if !activeOnlineJob}
+        {#if selectedCount > 0}
+          <span class="ticked numeric">{selectedCount.toLocaleString('en-GB')} ticked</span>
+          <Button size="sm" onclick={clearTicks}>Clear</Button>
+          <Button
+            size="sm"
+            disabled={busy || reloading || !!loadError || selectingAll}
+            title="Save every suggestion for the ticked tracks (Shift+A)"
+            onclick={saveTicked}>Save ticked</Button
+          >
+        {/if}
+        {#if findCount > 0}
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={searchBusy || !!loadError}
+            title="Search online (F)"
+            onclick={findMatches}
+          >
+            <Icon name="search" size="xs" />
+            {selectedCount
+              ? 'Find matches'
+              : findCount === 1
+                ? 'Find a match'
+                : 'Find matches for ' + findCount.toLocaleString('en-GB')}
+          </Button>
+        {/if}
+      {/if}
+      {#if lastAction && (lastAction.track === null || lastAction.track !== activeId)}
+        <Button
+          size="sm"
+          ariaLabel="Undo save"
+          title="Undo the last save (Ctrl+Z)"
+          disabled={busy}
+          onclick={undo}><Icon name="undo" size="xs" /></Button
+        >
       {/if}
     </div>
   </div>
 
-  {#if activeOnlineJob || notice || failures.length}
-    <div class="feedback">
-      <span role="status">
-        {#if activeOnlineJob}
-          {activeOnlineJob.paused ? 'Search paused' : 'Searching online'}
-          {#if activeOnlineJob.total_items != null}
-            <span class="numeric">
-              {activeOnlineJob.done_items.toLocaleString('en-GB')} / {activeOnlineJob.total_items.toLocaleString(
-                'en-GB',
-              )}</span
-            >
-          {/if}
-          {#if notice && notice !== 'Searching online'}
-            · {notice}
-          {/if}
-        {:else}{notice}{/if}
+  {#if activeOnlineJob}
+    {@const done = activeOnlineJob.done_items}
+    {@const all = activeOnlineJob.total_items}
+    <div class="search-strip" role="status" aria-live="polite">
+      <span class="search-text">
+        {activeOnlineJob.paused ? 'Search paused' : 'Searching online'}
+        {#if all != null}
+          <span class="numeric"
+            >{done.toLocaleString('en-GB')} of {all.toLocaleString('en-GB')} tracks</span
+          >
+        {/if}
       </span>
-      {#if activeOnlineJob && onopenactivity}
-        <Button size="sm" onclick={onopenactivity}>Activity</Button>
+      <span class="search-track" aria-hidden="true">
+        <span
+          class="search-fill"
+          style:transform={'scaleX(' + (all ? Math.min(1, done / all) : 0) + ')'}
+        ></span>
+      </span>
+      {#if onopenactivity}
+        <Button size="sm" variant="quiet" onclick={onopenactivity}>Details</Button>
       {/if}
+    </div>
+  {:else if searchSummary}
+    {@const summary = searchSummary}
+    <div class="search-strip done" role="status" aria-live="polite">
+      <span class="search-text">
+        Search finished for <span class="numeric">{summary.searched.toLocaleString('en-GB')}</span>
+        {summary.searched === 1 ? 'track' : 'tracks'} ·
+        <span class="numeric">{summary.review.toLocaleString('en-GB')}</span> to review ·
+        <span class="numeric">{summary.noMatch.toLocaleString('en-GB')}</span> with no match
+      </span>
+      {#if summary.review > 0 && stage !== 'review'}
+        <Button size="sm" onclick={() => chooseStage('review')}>Review them</Button>
+      {/if}
+      <Button size="sm" variant="icon" ariaLabel="Dismiss" onclick={() => (searchSummary = null)}
+        ><Icon name="close" size="xs" /></Button
+      >
+    </div>
+  {/if}
+
+  {#if notice || failures.length}
+    <div class="feedback" hidden={detailOpen && !failures.length}>
+      <span role="status">{notice}</span>
       {#if failures.length}
         <details>
           <summary
@@ -796,9 +997,7 @@
           >
           <ul>
             {#each failures as failure (failure.track_id)}
-              <li>
-                {failure.path} · {failure.reason}
-              </li>
+              <li>{failure.path} · {failure.reason}</li>
             {/each}
           </ul>
         </details>
@@ -816,11 +1015,15 @@
   {:else if !totalCount}
     <div class="empty">
       <h2>
-        {missing
+        {missing && (viewCount === 0 || stage === 'all')
           ? 'No tracks missing ' + MISSING_LABELS[missing].toLowerCase()
-          : 'No tracks in this view'}
+          : viewCount === 0
+            ? 'No tracks in this view'
+            : emptyStageText(stage)}
       </h2>
-      {#if missing}
+      {#if viewCount > 0 && stage !== 'all'}
+        <Button size="sm" onclick={() => chooseStage('all')}>Show all tracks</Button>
+      {:else if missing}
         <Button size="sm" onclick={() => (missing = '')}>Show all tracks</Button>
       {:else if onopenlibrary}
         <Button size="sm" onclick={onopenlibrary}>Go to Library</Button>
@@ -829,61 +1032,101 @@
   {:else}
     <div class="workspace" class:detail-open={detailOpen}>
       <section class="tracks" aria-label="Track list">
-        <div class="list-scroll" aria-busy={loading}>
-          <table class="track-table">
-            <thead>
-              <tr>
-                <th class="check-cell" scope="col">
-                  <input
-                    type="checkbox"
-                    aria-label={selectedCount === allCount
-                      ? 'Deselect all tracks'
-                      : 'Select all tracks'}
-                    checked={selectedCount === allCount && allCount > 0}
-                    indeterminate={selectedCount > 0 && selectedCount < allCount}
-                    onchange={selectAll}
-                  />
-                </th>
-                <th scope="col">Track</th>
-                <th scope="col" class="missing-col">Missing tags</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each items as item (item.track.id)}
-                {@const absent = missingNames(item)}
-                {@const subtitle = trackSubtitle(item)}
-                <tr
-                  class:active={item.track.id === activeId}
-                  data-active={item.track.id === activeId}
-                >
-                  <td class="check-cell">
-                    <input
-                      type="checkbox"
-                      aria-label={'Select ' + item.track.title}
-                      checked={isSelected(item.track.id)}
-                      onchange={() => selectOne(item.track.id)}
-                    />
-                  </td>
-                  <td>
-                    <button
-                      type="button"
-                      class="track-name"
-                      aria-pressed={item.track.id === activeId}
-                      onclick={() => focusItem(item)}
-                      title={item.track.location}
-                    >
-                      <span>{item.track.title}</span>
-                      {#if subtitle}
-                        <small>{subtitle}</small>
-                      {/if}
-                    </button>
-                  </td>
-                  <td class="missing-text" title={absent || 'No missing tags'}>{absent || '—'}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
+        <div class="list-head">
+          <input
+            type="checkbox"
+            aria-label={selectedCount === totalCount ? 'Deselect all tracks' : 'Select all tracks'}
+            title="Tick every track in this tab (Ctrl+A)"
+            checked={selectedCount === totalCount && totalCount > 0}
+            indeterminate={selectedCount > 0 && selectedCount < totalCount}
+            onchange={selectAll}
+          />
+          <div class="columns">
+            {#each LIST_COLUMNS as column (column.id)}
+              {@const sorted = listSort?.column === column.id ? listSort.direction : null}
+              <button
+                type="button"
+                class="column"
+                data-column={column.id}
+                aria-label={'Sort by ' +
+                  column.label.toLowerCase() +
+                  (sorted === 'asc' ? ', A to Z' : sorted === 'desc' ? ', Z to A' : '')}
+                data-sorted={sorted ?? undefined}
+                onclick={() => sortBy(column.id)}
+                >{column.label}{#if column.id === 'title'}<span class="numeric count"
+                    >{totalCount.toLocaleString('en-GB')}</span
+                  >{/if}{#if sorted}<Icon
+                    name={sorted === 'asc' ? 'chevron-up' : 'chevron-down'}
+                    size="xs"
+                  />{/if}</button
+              >
+            {/each}
+            <span class="column status-head">Status</span>
+          </div>
         </div>
+        <ul class="list-scroll" aria-busy={loading}>
+          {#each items as item (item.track.id)}
+            {@const status = rowStatus(item)}
+            {@const gaps = missingNow(item)}
+            {@const searching = !!activeOnlineJob && searchingIds.has(item.track.id)}
+            {@const art = item.artwork.proposed?.artwork ?? item.artwork.artwork}
+            <li
+              class="row"
+              class:active={item.track.id === activeId}
+              data-active={item.track.id === activeId}
+            >
+              <input
+                type="checkbox"
+                aria-label={'Tick ' + item.track.title}
+                checked={isSelected(item.track.id)}
+                onchange={() => selectOne(item.track.id)}
+              />
+              <button
+                type="button"
+                class="track-name"
+                aria-pressed={item.track.id === activeId}
+                onclick={() => focusItem(item)}
+                title={item.track.location}
+              >
+                <Thumb seed={item.track.id} size="sm" src={art ? artworkUrl(art) : null} alt="" />
+                <span class="names">
+                  <span class="title">{item.track.title}</span>
+                  <span class="artist"
+                    >{#if item.track.artist}{item.track.artist}{/if}{#if gaps.length}<span
+                        class="gaps">{item.track.artist ? ' · ' : ''}Missing {gaps.join(', ')}</span
+                      >{#if gaps.some((gap) => !COLUMN_GAPS.has(gap))}<span class="gaps-wide"
+                          >{item.track.artist ? ' · ' : ''}Missing {gaps
+                            .filter((gap) => !COLUMN_GAPS.has(gap))
+                            .join(', ')}</span
+                        >{/if}{/if}</span
+                  >
+                </span>
+                {#each ['genre', 'label', 'year'] as const as column (column)}
+                  {@const value = item.track[column]}
+                  <span
+                    class="cell"
+                    data-column={column}
+                    class:numeric={column === 'year'}
+                    class:empty-cell={!value}
+                    title={value ?? undefined}
+                    >{#if value}{value}{:else}<span aria-label={'No ' + column}>–</span>{/if}</span
+                  >
+                {/each}
+                <span class="status" data-stage={searching ? 'searching' : item.stage}>
+                  {#if searching && item.stage === 'not_searched'}
+                    <span class="status-main">Searching</span>
+                  {:else}
+                    <span class="status-main"
+                      >{#if status.confidence}<span class="numeric">{status.confidence}</span
+                        >{/if}{status.primary}</span
+                    >
+                    {#if status.secondary}<span class="status-sub">{status.secondary}</span>{/if}
+                  {/if}
+                </span>
+              </button>
+            </li>
+          {/each}
+        </ul>
         {#if pageCount > 1}
           <nav aria-label="Track pages">
             <Button size="sm" disabled={page === 0} onclick={() => page--}>Previous</Button>
@@ -895,221 +1138,39 @@
         {/if}
       </section>
 
-      <section class="review" aria-label="Suggested tags" aria-busy={busy}>
-        {#if current}
-          {@const item = current}
-          {@const savedField = showLocalUndo ? lastAction?.field : null}
-          {@const changes = item.fields.filter(
-            (field) => (field.changes && !field.locked_by_user) || field.field === savedField,
-          )}
-          {@const cover = item.artwork.proposed}
-          {@const covers = item.candidates.filter((candidate) => candidate.has_artwork)}
-          {@const activeCoverIndex = resolveActiveCoverIndex(
-            item,
-            chosenCoverByTrack[item.track.id],
-            covers,
-          )}
-          {@const writable =
-            changes.some((field) => field.changes && !field.locked_by_user) || !!cover}
-          {@const sources = uniqueProviders([
-            ...changes.filter((field) => field.changes).map((field) => field.provider),
-            cover?.provider,
-          ])}
-          {@const sharedSource = sources.length === 1 ? sources[0]! : null}
-          {@const headUndo =
-            lastAction !== null &&
-            ((showLocalUndo && !savedField) || (detailOpen && !showLocalUndo))}
-          <header class="review-head">
-            {#if compact}
-              <span class="back-to-tracks"
-                ><Button size="sm" onclick={backToTracks}>Back to tracks</Button></span
-              >
-            {/if}
-            <h2 title={item.track.title}>{item.track.title}</h2>
-            {#if writable || headUndo}
-              <div class="actions">
-                {#if writable || (showLocalUndo && !savedField)}
-                  <Button
-                    size="sm"
-                    disabled={!writable || busy || reloading}
-                    title="Write all suggestions for this track"
-                    onclick={() => accept([item.track.id], null, item)}>Accept all</Button
-                  >
-                {/if}
-                {#if headUndo}{@render undoButton()}
-                {/if}
-              </div>
-            {/if}
-          </header>
-          {#if item.candidates.length}
-            <CandidateStrip
-              candidates={item.candidates}
-              selected={item.selected_candidate}
-              busy={busy || reloading}
-              onselect={(index) => useMatch(item, index)}
-            />
-          {/if}
-          {#if changes.length || cover || covers.length || savedField === 'artwork'}
-            <table class="diff">
-              <thead>
-                <tr>
-                  <th scope="col">Tag</th>
-                  <th scope="col">Current</th>
-                  <th scope="col"
-                    >Suggested{#if sharedSource}<small>{sharedSource}</small>{/if}</th
-                  >
-                  <th scope="col">
-                    <span class="visually-hidden">Action</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each changes as field (field.field)}
-                  <tr>
-                    <th scope="row">{MISSING_LABELS[field.field]}</th>
-                    <td>{field.current_value || '—'}</td>
-                    <td
-                      >{field.proposed_value || '—'}{#if field.provider && !sharedSource}
-                        <small>{formatProviderName(field.provider)}</small>
-                      {/if}
-                    </td>
-                    <td>
-                      {#if savedField === field.field}{@render undoButton()}
-                      {:else}
-                        <Button
-                          size="sm"
-                          disabled={busy || reloading}
-                          aria-label={'Accept ' + MISSING_LABELS[field.field]}
-                          title={field.field === 'mix' || field.field === 'subgenre'
-                            ? 'Save to library'
-                            : 'Write ' + MISSING_LABELS[field.field].toLowerCase() + ' to file'}
-                          onclick={() => accept([item.track.id], field.field, item)}>Accept</Button
-                        >
-                      {/if}
-                    </td>
-                  </tr>
-                {/each}
-                {#if cover || covers.length || savedField === 'artwork'}
-                  <tr>
-                    <th scope="row">Artwork</th>
-                    <td>
-                      {#if item.artwork.artwork}
-                        <Thumb
-                          seed={item.track.id}
-                          size="sm"
-                          src={artworkUrl(item.artwork.artwork)}
-                          alt="Current cover"
-                        />
-                      {:else}—{/if}
-                    </td>
-                    <td>
-                      <div class="cover-cell">
-                        {#if cover}
-                          <Thumb
-                            seed={item.track.id}
-                            size="sm"
-                            src={artworkUrl(cover.artwork)}
-                            alt="Suggested cover"
-                          />
-                          {#if !sharedSource}
-                            <small>{formatProviderName(cover.provider)}</small>
-                          {/if}
-                        {/if}
-                        {#if covers.length && (covers.length > 1 || (!cover && savedField !== 'artwork'))}
-                          <select
-                            aria-label="Choose suggested cover"
-                            disabled={busy || reloading}
-                            value={activeCoverIndex != null ? String(activeCoverIndex) : ''}
-                            onchange={(event) => {
-                              const raw = event.currentTarget.value;
-                              if (!raw) return;
-                              const index = Number(raw);
-                              if (Number.isInteger(index)) useCover(item, index);
-                            }}
-                          >
-                            <option value="" disabled>Choose cover</option>
-                            {#each covers as candidate (candidate.index)}
-                              <option value={String(candidate.index)}
-                                >{formatProviderName(
-                                  candidate.artwork_provider ?? candidate.provider,
-                                )} · {candidate.album ?? candidate.title ?? 'Release'}</option
-                              >
-                            {/each}
-                          </select>
-                        {/if}
-                      </div>
-                    </td>
-                    <td>
-                      {#if savedField === 'artwork'}{@render undoButton()}
-                      {:else if cover}
-                        <Button
-                          size="sm"
-                          disabled={busy || reloading}
-                          aria-label="Accept artwork"
-                          onclick={() => accept([item.track.id], 'artwork', item)}>Accept</Button
-                        >
-                      {/if}
-                    </td>
-                  </tr>
-                {/if}
-              </tbody>
-            </table>
-          {:else}
-            <p class="hint">
-              {item.online_checked
-                ? 'No new tags suggested'
-                : 'Select tracks and search online for suggestions'}
-            </p>
-          {/if}
-          <MatchEvidenceHeader evidence={item.evidence} steps={item.steps} {onopenproviders} />
-          <details class="tools" bind:open={toolsOpen}>
-            <summary>Track tools</summary>
-            {#if toolsOpen}
-              <form
-                onsubmit={(event) => {
-                  event.preventDefault();
-                  lookupLink(item);
-                }}
-              >
-                <label
-                  >Release link<input
-                    type="url"
-                    bind:value={url}
-                    placeholder="Paste a release link"
-                  />
-                </label>
-                <Button type="submit" size="sm" disabled={busy || !url.trim()}
-                  >{linkLookingUp ? 'Searching…' : 'Find match'}</Button
-                >
-              </form>
-              <div class="actions">
-                <Button size="sm" onclick={() => void showBatch()}>Edit tags</Button>
-                <Button size="sm" onclick={() => void showWrites()}>Write manual edits</Button>
-                {#if onrename}
-                  <Button size="sm" onclick={() => void renameTargets()}>Rename files</Button>
-                {/if}
-              </div>
-            {/if}
-          </details>
-        {:else if loading}
-          <p role="status">Loading tracks…</p>
-        {/if}
-      </section>
+      {#if current}
+        {@const item = current}
+        <PrepReview
+          bind:this={review}
+          {item}
+          busy={busy || reloading}
+          searching={searchBusy}
+          {linkBusy}
+          {compact}
+          chosenCover={chosenCoverByTrack[item.track.id]}
+          artFor={(index) => matchArt[item.track.id + ':' + index] ?? null}
+          onkeepcover={() => keepFileCover(item)}
+          canUndo={lastAction !== null && lastAction.track === item.track.id}
+          onaccept={(fields, artwork) => acceptTrack(item, fields, artwork)}
+          onskip={() => skipTrack(item)}
+          onchoose={(index) => chooseMatch(item, index)}
+          oncover={(index) => useCover(item, index)}
+          onlookup={(link) => lookupLink(item, link)}
+          onsearch={() => findMatch(item)}
+          onedit={() => void showBatch()}
+          onwrite={() => void showWrites()}
+          onrename={onrename ? () => void renameTargets() : undefined}
+          onpreview={onpreview ? () => onpreview(item.track) : undefined}
+          onback={backToTracks}
+          onundo={undo}
+          {onopenproviders}
+        />
+      {:else if loading}
+        <p class="empty" role="status">Loading tracks…</p>
+      {/if}
     </div>
   {/if}
 </section>
-
-{#snippet undoButton()}
-  <Button
-    size="sm"
-    aria-label="Undo save"
-    title="Undo this save (Ctrl+Z)"
-    disabled={busy}
-    onclick={undo}
-  >
-    <Icon name="undo" size="xs" />
-  </Button>
-{/snippet}
 
 {#if batchOpen}
   <BatchTagSheet
@@ -1121,7 +1182,7 @@
     client={{ preview: client.previewBatchTag, apply: client.applyBatchTag }}
     onapplied={() => {
       markOwnWrite();
-      notice = 'Manual edits are ready to write';
+      notice = 'Edits saved in the library. Write them to the files with W';
       refresh++;
     }}
   />
@@ -1136,7 +1197,7 @@
       failures = result.failed;
       if (result.operation_id != null) {
         markOwnWrite();
-        history = [...history, { operation: result.operation_id, track: null, field: null }];
+        history = [...history, { operation: result.operation_id, track: null }];
       }
       notice = formatWriteNotice(result);
       refresh++;
@@ -1155,45 +1216,90 @@
     background: var(--color-background);
     color: var(--color-text);
   }
-  .bar,
-  .actions,
-  .filter,
-  nav,
-  .feedback,
-  .review-head,
-  form {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
+  .bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2-5);
     min-width: 0;
-  }
-  .bar,
-  .feedback {
-    flex-wrap: wrap;
-    padding: var(--space-2) var(--space-4);
+    padding: var(--space-3) var(--space-4);
+    background: var(--color-surface);
     border-bottom: var(--border-width) solid var(--color-border);
   }
-  .bar {
-    column-gap: var(--space-3);
-    background: var(--color-surface);
+  .bar[hidden] {
+    display: none;
   }
-  .filter,
-  .count,
-  .hint,
+  .stages {
+    min-width: 0;
+    overflow-x: auto;
+  }
+  /* Each tab as wide as its own label, so five tabs fit the narrowest window. */
+  .stages :global([role='tablist']) {
+    grid-auto-columns: auto;
+  }
+  .tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2-5);
+    min-width: 0;
+  }
+  .tools :global(button) {
+    gap: var(--space-1-5);
+  }
+  .spacer {
+    flex: 1;
+  }
+  .search-strip {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--text-sm);
+    background: var(--color-surface-2);
+    border-bottom: var(--border-width) solid var(--color-border);
+  }
+  .search-strip.done {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+  .search-text {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: var(--space-1-5);
+    align-items: baseline;
+    color: var(--color-text);
+  }
+  .search-track {
+    height: var(--space-1);
+    border-radius: var(--radius-xs);
+    background: var(--color-border);
+    overflow: hidden;
+  }
+  .search-fill {
+    display: block;
+    height: 100%;
+    background: var(--color-text);
+    transform-origin: left;
+    transition: transform var(--duration-fast) var(--ease-out);
+  }
+  .gaps,
+  .gaps-wide {
+    color: var(--color-muted);
+  }
+  .status[data-stage='searching'] {
+    color: var(--color-text);
+  }
+  .ticked,
   .feedback,
   nav {
     color: var(--color-text-2);
     font-size: var(--text-sm);
   }
-  .actions {
-    flex-wrap: wrap;
-  }
-  .bar > .actions {
-    margin-left: auto;
-  }
+
   select,
-  input[type='url'] {
+  .find {
     font: inherit;
+    font-size: var(--text-sm);
     height: var(--control-height-sm);
     max-width: 100%;
     min-width: 0;
@@ -1211,10 +1317,25 @@
     margin: 0;
     cursor: pointer;
   }
+  .feedback {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-4);
+    border-bottom: var(--border-width) solid var(--color-border);
+  }
+  .feedback[hidden] {
+    display: none;
+  }
+  .feedback ul {
+    margin: var(--space-2) 0 0;
+    padding-left: var(--space-4);
+  }
   .workspace {
     flex: 1;
     display: grid;
-    grid-template-columns: minmax(0, 7fr) minmax(0, 6fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     min-width: 0;
     min-height: 0;
   }
@@ -1226,231 +1347,260 @@
     background: var(--color-surface);
     border-right: var(--border-width) solid var(--color-border);
   }
-  .list-scroll {
-    min-width: 0;
-    min-height: 0;
-    overflow: auto;
-    flex: 1;
+  .tracks {
+    container: tracks / inline-size;
+    --col-genre: 96px;
+    --col-label: 120px;
+    --col-year: 40px;
+    --col-status: 120px;
+    --row-columns: var(--thumb-sm) minmax(0, 1fr) var(--col-genre) var(--col-label) var(--col-year)
+      var(--col-status);
   }
-  table {
-    width: 100%;
-    border-spacing: 0;
-    table-layout: fixed;
+  .list-head {
+    display: grid;
+    grid-template-columns: var(--checkbox-size) minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-3);
+    height: var(--table-header-height);
+    padding-left: var(--space-4);
+    color: var(--color-text-2);
     font-size: var(--text-sm);
-    text-align: left;
-  }
-  td,
-  th {
-    text-align: left;
-    padding: var(--space-1) var(--space-2);
     border-bottom: var(--border-width) solid var(--color-border);
   }
-  th {
-    font-weight: var(--weight-medium);
-  }
-  thead th {
-    height: var(--table-header-height);
-    color: var(--color-text-2);
-    background: var(--color-surface);
-  }
-  .track-table thead th {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-  }
-  .check-cell {
-    width: calc(var(--checkbox-size) + var(--space-3) * 2);
-    padding-inline: var(--space-3);
-  }
-  .missing-col {
-    width: 40%;
-  }
-  .track-table tr.active td {
-    background: var(--color-raised);
-  }
-  .track-table tr.active td:first-child {
-    box-shadow: inset var(--selection-bar-width) 0 var(--color-accent);
-  }
-  .track-name {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
+  .columns {
     min-width: 0;
-    width: 100%;
-    min-height: var(--control-height-md);
-    border: 0;
-    background: transparent;
-    color: inherit;
+    height: 100%;
+    display: grid;
+    grid-template-columns: var(--row-columns);
+    align-items: center;
+    gap: var(--space-3);
+    padding-right: var(--space-4);
+  }
+  .column {
+    min-width: 0;
+    height: 100%;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1-5);
     padding: 0;
     font: inherit;
-    text-align: left;
+    color: inherit;
+    background: transparent;
+    border: 0;
     cursor: pointer;
-  }
-  .track-name span,
-  .track-name small,
-  .missing-text,
-  h2 {
-    display: block;
-    overflow: hidden;
     white-space: nowrap;
+    transition: color var(--duration-fast) var(--ease-out);
+  }
+  .column:hover,
+  .column[data-sorted] {
+    color: var(--color-text);
+  }
+  .column:focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-text);
+    outline-offset: -2px;
+  }
+  .column[data-column='title'] {
+    grid-column: 1 / 3;
+  }
+  .column[data-column='year'] {
+    justify-content: end;
+  }
+  .status-head {
+    justify-content: end;
+    cursor: default;
+  }
+  .count {
+    color: var(--color-muted);
+  }
+  .cell {
+    min-width: 0;
+    overflow: hidden;
     text-overflow: ellipsis;
-  }
-  .missing-text {
-    display: table-cell;
+    white-space: nowrap;
+    font-size: var(--text-sm);
     color: var(--color-text-2);
-    font-size: var(--text-xs);
   }
-  small {
-    display: block;
-    color: var(--color-text-2);
-    font-size: var(--text-xs);
-  }
-  nav {
-    justify-content: center;
-    padding: var(--space-2);
-    border-top: var(--border-width) solid var(--color-border);
-  }
-  .review {
-    position: relative;
-    min-width: 0;
-    min-height: 0;
-    overflow: auto;
-    padding: var(--space-3) var(--space-4);
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--space-3);
-  }
-  .review > * {
-    flex-shrink: 0;
-  }
-  .review-head {
-    justify-content: space-between;
-  }
-  .back-to-tracks {
-    flex-shrink: 0;
-  }
-  h2 {
-    font-size: var(--text-md);
-    font-weight: var(--weight-medium);
-    min-width: 0;
-    margin: 0;
-  }
-  .review-head h2 {
-    flex: 1;
-  }
-  .review-head .actions {
-    flex-shrink: 0;
-  }
-  .diff th,
-  .diff td {
-    overflow-wrap: anywhere;
-    vertical-align: middle;
-  }
-  .diff th:first-child {
-    width: 18%;
-  }
-  .diff th:last-child {
-    width: calc(var(--space-8) * 2 + var(--space-5));
-  }
-  .diff th,
-  .diff td {
-    padding: var(--space-1-5) var(--space-1);
-  }
-  .diff td:last-child {
+  .cell[data-column='year'] {
     text-align: right;
   }
-  .diff small {
-    margin-top: var(--space-1);
+  .empty-cell {
+    color: var(--color-muted);
   }
-  .diff select {
-    width: 100%;
+  .gaps {
+    display: none;
   }
-  .cover-cell {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: var(--space-1-5);
-    min-width: 0;
+  .find {
+    width: 12rem;
   }
-  .tools {
-    border-top: var(--border-width) solid var(--color-border);
-    padding-top: var(--space-2);
-    color: var(--color-text-2);
-    font-size: var(--text-xs);
+  @container tracks (max-width: 640px) {
+    .columns,
+    .track-name {
+      --row-columns: var(--thumb-sm) minmax(0, 1fr) var(--col-genre) var(--col-year)
+        var(--col-status);
+    }
+    [data-column='label'] {
+      display: none;
+    }
   }
-  summary {
-    width: fit-content;
-    cursor: pointer;
+  @container tracks (max-width: 520px) {
+    .columns,
+    .track-name {
+      --row-columns: var(--thumb-sm) minmax(0, 1fr) var(--col-status);
+    }
+    [data-column='genre'],
+    [data-column='year'],
+    .gaps-wide {
+      display: none;
+    }
+    .gaps {
+      display: inline;
+    }
   }
-  form,
-  .tools > .actions {
-    margin-top: var(--space-2);
-  }
-  form {
-    flex-wrap: wrap;
-    align-items: flex-end;
-  }
-  form label {
-    display: grid;
-    row-gap: var(--space-1);
+  .list-scroll {
     flex: 1;
     min-width: 0;
-  }
-  .empty {
-    margin: auto;
-    padding: var(--space-4);
-    display: grid;
-    justify-items: center;
-    gap: var(--space-3);
-  }
-  .empty p,
-  .hint {
+    min-height: 0;
+    overflow-y: auto;
+    list-style: none;
     margin: 0;
+    padding: 0;
   }
-  .feedback ul {
-    margin-block: var(--space-2);
-    max-block-size: calc(var(--space-8) * 4);
-    overflow: auto;
-    overflow-wrap: anywhere;
+  .row {
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--checkbox-size) minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-3);
+    padding-left: var(--space-4);
+    border-bottom: var(--border-width) solid var(--color-border);
+    transition: background-color var(--duration-fast) var(--ease-out);
   }
-  .scope-label {
-    max-width: 14ch;
+  .row:hover {
+    background: var(--color-surface-2);
+  }
+  .row.active {
+    background: var(--color-raised);
+  }
+  .row.active::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 2px;
+    background: var(--color-accent);
+  }
+  .track-name {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: var(--row-columns);
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-4) var(--space-2) 0;
+    font: inherit;
+    text-align: left;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+  }
+  .track-name:focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-text);
+    outline-offset: -2px;
+  }
+  .names,
+  .status {
+    min-width: 0;
+    display: grid;
+    gap: var(--space-1);
+  }
+  .title,
+  .artist {
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .bar[hidden] {
-    display: none;
+  .title {
+    font-size: var(--text-md);
+  }
+  .artist,
+  .status {
+    font-size: var(--text-sm);
+    color: var(--color-text-2);
+  }
+  .status {
+    justify-items: end;
+    text-align: right;
+  }
+  .status-main {
+    display: inline-flex;
+    gap: var(--space-2);
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .status-main .numeric {
+    color: var(--color-text);
+  }
+  .status[data-stage='review'] .status-main {
+    color: var(--color-text);
+  }
+  .status[data-stage='not_searched'],
+  .status[data-stage='done'] {
+    color: var(--color-muted);
+  }
+  .status-sub {
+    color: var(--color-muted);
+    white-space: nowrap;
+  }
+  nav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-4);
+    border-top: var(--border-width) solid var(--color-border);
+  }
+  .empty {
+    display: grid;
+    justify-items: center;
+    align-content: center;
+    gap: var(--space-3);
+    flex: 1;
+    margin: 0;
+    padding: var(--space-8) var(--space-4);
+    color: var(--color-text-2);
+    font-size: var(--text-sm);
+  }
+  .empty h2 {
+    margin: 0;
+    font-size: var(--text-md);
+    font-weight: var(--weight-medium);
+    color: var(--color-text);
+  }
+  .scope-label {
+    max-width: 16rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   @container (max-width: 800px) {
     .workspace {
       grid-template-columns: minmax(0, 1fr);
-      grid-template-rows: minmax(0, 1fr);
+    }
+    .workspace:not(.detail-open) > :global(.review),
+    .workspace.detail-open > .tracks {
+      display: none;
     }
     .tracks {
       border-right: 0;
-      border-bottom: var(--border-width) solid var(--color-border-control);
-    }
-    .workspace:not(.detail-open) .review,
-    .workspace.detail-open .tracks {
-      display: none;
-    }
-    .filter select {
-      max-inline-size: calc(var(--space-8) * 5);
-    }
-    .bar {
-      padding-inline: var(--space-2);
-    }
-    .review {
-      padding: var(--space-2) var(--space-3);
     }
   }
   @media (forced-colors: active) {
-    .track-table tr.active td {
-      border-bottom-color: Highlight;
+    .row.active::before,
+    .search-fill {
+      background: Highlight;
     }
-    .track-table tr.active td:first-child {
-      border-left: var(--selection-bar-width) solid Highlight;
+    .search-track {
+      outline: 1px solid CanvasText;
     }
   }
 </style>

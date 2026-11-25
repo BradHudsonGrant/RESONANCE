@@ -327,6 +327,7 @@
         bands={{ low: 0.85, mid: 0.55, high: 0.35, tone: 0.42, spread: 0.28 }}
         alt="Track 202 inspector artwork"
       />
+      <Thumb size="xl" seed={404} alt="Track 404 Prep review cover" />
       <div class="sidebar-wave-preview">
         <Wave variant="sidebar" seed={303} paused />
       </div>

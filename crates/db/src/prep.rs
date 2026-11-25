@@ -1,8 +1,10 @@
 //! Batch tag operations, release-wide edits and multi-track proposal decisions for Prep.
 
+use std::collections::HashSet;
+
 use resonance_core::library::TagField;
 use resonance_core::prep::{
-    TextCase, find_and_replace_edits, fix_case_edits, parent_folder, release_edits_from,
+    PrepStage, TextCase, find_and_replace_edits, fix_case_edits, parent_folder, release_edits_from,
 };
 use resonance_core::staging::{effective_tags, fields_to_accept_above, staging_diff};
 use rusqlite::{OptionalExtension, params};
@@ -43,7 +45,50 @@ pub enum BatchTagOperation {
     },
 }
 
+/// What decides each track's Prep stage, read for the whole library in three queries.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PrepStageFacts {
+    pub pending: HashSet<i64>,
+    pub searched_online: HashSet<i64>,
+    pub matched_online: HashSet<i64>,
+}
+
+impl PrepStageFacts {
+    pub fn stage(&self, track_id: i64) -> PrepStage {
+        PrepStage::of(
+            self.pending.contains(&track_id),
+            self.searched_online.contains(&track_id),
+            self.matched_online.contains(&track_id),
+        )
+    }
+}
+
 impl Database {
+    pub fn prep_stage_facts(&self) -> Result<PrepStageFacts, DbError> {
+        let mut facts = PrepStageFacts::default();
+        let mut pending = self.connection.prepare_cached(
+            "SELECT track_id FROM proposed_tag WHERE status = 'pending'
+             UNION
+             SELECT track_id FROM proposed_artwork WHERE status = 'pending'",
+        )?;
+        for id in pending.query_map([], |row| row.get(0))? {
+            facts.pending.insert(id?);
+        }
+        let mut online = self.connection.prepare_cached(
+            "SELECT track_id, best_json IS NOT NULL FROM track_identification WHERE online = 1",
+        )?;
+        for row in online.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, bool>(1)?))
+        })? {
+            let (id, matched) = row?;
+            facts.searched_online.insert(id);
+            if matched {
+                facts.matched_online.insert(id);
+            }
+        }
+        Ok(facts)
+    }
+
     /// Track IDs with pending field or artwork proposals, in track order.
     pub fn pending_prep_track_ids(&self, limit: u32) -> Result<Vec<i64>, DbError> {
         let mut stmt = self.connection.prepare_cached(

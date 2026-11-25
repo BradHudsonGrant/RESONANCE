@@ -321,6 +321,13 @@ fn steps_without_their_key_are_skipped_and_reported_not_failed() {
                     best: None
                 }
             ),
+            (
+                Some("bandcamp"),
+                StepOutcome::Ran {
+                    candidates: 0,
+                    best: None
+                }
+            ),
         ]
     );
     assert_eq!(
@@ -812,11 +819,11 @@ fn user_values_survive_a_full_rerun_and_conflicting_proposals_show_as_locked() {
         assert_eq!(
             proposed,
             [
+                (TagField::Title, "Night Drive (Extended Mix)"),
                 (TagField::Album, "Night Drive"),
                 (TagField::Year, "2019"),
                 (TagField::TrackNumber, "A2"),
                 (TagField::Label, "Some Label"),
-                (TagField::Mix, "Extended Mix"),
                 (TagField::CatNo, "DEF023"),
             ]
         );
@@ -826,7 +833,9 @@ fn user_values_survive_a_full_rerun_and_conflicting_proposals_show_as_locked() {
                 &[(TagField::Label, Some("Typed Label".to_owned()))],
             )
             .unwrap();
-        database.accept_proposals(track, &[TagField::Mix]).unwrap();
+        database
+            .accept_proposals(track, &[TagField::Title])
+            .unwrap();
     }
 
     let second = run_online_pass(&database, &pipeline, &[], &never(), |_, _| {}).unwrap();
@@ -834,12 +843,16 @@ fn user_values_survive_a_full_rerun_and_conflicting_proposals_show_as_locked() {
     assert_eq!(second.looked_up, 1);
     let mut database = database.lock().unwrap();
     let layers = database.tag_layers(track).unwrap().unwrap();
-    assert_eq!(
-        layers.user,
-        [
-            (TagField::Label, "Typed Label".to_owned()),
-            (TagField::Mix, "Extended Mix".to_owned()),
-        ]
+    assert_eq!(layers.user.len(), 2);
+    assert!(
+        layers
+            .user
+            .contains(&(TagField::Label, "Typed Label".to_owned()))
+    );
+    assert!(
+        layers
+            .user
+            .contains(&(TagField::Title, "Night Drive (Extended Mix)".to_owned()))
     );
     let diff = staging_diff(&layers.file, &layers.user, &layers.proposals);
     let label = diff

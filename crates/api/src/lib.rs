@@ -511,16 +511,21 @@ impl Api {
             Request::ApplyRename { scope, template } => self
                 .apply_rename(scope, &template)
                 .map(Response::ApplyRename),
-            Request::PrepTrackIds { query, track_ids } => self
-                .prep_track_ids(query, track_ids)
+            Request::PrepTrackIds {
+                query,
+                track_ids,
+                stage,
+            } => self
+                .prep_track_ids(query, track_ids, stage)
                 .map(Response::PrepTrackIds),
             Request::PrepPage {
                 query,
                 track_ids,
+                stage,
                 offset,
                 limit,
             } => self
-                .prep_page(query, track_ids, offset, limit)
+                .prep_page(query, track_ids, stage, offset, limit)
                 .map(Response::PrepPage),
             Request::PrepQueue {
                 query,
@@ -572,6 +577,10 @@ impl Api {
             } => self
                 .fetch_prep_candidate_artwork(track_id, candidate_index)
                 .map(Response::FetchPrepCandidateArtwork),
+            Request::SkipPrepArtwork { track_id } => self
+                .skip_prep_artwork(track_id)
+                .map(Box::new)
+                .map(Response::SkipPrepArtwork),
             Request::SkipPrepItems { track_ids, fields } => self
                 .skip_prep_items(&track_ids, &fields)
                 .map(Response::SkipPrepItems),

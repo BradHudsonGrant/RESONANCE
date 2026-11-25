@@ -5,3 +5,5 @@ extend-exclude = ["app/THIRD-PARTY-NOTICES.txt", "ui/dev/licences/**"]
 [default.extend-words]
 # The MP4 box that holds a track
 trak = "trak"
+# The ID3 frames for the artist and album artist
+TPE = "TPE"

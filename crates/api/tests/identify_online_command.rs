@@ -1467,6 +1467,7 @@ fn prep_page_paginates_and_accept_reports_reverted_fields() {
         .handle(Request::PrepPage {
             query: None,
             track_ids: None,
+            stage: None,
             offset: 0,
             limit: 2,
         })
@@ -1482,6 +1483,7 @@ fn prep_page_paginates_and_accept_reports_reverted_fields() {
         .handle(Request::PrepPage {
             query: None,
             track_ids: None,
+            stage: None,
             offset: 2,
             limit: 2,
         })
@@ -1492,6 +1494,37 @@ fn prep_page_paginates_and_accept_reports_reverted_fields() {
     assert_eq!(page_1.total, 3);
     assert_eq!(page_1.items.len(), 1);
     assert_eq!(page_0.items[0].track.id, first_id);
+    let counts = page_0.stages;
+    assert_eq!(
+        counts.review + counts.not_searched + counts.no_match + counts.done,
+        3
+    );
+
+    let Response::PrepPage(review) = api
+        .handle(Request::PrepPage {
+            query: None,
+            track_ids: None,
+            stage: Some(resonance_api::command::PrepStageName::Review),
+            offset: 0,
+            limit: 50,
+        })
+        .unwrap()
+    else {
+        panic!("expected review page");
+    };
+    assert_eq!(review.total, counts.review);
+    assert!(review.items.iter().any(|item| item.track.id == first_id));
+    let Response::PrepTrackIds(no_match) = api
+        .handle(Request::PrepTrackIds {
+            query: None,
+            track_ids: None,
+            stage: Some(resonance_api::command::PrepStageName::NoMatch),
+        })
+        .unwrap()
+    else {
+        panic!("expected track ids");
+    };
+    assert!(!no_match.contains(&first_id));
 
     let Response::AcceptAndWrite(reverted) = api
         .handle(Request::AcceptAndWrite {

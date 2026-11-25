@@ -1350,7 +1350,7 @@ test('a batch of 50 mixed files goes from untagged to tagged in Prep using the k
     await expect(filter).toHaveValue('artist');
     const selectAll = prep.getByRole('checkbox', { name: 'Select all tracks' });
     await selectAll.press('Space');
-    await expect(prep.getByText('50 selected')).toBeVisible();
+    await expect(prep.getByText('50 ticked')).toBeVisible();
     for (const [width, height] of [
       [1100, 700],
       [760, 480],
@@ -1365,7 +1365,19 @@ test('a batch of 50 mixed files goes from untagged to tagged in Prep using the k
         await firstTrack.press('Enter');
         await expect(prep.getByRole('button', { name: 'Back to tracks' })).toBeFocused();
       }
-      await expect(prep.getByRole('button', { name: 'Accept Artist' })).toBeInViewport();
+      const acceptArtist = prep.getByRole('button', { name: 'Accept Artist' });
+      if (width === 760) {
+        // A short window scrolls the review; Tab reaches the suggestion and brings it into view.
+        for (
+          let step = 0;
+          step < 20 && !(await acceptArtist.evaluate((el) => el === document.activeElement));
+          step++
+        ) {
+          await page.keyboard.press('Tab');
+        }
+        await expect(acceptArtist).toBeFocused();
+      }
+      await expect(acceptArtist).toBeInViewport();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       );
@@ -1384,7 +1396,7 @@ test('a batch of 50 mixed files goes from untagged to tagged in Prep using the k
     await expect(prep.getByText('Restored 50 files')).toBeVisible({ timeout: 30_000 });
     expect(files.every((file) => !readFileSync(file).includes(id3ArtistFrame))).toBe(true);
     await selectAll.press('Space');
-    await prep.getByRole('button', { name: 'Accept selected' }).press('Enter');
+    await prep.getByRole('button', { name: 'Save ticked' }).press('Enter');
     await expect(prep.getByText('Saved to 50 files')).toBeVisible({ timeout: 30_000 });
 
     // Verify all 50 mixed files on disk now hold their tags and have zero unwritten changes left.

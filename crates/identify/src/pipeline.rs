@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use resonance_core::identify::{
     Candidate, ENRICHMENT_THRESHOLD, FINGERPRINT_MATCH_SCORE, KnownTags, MAX_STORED_CANDIDATES,
     RankedCandidate, ReleaseUrl, STOP_THRESHOLD, Step, StepOutcome, confirm_by_fingerprint,
-    fuse_and_rank, is_same_candidate, is_viable_alternative, needs_preview_check, normalise_tags,
-    parse_path, replaces_best, retain_viable_candidates,
+    fuse_and_rank, guessed_bandcamp_pages, is_same_candidate, is_viable_alternative,
+    needs_preview_check, normalise_tags, parse_path, replaces_best, retain_viable_candidates,
 };
 use resonance_core::providers::ProviderKey;
 use resonance_db::{Database, IdentificationInput};
@@ -299,6 +299,7 @@ impl Pipeline {
         self.isrc_fast_step(&mut states, &keys, abort);
         self.fingerprint_step(&mut states, &keys, abort);
         self.text_step(&mut states, &keys, abort);
+        self.bandcamp_page_step(&mut states, &keys, abort);
         self.enrichment_bridge_step(&mut states, &keys, abort);
 
         for state in &mut states {
@@ -566,6 +567,47 @@ impl Pipeline {
                         StepOutcome::Failed(error.to_string()),
                     ),
                 }
+            }
+        }
+    }
+
+    /// Edits and bootlegs that only Bandcamp sells are in no catalogue the text search reaches,
+    /// so a track still unmatched reads the Bandcamp pages its names point at. A page that does
+    /// not exist costs one request and is cached.
+    fn bandcamp_page_step(&self, states: &mut [TrackState], keys: &Keys, abort: &AtomicBool) {
+        let Some(bandcamp) = self.find_registered("bandcamp") else {
+            return;
+        };
+        if self.blocked(bandcamp, QueryKind::Release, keys).is_some() {
+            return;
+        }
+        let lookup = self.lookup(bandcamp, keys);
+        for state in states.iter_mut() {
+            if state.done {
+                continue;
+            }
+            let pages = guessed_bandcamp_pages(&state.identification.known);
+            if pages.is_empty() {
+                continue;
+            }
+            let mut found = 0;
+            for page in &pages {
+                if abort.load(Ordering::Acquire) {
+                    return;
+                }
+                if let Ok(candidates) = bandcamp.provider.lookup(&Query::Release(page), &lookup)
+                    && !candidates.is_empty()
+                {
+                    found += candidates.len();
+                    state.collected.extend(candidates);
+                    break;
+                }
+            }
+            if found > 0 {
+                let best = self.settle(state);
+                report(state, Step::TextSearch, Some("bandcamp"), ran(found, best));
+            } else {
+                report(state, Step::TextSearch, Some("bandcamp"), ran(0, None));
             }
         }
     }

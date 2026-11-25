@@ -6,7 +6,7 @@
   import { onThemeChange } from './theme';
 
   interface Props {
-    size?: 'sm' | 'md' | 'lg';
+    size?: 'sm' | 'md' | 'lg' | 'xl';
     src?: string | null;
     alt?: string;
     seed: number;
@@ -23,7 +23,9 @@
   let failedSrc = $state<string | null>(null);
   const showImage = $derived(Boolean(src) && src !== failedSrc);
 
-  const pixelDimension = $derived(size === 'sm' ? 36 : size === 'lg' ? 96 : 60);
+  const pixelDimension = $derived(
+    size === 'sm' ? 36 : size === 'lg' ? 96 : size === 'xl' ? 168 : 60,
+  );
 
   function parseRgb(value: string): Rgb {
     const [r = 0, g = 0, b = 0] = (value.match(/[\d.]+/g) ?? []).map(Number);
@@ -102,6 +104,12 @@
     width: var(--thumb-lg);
     height: var(--thumb-lg);
     border-radius: var(--radius-lg);
+  }
+
+  .size-xl {
+    width: var(--thumb-xl);
+    height: var(--thumb-xl);
+    border-radius: var(--radius-xl);
   }
 
   .image,

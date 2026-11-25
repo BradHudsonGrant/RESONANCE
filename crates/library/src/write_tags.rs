@@ -14,7 +14,7 @@ use std::io::{self, Seek};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use lofty::config::{ParseOptions, WriteOptions};
+use lofty::config::{ParseOptions, ParsingMode, WriteOptions};
 use lofty::error::{FileEncodingError, FileParseError};
 use lofty::flac::FlacFile;
 use lofty::id3::v2::{Id3v2Tag, Id3v2Version};
@@ -483,10 +483,26 @@ fn edit_file(
     use_id3v23: bool,
 ) -> Result<(Prior, bool), FileProblem> {
     let parse = ParseOptions::new();
+    let relaxed = ParseOptions::new().parsing_mode(ParsingMode::Relaxed);
     let options = WriteOptions::new().use_id3v23(use_id3v23);
+    // The same lenient second read the scan uses, so a file the library could read can be
+    // written. Only a file the strict read refuses takes it, and a frame the lenient read skips
+    // is not written back, so undo cannot bring that frame back either. The copy's audio is
+    // compared with the original before it replaces it.
+    macro_rules! read {
+        ($file_type:ty) => {
+            match <$file_type>::read_from(file, parse) {
+                Ok(audio) => audio,
+                Err(first) => {
+                    file.rewind().map_err(FileProblem::Io)?;
+                    <$file_type>::read_from(file, relaxed).map_err(|_| FileProblem::Parse(first))?
+                }
+            }
+        };
+    }
     macro_rules! with_id3v2 {
         ($file_type:ty) => {{
-            let mut audio = <$file_type>::read_from(file, parse).map_err(FileProblem::Parse)?;
+            let mut audio = read!($file_type);
             let (tag, prior, was_v23) = edit_id3v2(audio.remove_id3v2(), edit, cover);
             audio.set_id3v2(tag);
             file.rewind().map_err(FileProblem::Io)?;
@@ -499,7 +515,7 @@ fn edit_file(
         AudioFormat::Wav => with_id3v2!(WavFile),
         AudioFormat::Aiff => with_id3v2!(AiffFile),
         AudioFormat::Flac => {
-            let mut audio = FlacFile::read_from(file, parse).map_err(FileProblem::Parse)?;
+            let mut audio = read!(FlacFile);
             let tag: VorbisComments = audio.remove_vorbis_comments().unwrap_or_default();
             let (tag, mut prior) = edit_tag(tag, edit, CoverEdit::Keep);
             audio.set_vorbis_comments(tag);
@@ -509,7 +525,7 @@ fn edit_file(
             Ok((prior, true))
         }
         AudioFormat::M4a => {
-            let mut audio = Mp4File::read_from(file, parse).map_err(FileProblem::Parse)?;
+            let mut audio = read!(Mp4File);
             let tag: Ilst = audio.remove_ilst().unwrap_or_default();
             let (tag, prior) = edit_tag(tag, edit, cover);
             audio.set_ilst(tag);

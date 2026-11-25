@@ -5,7 +5,7 @@
 use crate::identify::{normalise_tags, parse_path};
 use crate::library::TagField;
 use crate::staging::{
-    Proposal, ProposalStatus, StoredProposal, changing_proposals, normalise_value,
+    Proposal, ProposalStatus, StoredProposal, changing_proposals, normalise_value, title_with_mix,
 };
 
 /// The release-level fields copied across an album, EP or folder by "Apply to release".
@@ -283,6 +283,34 @@ fn collapse_spaces_and_empty_brackets(text: &str) -> String {
         .join(" ")
 }
 
+/// Where a track stands in Prep. The order is the order a user works through them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PrepStage {
+    /// Suggestions are waiting for a decision, from a search or from the file's own name.
+    Review,
+    /// No online search has run for the track yet.
+    NotSearched,
+    /// An online search ran and found nothing usable.
+    NoMatch,
+    /// Matched online and every suggestion has been saved or skipped.
+    Done,
+}
+
+impl PrepStage {
+    /// Waiting suggestions come first, because they are the only stage with a decision to make.
+    pub fn of(has_pending: bool, searched_online: bool, matched_online: bool) -> Self {
+        if has_pending {
+            Self::Review
+        } else if !searched_online {
+            Self::NotSearched
+        } else if matched_online {
+            Self::Done
+        } else {
+            Self::NoMatch
+        }
+    }
+}
+
 /// The parent folder of a relative asset path (`"Label - EP/01 Track.wav"` -> `"Label - EP"`).
 pub fn parent_folder(path: &str) -> &str {
     path.rfind(['/', '\\']).map_or("", |index| &path[..index])
@@ -383,11 +411,18 @@ pub fn local_proposals(file_tags: &[(TagField, String)], path: &str) -> Vec<Prop
 
     let tag_year = from_tags.year.map(|y| y.to_string());
     let path_year = from_path.year.map(|y| y.to_string());
+    let tag_title = from_tags
+        .title
+        .as_deref()
+        .map(|title| title_with_mix(title, from_tags.mix.as_deref()));
+    let path_title = from_path
+        .title
+        .as_deref()
+        .map(|title| title_with_mix(title, from_path.mix.as_deref()));
 
     let tag_candidates = [
         (TagField::Artist, from_tags.artist.as_deref()),
-        (TagField::Title, from_tags.title.as_deref()),
-        (TagField::Mix, from_tags.mix.as_deref()),
+        (TagField::Title, tag_title.as_deref()),
         (TagField::Album, from_tags.album.as_deref()),
         (TagField::Label, from_tags.label.as_deref()),
         (TagField::CatNo, from_tags.catno.as_deref()),
@@ -397,8 +432,7 @@ pub fn local_proposals(file_tags: &[(TagField, String)], path: &str) -> Vec<Prop
 
     let path_candidates = [
         (TagField::Artist, from_path.artist.as_deref()),
-        (TagField::Title, from_path.title.as_deref()),
-        (TagField::Mix, from_path.mix.as_deref()),
+        (TagField::Title, path_title.as_deref()),
         (TagField::Album, from_path.album.as_deref()),
         (TagField::Label, from_path.label.as_deref()),
         (TagField::CatNo, from_path.catno.as_deref()),
@@ -558,6 +592,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn prep_stage_puts_waiting_suggestions_first() {
+        assert_eq!(PrepStage::of(true, false, false), PrepStage::Review);
+        assert_eq!(PrepStage::of(true, true, false), PrepStage::Review);
+        assert_eq!(PrepStage::of(true, true, true), PrepStage::Review);
+        assert_eq!(PrepStage::of(false, false, false), PrepStage::NotSearched);
+        assert_eq!(PrepStage::of(false, true, false), PrepStage::NoMatch);
+        assert_eq!(PrepStage::of(false, true, true), PrepStage::Done);
+    }
+
+    #[test]
     fn title_and_sentence_case_keep_dj_acronyms_and_roman_numerals_uppercase() {
         assert_eq!(
             fix_case(
@@ -653,13 +697,9 @@ mod tests {
         assert!(
             untagged
                 .iter()
-                .any(|p| p.field == TagField::Title && p.value == "Echo Chamber")
+                .any(|p| p.field == TagField::Title && p.value == "Echo Chamber (Extended Mix)")
         );
-        assert!(
-            untagged
-                .iter()
-                .any(|p| p.field == TagField::Mix && p.value == "Extended Mix")
-        );
+        assert!(untagged.iter().all(|p| p.field != TagField::Mix));
         assert!(
             untagged
                 .iter()
@@ -689,6 +729,18 @@ mod tests {
             "Some Artist - Night Drive.flac",
         );
         assert!(already_clean.is_empty());
+
+        let edit_in_title = local_proposals(
+            &[
+                (TagField::Artist, "Some Artist".to_owned()),
+                (TagField::Title, "Night Drive (Late Edit)".to_owned()),
+            ],
+            "Some Artist - Night Drive (Late Edit).mp3",
+        );
+        assert!(
+            edit_in_title.is_empty(),
+            "the edit stays in the title: {edit_in_title:?}"
+        );
 
         let inferred = local_proposals(
             &[(TagField::Title, "Ada Marsh - Blue Hour".to_owned())],
