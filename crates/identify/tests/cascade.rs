@@ -791,6 +791,7 @@ fn user_values_survive_a_full_rerun_and_conflicting_proposals_show_as_locked() {
                 duration_s: 412,
             }),
             decoded_facts: None,
+            quality: None,
         };
         database
             .record_asset_identity(
@@ -1205,6 +1206,7 @@ fn step_5b_preview_verification_confirms_track_and_never_copies_audio_match_acro
             }),
             chromaprint: Some(fp),
             decoded_facts: None,
+            quality: None,
         };
         db.record_asset_identity(
             1,
@@ -1290,6 +1292,7 @@ fn step_5b_preview_verification_confirms_track_and_never_copies_audio_match_acro
                 duration_s: 412,
             }),
             decoded_facts: None,
+            quality: None,
         };
         db.record_asset_identity(
             1,
@@ -1621,6 +1624,7 @@ fn audd_runs_only_with_key_on_uncertain_tracks_and_respects_edit_guard() {
             }),
             chromaprint: None,
             decoded_facts: None,
+            quality: None,
         };
         guard
             .record_asset_identity(

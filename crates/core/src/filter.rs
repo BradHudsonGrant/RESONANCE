@@ -9,6 +9,7 @@ use std::fmt;
 use crate::columns::{LibraryColumn, generic_tag_fields, tag_label, tag_sort_value};
 use crate::key::Key;
 use crate::library::AudioFormat;
+use crate::quality::QualityKind;
 
 /// The most filters one "any of" group holds.
 pub const MAX_GROUP: usize = 8;
@@ -182,7 +183,7 @@ impl LibraryColumn {
             | Self::Channels
             | Self::FileSize => FieldKind::Number,
             Self::Added | Self::Modified => FieldKind::Date,
-            Self::Key | Self::Format => FieldKind::Choice,
+            Self::Key | Self::Format | Self::Quality => FieldKind::Choice,
             Self::Artwork => FieldKind::Picture,
             Self::Path | Self::Folder => FieldKind::Location,
         }
@@ -229,6 +230,7 @@ impl LibraryColumn {
         let label = match self {
             Self::Tag(field) => tag_label(field).to_owned(),
             Self::Added => "date added".to_owned(),
+            Self::Quality => "quality flags".to_owned(),
             Self::Modified => "date modified".to_owned(),
             other => other.label(),
         };
@@ -806,6 +808,10 @@ fn clean_values(column: LibraryColumn, values: &[String]) -> Result<Vec<String>,
                 .parse::<Key>()
                 .map_err(|_| FilterError::BadValue(trimmed.to_owned()))?
                 .camelot(),
+            LibraryColumn::Quality => quality_kind(trimmed)
+                .ok_or_else(|| FilterError::BadValue(trimmed.to_owned()))?
+                .name()
+                .to_owned(),
             _ => trimmed.to_owned(),
         };
         if !kept
@@ -822,6 +828,14 @@ fn clean_values(column: LibraryColumn, values: &[String]) -> Result<Vec<String>,
         return Err(FilterError::BadValue(format!("{} values", kept.len())));
     }
     Ok(kept)
+}
+
+/// A quality flag kind by its stored name or the label the app shows.
+fn quality_kind(text: &str) -> Option<QualityKind> {
+    let lower = text.to_lowercase();
+    QualityKind::ALL
+        .into_iter()
+        .find(|kind| kind.name() == lower || kind.label().to_lowercase() == lower)
 }
 
 fn finite(value: Option<f64>) -> Result<Option<f64>, FilterError> {
@@ -856,6 +870,9 @@ fn shown_value(column: LibraryColumn, value: &str) -> String {
     match column {
         LibraryColumn::Format => value.to_uppercase(),
         LibraryColumn::Key => value.to_owned(),
+        LibraryColumn::Quality => {
+            quality_kind(value).map_or_else(|| quoted(value), |kind| kind.label().to_lowercase())
+        }
         _ => quoted(value),
     }
 }
@@ -1369,5 +1386,33 @@ mod tests {
             .collect();
         assert_eq!(clean_terms(many), Err(FilterError::TooManyTerms));
         assert_eq!(FilterTerm::any_of(Vec::new()), Err(FilterError::GroupSize));
+    }
+
+    #[test]
+    fn quality_filters_take_flag_kinds_by_name_or_label() {
+        let picked = filter(
+            LibraryColumn::Quality,
+            Condition::AnyOf(vec!["Fake lossless".into(), "clipping".into()]),
+        );
+        assert_eq!(
+            picked.condition,
+            Condition::AnyOf(vec!["transcode".into(), "clipping".into()])
+        );
+        assert_eq!(picked.label(), "Quality is fake lossless or clipping");
+        assert_eq!(
+            filter(LibraryColumn::Quality, Condition::Present).label(),
+            "Has quality flags"
+        );
+        assert_eq!(
+            filter(LibraryColumn::Quality, Condition::Missing).label(),
+            "No quality flags"
+        );
+        assert!(
+            FieldFilter::new(
+                LibraryColumn::Quality,
+                Condition::AnyOf(vec!["warm".into()])
+            )
+            .is_err()
+        );
     }
 }

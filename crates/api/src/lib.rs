@@ -11,6 +11,7 @@ pub mod mix_frame;
 mod online;
 mod prep;
 mod providers;
+mod quality;
 mod relink;
 mod renames;
 pub mod serve;
@@ -458,6 +459,9 @@ impl Api {
             Request::SkipProposal { track_id, fields } => self
                 .skip_proposal(track_id, &fields)
                 .map(Response::SkipProposal),
+            Request::TrackQuality { track_id } => {
+                self.track_quality(track_id).map(Response::TrackQuality)
+            }
             Request::TrackArtwork { track_id } => {
                 self.track_artwork(track_id).map(Response::TrackArtwork)
             }
@@ -905,6 +909,7 @@ pub(crate) fn library_track(row: &TrackRow) -> LibraryTrack {
             .collect(),
         missing_since: row.missing_since,
         artwork: row.artwork.clone(),
+        quality: row.quality.as_ref().map(quality::quality_flag),
         added_ms: row.added_ns / 1_000_000,
         modified_ms: file.modified_ns / 1_000_000,
     }

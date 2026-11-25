@@ -9,6 +9,7 @@ mod operations;
 mod prep;
 mod prep_writes;
 mod preview_settings;
+mod quality;
 mod renames;
 mod search;
 mod sources;
@@ -20,6 +21,8 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+
+use resonance_core::quality::QualityFlag;
 
 pub use artwork::{
     ARTWORK_FOLDER, ArtworkError, ArtworkStore, CachedArtworkSource, ProposedArtwork,
@@ -38,6 +41,7 @@ pub use identity::{
 pub use operations::StoredOperation;
 pub use prep::{BatchTagOperation, PrepStageFacts};
 pub use prep_writes::{FileDecision, FileRevision};
+pub use quality::StoredQuality;
 pub use renames::{RenameTarget, StoredRename};
 use resonance_core::collections::CollectionNameError;
 use resonance_core::library::{
@@ -62,7 +66,7 @@ pub(crate) fn placeholders(count: usize) -> String {
 
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
-const MIGRATIONS: [&str; 22] = [
+const MIGRATIONS: [&str; 23] = [
     include_str!("../migrations/0001_library.sql"),
     include_str!("../migrations/0002_sources.sql"),
     include_str!("../migrations/0003_identity.sql"),
@@ -85,6 +89,7 @@ const MIGRATIONS: [&str; 22] = [
     include_str!("../migrations/0020_operation_tag_decisions.sql"),
     include_str!("../migrations/0021_prep_query_indexes.sql"),
     include_str!("../migrations/0022_reread_unreadable_files.sql"),
+    include_str!("../migrations/0023_quality.sql"),
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -189,6 +194,8 @@ pub struct TrackRow {
     pub artwork: Option<String>,
     /// When the track first came into the library, in Unix nanoseconds.
     pub added_ns: i64,
+    /// The most serious problem the quality check found in the file.
+    pub quality: Option<QualityFlag>,
 }
 
 /// The connection that writes. Readers open their own.
@@ -571,15 +578,19 @@ impl Database {
 /// sort, so a page deep in a large library costs a walk along an index. `CROSS JOIN` holds
 /// SQLite to that plan: left to choose, it sorted every row, and the last page of 100,000 took
 /// 585 ms instead of 13 ms.
-const TRACKS_IN_ORDER: &str = "SELECT asset.id, asset.track_id, source.folder, asset.path,
+const TRACKS_IN_ORDER: &str = concat!(
+    "SELECT asset.id, asset.track_id, source.folder, asset.path,
          asset.size_bytes, asset.modified_ns, asset.format, asset.duration_ms, asset.sample_rate,
          asset.channels, asset.bit_depth, asset.bitrate_kbps, track.favourite, asset.missing_since,
-         asset.artwork_hash, track.added_ns
+         asset.artwork_hash, track.added_ns, ",
+    quality::worst_flag_sql!(),
+    "
      FROM source
      CROSS JOIN asset ON asset.source_id = source.id
      JOIN track ON track.id = asset.track_id
      WHERE asset.included = 1
-     ORDER BY source.folder, asset.path";
+     ORDER BY source.folder, asset.path"
+);
 
 pub(crate) fn tag_field(name: String) -> Result<TagField, DbError> {
     TagField::from_name(&name).ok_or(DbError::UnknownName {
@@ -610,6 +621,7 @@ pub(crate) fn track_row(row: &Row<'_>) -> Result<(i64, TrackRow), DbError> {
     let missing_since: Option<i64> = row.get(13)?;
     let artwork: Option<String> = row.get(14)?;
     let added_ns: i64 = row.get(15)?;
+    let quality = quality::parse_worst_flag(row.get(16)?)?;
     let track = TrackRow {
         track_id: row.get(1)?,
         source_folder: row.get(2)?,
@@ -627,6 +639,7 @@ pub(crate) fn track_row(row: &Row<'_>) -> Result<(i64, TrackRow), DbError> {
         user_tags: Vec::new(),
         artwork,
         added_ns,
+        quality,
     };
     Ok((row.get(0)?, track))
 }

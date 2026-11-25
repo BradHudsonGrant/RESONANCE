@@ -30,6 +30,7 @@ use crate::command::{
 };
 use crate::error::ApiError;
 use crate::online::{to_command_evidence, to_command_step_reports};
+use crate::quality::quality_flag;
 use crate::staging::{fields_of, staged_field, tag_field, tag_name};
 use crate::table_layout::core_direction;
 use crate::tag_writes::journal_operation;
@@ -421,12 +422,19 @@ fn build_prep_items(
             .map(tag_name)
             .collect();
 
+        let quality = library
+            .track_quality(row.track_id)
+            .map_err(ApiError::library_unreadable)?
+            .map(|stored| stored.flags.iter().map(quality_flag).collect())
+            .unwrap_or_default();
+
         items.push(PrepItem {
             track,
             missing,
             review_token,
             fields,
             artwork,
+            quality,
             pending_fields,
             provider: best_provider,
             confidence: best_confidence,

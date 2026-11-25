@@ -5,6 +5,7 @@ use resonance_core::identity::{
 use resonance_core::library::{AudioFormat, TagField, is_asset_path_included};
 use rusqlite::{OptionalExtension, Transaction, params};
 
+use crate::quality::record_quality;
 use crate::{Database, DbError, FileStamp, ScannedFile, SourceId, search, sources, tag_field};
 
 /// An asset whose identity has not been computed yet, or whose file or lossy decoder changed.
@@ -22,7 +23,7 @@ pub struct PendingAsset {
 }
 
 /// Stored identity and location of an asset in the database.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StoredAssetIdentity {
     pub asset_id: i64,
     pub track_id: i64,
@@ -126,6 +127,7 @@ const PENDING_IDENTITY_CONDITION: &str = "asset.included = 1
            AND asset.audio_decoder IS NOT NULL
            AND asset.audio_decoder != ?
        )
+       OR NOT EXISTS (SELECT 1 FROM asset_quality WHERE asset_quality.asset_id = asset.id)
    )";
 
 #[allow(clippy::type_complexity)]
@@ -368,7 +370,8 @@ impl Database {
         let fp_raw = identity.chromaprint.as_ref().map(Chromaprint::raw_le_bytes);
         let fp_duration = identity.chromaprint.as_ref().map(|fp| fp.duration_s);
 
-        let changed = self.connection.execute(
+        let tx = self.connection.transaction()?;
+        let changed = tx.execute(
             "UPDATE asset
              SET byte_hash = ?2,
                  audio_hash = ?3,
@@ -391,6 +394,12 @@ impl Database {
                 stamp.modified_ns,
             ],
         )?;
+        if changed > 0
+            && let Some(quality) = &identity.quality
+        {
+            record_quality(&tx, asset_id, quality)?;
+        }
+        tx.commit()?;
         Ok(changed > 0)
     }
 
@@ -427,7 +436,7 @@ impl Database {
                 let fp_encoded = identity.chromaprint.as_ref().map(|fp| fp.encoded.as_str());
                 let fp_raw = identity.chromaprint.as_ref().map(Chromaprint::raw_le_bytes);
                 let fp_duration = identity.chromaprint.as_ref().map(|fp| fp.duration_s);
-                changed += stmt.execute(params![
+                let updated = stmt.execute(params![
                     asset_id,
                     identity.byte_hash.as_bytes().as_slice(),
                     audio_bytes,
@@ -438,6 +447,12 @@ impl Database {
                     stamp.size_bytes,
                     stamp.modified_ns,
                 ])?;
+                if updated > 0
+                    && let Some(quality) = &identity.quality
+                {
+                    record_quality(&tx, *asset_id, quality)?;
+                }
+                changed += updated;
             }
         }
         tx.commit()?;
@@ -713,6 +728,7 @@ impl Database {
                 audio,
                 chromaprint,
                 decoded_facts: None,
+                quality: None,
             }
         });
 
@@ -1131,6 +1147,9 @@ impl Database {
             )?;
         }
         search::sync_asset_metadata_in_tx(&tx, original_asset_id, &file.path, &merged_tags, true)?;
+        if let Some(quality) = &identity.quality {
+            record_quality(&tx, original_asset_id, quality)?;
+        }
 
         tx.commit()?;
         Ok(true)
@@ -1348,6 +1367,7 @@ mod tests {
                 duration_s: 120,
             }),
             decoded_facts: None,
+            quality: None,
         };
         assert!(
             db.record_asset_identity(pending[0].asset_id, pending[0].stamp, &id)
@@ -1409,6 +1429,10 @@ mod tests {
                 }),
                 chromaprint: None,
                 decoded_facts: None,
+                quality: Some(resonance_core::identity::AssetQuality {
+                    measurements: Default::default(),
+                    flags: Vec::new(),
+                }),
             };
             assert!(
                 db.record_asset_identity(item.asset_id, item.stamp, &identity)

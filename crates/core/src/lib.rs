@@ -12,6 +12,7 @@ pub mod meter;
 pub mod prep;
 pub mod preview;
 pub mod providers;
+pub mod quality;
 pub mod quick_filters;
 pub mod search;
 pub mod staging;

@@ -33,6 +33,7 @@ pub fn starter_filters() -> Vec<FilterTerm> {
             Condition::AnyOf(vec!["wav".into(), "flac".into(), "aiff".into()]),
         ),
         one(LibraryColumn::Bitrate, Condition::Below(320.0)),
+        one(LibraryColumn::Quality, Condition::Present),
     ]
     .into_iter()
     .flatten()
@@ -191,7 +192,7 @@ mod tests {
     fn a_new_library_recommends_the_starter_filters() {
         let bar = QuickFilterBar::default();
         assert_eq!(keys(&bar.recommended(&[], NOW)), keys(&starter_filters()));
-        assert_eq!(starter_filters().len(), 4);
+        assert_eq!(starter_filters().len(), 5);
     }
 
     #[test]
