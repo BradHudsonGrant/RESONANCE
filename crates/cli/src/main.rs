@@ -36,8 +36,8 @@ enum Command {
     },
     /// Hash and fingerprint any files in the library whose identity is still pending
     Identify {
-        /// Then look every track without an online result up on AcoustID, MusicBrainz and
-        /// Discogs, using the keys saved in Settings
+        /// Then look every track without an online result up: AcoustID, MusicBrainz, Discogs,
+        /// Deezer, iTunes and Bandcamp, using the keys saved in Settings
         #[arg(long)]
         online: bool,
     },

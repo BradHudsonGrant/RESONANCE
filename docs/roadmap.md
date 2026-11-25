@@ -113,8 +113,8 @@ Accept:
 Accept:
 
 - [x] A batch of 50 mixed files goes from untagged to tagged using the keyboard only ([#116](https://github.com/BradHudsonGrant/RESONANCE/issues/116)). Evidence: merged in [#139](https://github.com/BradHudsonGrant/RESONANCE/pull/139); `ui/e2e/library.e2e.ts` creates 50 untagged mixed WAV and AIFF files, opens `Prep` with `2`, advances with `ArrowDown` inside one 16 ms frame, accepts 49 high-confidence tracks with `Shift+A`, edits the remaining track inline with `E`, `ArrowDown` and `Enter`, and writes all 50 files to disk with `W` and `Enter` with zero mouse clicks.
-- [ ] Hit rates per pipeline step are measured on the local fixtures.
-- [ ] User edits survive a re-run.
+- [x] Hit rates per pipeline step are measured on the local fixtures. Evidence: [benchmarks/identify.md](benchmarks/identify.md); on the 50 fixtures the fingerprint found candidates for 23 of 49 tracks and made 22 confident, the name searches 17 of 25 and 8, and the check by ear 4 of 8 and 1, for 35 matched and 31 confident, 26 of them confirmed by audio.
+- [x] User edits survive a re-run. Evidence: `user_values_survive_a_full_rerun_and_conflicting_proposals_show_as_locked` in `crates/identify/tests/cascade.rs` sets a value by hand, runs the full online pass again and shows the user's value kept with the new proposal held as locked; the Prep stage rules treat a field the user set as decided ([#153](https://github.com/BradHudsonGrant/RESONANCE/pull/153)), verified in `crates/db/tests/tag_layers.rs`.
 
 ## M4 Quality and replace, v0.5.0
 

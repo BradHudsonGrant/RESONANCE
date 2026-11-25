@@ -2,6 +2,45 @@
 
 Every release, newest first. Made from the commit history with git-cliff.
 
+## 0.4.0, 25 November 2026
+
+### Added
+
+- Store provider keys in OS credential store ([#123](https://github.com/BradHudsonGrant/RESONANCE/pull/123))
+- Add 6-step identification pipeline and providers ([#124](https://github.com/BradHudsonGrant/RESONANCE/pull/124))
+- Add three-layer tags and per-field staging diff ([#125](https://github.com/BradHudsonGrant/RESONANCE/pull/125))
+- Choose how keys are shown ([#127](https://github.com/BradHudsonGrant/RESONANCE/pull/127))
+- Write tags across formats with journal and undo ([#129](https://github.com/BradHudsonGrant/RESONANCE/pull/129))
+- Add filename templates and undoable rename ([#130](https://github.com/BradHudsonGrant/RESONANCE/pull/130))
+- Pause and resume jobs from Activity ([#132](https://github.com/BradHudsonGrant/RESONANCE/pull/132))
+- Cache and display embedded and provider artwork ([#134](https://github.com/BradHudsonGrant/RESONANCE/pull/134))
+- Choose, order, wrap and sort columns ([#135](https://github.com/BradHudsonGrant/RESONANCE/pull/135))
+- Add auto-preview while moving through tracks ([#137](https://github.com/BradHudsonGrant/RESONANCE/pull/137))
+- Filter on any field with a quick filters bar ([#138](https://github.com/BradHudsonGrant/RESONANCE/pull/138))
+- Build Prep space and keyboard-only batch tagging ([#139](https://github.com/BradHudsonGrant/RESONANCE/pull/139))
+- Add store searches and check matches by ear ([#148](https://github.com/BradHudsonGrant/RESONANCE/pull/148))
+- Review inbox with every tag and covers by sight ([#149](https://github.com/BradHudsonGrant/RESONANCE/pull/149))
+- Find Bandcamp pages from the file's names ([#150](https://github.com/BradHudsonGrant/RESONANCE/pull/150))
+- One sortable list with no pages ([#153](https://github.com/BradHudsonGrant/RESONANCE/pull/153))
+
+### Fixed
+
+- Show selection actions without moving the table ([#120](https://github.com/BradHudsonGrant/RESONANCE/pull/120))
+- Look up one AcoustID fingerprint per request ([#152](https://github.com/BradHudsonGrant/RESONANCE/pull/152))
+
+### Faster
+
+- Keep startup UI-thread tasks under 16 ms ([#141](https://github.com/BradHudsonGrant/RESONANCE/pull/141))
+
+### Docs
+
+- Mark M2 v0.3.0 release complete ([#121](https://github.com/BradHudsonGrant/RESONANCE/pull/121))
+- Record a clean hour at a 256-frame buffer ([#140](https://github.com/BradHudsonGrant/RESONANCE/pull/140))
+
+### Tests
+
+- Wait for Prep to load before ticking tracks ([#156](https://github.com/BradHudsonGrant/RESONANCE/pull/156))
+
 ## 0.3.0, 18 November 2026
 
 ### Added
