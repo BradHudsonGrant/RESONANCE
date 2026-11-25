@@ -59,7 +59,7 @@
     {#if noBin === null}
       <p class="note">
         Their files go to the Recycle Bin, or the Trash, and leave the library. Collections,
-        favourites and tags are kept, and History can put everything back.
+        favourites and tags are kept, and Activity can put everything back.
       </p>
     {:else}
       <p class="note" role="alert">{noBin}</p>

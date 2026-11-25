@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { JournalOperation } from '../ipc/bindings/JournalOperation';
 import DeleteSheet from './DeleteSheet.svelte';
-import HistorySheet from './HistorySheet.svelte';
 
 HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) {
   this.open = true;
@@ -60,47 +59,5 @@ describe('DeleteSheet', () => {
     await fireEvent.click(within(sheet).getByRole('button', { name: 'Delete for good' }));
     await waitFor(() => expect(ondeleted).toHaveBeenCalledTimes(1));
     expect(deleteTracks).toHaveBeenLastCalledWith([3], true);
-  });
-});
-
-describe('HistorySheet', () => {
-  it('lists changes newest first and undoes the one picked', async () => {
-    const rolledBack: JournalOperation = {
-      ...moved,
-      id: 3,
-      kind: 'rename_files',
-      state: 'rolled_back',
-      summary: 'Renaming 1 file',
-      can_undo: false,
-      recovery: 'The app stopped part way, so the steps that had happened were put back.',
-    };
-    const undone: JournalOperation = { ...moved, state: 'undone', can_undo: false };
-    let operations = [moved, rolledBack];
-    const client = {
-      recentOperations: vi.fn(() => Promise.resolve(operations)),
-      undo: vi.fn(() => {
-        operations = [undone, rolledBack];
-        return Promise.resolve({ operation: undone, restored: 2 });
-      }),
-    };
-    const onundone = vi.fn();
-    render(HistorySheet, { open: true, client, onundone });
-
-    const list = await screen.findByRole('list', { name: 'Changes to files' });
-    const [first, second, ...rest] = within(list).getAllByRole('listitem');
-    if (!first || !second) throw new Error('expected 2 changes');
-    expect(rest).toHaveLength(0);
-    expect(first.textContent).toContain('Moved 2 files to the bin');
-    expect(second.textContent).toContain('Put back');
-    expect(second.textContent).toContain('The app stopped part way');
-    expect(within(second).queryByRole('button')).toBeNull();
-
-    await fireEvent.click(
-      within(first).getByRole('button', { name: 'Undo Moved 2 files to the bin' }),
-    );
-    await waitFor(() => expect(onundone).toHaveBeenCalledTimes(1));
-    expect(client.undo).toHaveBeenCalledWith(4);
-    await waitFor(() => expect(within(list).queryByRole('button', { name: /^Undo/ })).toBeNull());
-    expect(within(list).getAllByRole('listitem')[0]?.textContent).toContain('Undone');
   });
 });

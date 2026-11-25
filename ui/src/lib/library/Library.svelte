@@ -49,8 +49,6 @@
     onrename?: (scope: RenameScope, label: string) => void;
     /** Asks before moving the selected tracks' files to the bin. */
     ondelete?: (trackIds: number[]) => void;
-    /** Opens the history of changes to files, where each can be undone. */
-    onhistory?: () => void;
     onscan: () => void;
     ontogglefavourite?: (track: LibraryTrack) => void;
     onclearsearch?: () => void;
@@ -111,7 +109,6 @@
     onrelink,
     onrename,
     ondelete,
-    onhistory,
     onscan,
     ontogglefavourite,
     onclearsearch,
@@ -316,9 +313,6 @@
             >
               Rename files
             </Button>
-          {/if}
-          {#if onhistory}
-            <Button variant="quiet" onclick={onhistory}>History</Button>
           {/if}
           <div class="filter-action">
             <Tooltip
