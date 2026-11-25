@@ -1,26 +1,23 @@
 # Prep
 
-Prep is where new tracks get their tags. It works like an inbox: every track sits in one stage, and the job is to move tracks through them until nothing is left to review.
+Prep is where new tracks get their tags. Every track in the view sits in one list, and each one has a status.
 
-## Stages
+## Status
 
-The tabs across the top split the view into stages, each with a count.
+| Status       | What it means                                                                          |
+| ------------ | -------------------------------------------------------------------------------------- |
+| To review    | An online match's suggestions are waiting for a decision                               |
+| Not searched | No online search has run for the track. Fixes from its own tags or name may be waiting |
+| No match     | An online search ran and found nothing usable. Fixes from the file may be waiting      |
+| Done         | The track was matched and its suggestions have all been saved or skipped               |
 
-| Tab          | What it holds                                                                              |
-| ------------ | ------------------------------------------------------------------------------------------ |
-| To review    | Tracks with suggestions waiting for a decision, from an online match or from the file name |
-| Not searched | Tracks no online search has run for                                                        |
-| No match     | Tracks an online search ran for and found nothing usable                                   |
-| Done         | Matched tracks whose suggestions have all been saved or skipped                            |
-| All          | Every track in the view                                                                    |
+The rule that gives a track its status lives in `crates/core/src/prep.rs` (`PrepStage`). The toolbar sums the statuses up in a line, such as "36 to review · 395 not searched". Sorting by the Status column lists them in the order above, then the other way round. The core does that sort (`order_by_stage`), keeping the view's own order inside each stage.
 
-The rule that places a track in a stage lives in `crates/core/src/prep.rs` (`PrepStage`). Prep opens on the first tab with work in it: To review, then Not searched, then No match. After that the tab stays where the user puts it.
-
-**Find tracks** narrows any tab by name, and the filter beside it narrows to tracks missing one tag. A selection sent from Library shows as a button that clears it.
+**Find tracks** narrows the list by name, and the filter beside it narrows to tracks missing one tag. A selection sent from Library shows as a button that clears it.
 
 ## Finding matches
 
-**Find matches** searches every track in the current tab, or only the ticked tracks when any are ticked. The button names how many tracks it will search. While a search runs, a strip under the toolbar shows how many tracks are done, the rows being searched say Searching, and the rest of Prep stays usable. When it ends, the strip says how many tracks are ready to review and how many found nothing.
+**Find matches** searches every track not yet searched, or only the ticked tracks when any are ticked. The button names how many tracks it will search. While a search runs, a strip under the toolbar shows how many tracks are done, the rows being searched say Searching, and the rest of Prep stays usable. When it ends, the strip says how many tracks are ready to review and how many found nothing, and offers to list them first.
 
 A track the catalogues do not know, such as an edit sold only on Bandcamp, is looked up on the Bandcamp page its names point at: first the Bandcamp sellers that other tracks sharing its artist, remixer or mix name were matched to, then the remixer or the name in the mix, the artist, the label and the release named in the title, with the title as Bandcamp writes it in the address. An artist who sells under another name is found once one of their tracks is matched, by search or by a pasted link. Bandcamp's own search is not used: its rules for automated visitors exclude it.
 
@@ -28,11 +25,11 @@ A title that ends in the release it came from, such as `Track [Label Vol.4]`, is
 
 A track counts as searched once a search has run, even if one provider failed. The next search tries it again.
 
-The checkboxes are for working on many tracks at once. Moving between tabs keeps the ticks. Changing the filter or the Library selection clears them.
+The checkboxes are for working on many tracks at once. Sorting keeps the ticks. Changing the filter, the find text or the Library selection clears them.
 
 ## The list
 
-Each row shows the cover (the suggested one if there is one), title and artist, then Genre, Label and Year, then where the track stands: the match confidence and whether the audio or only the names matched, the number of changes waiting, or Not searched, No match or Done. An empty column shows a dash, and a missing artist, title or cover is named under the artist. Clicking a column header sorts by it, A to Z, then Z to A, then back to Prep's order. As the list narrows, Label goes first, then Genre and Year, and the missing tags move into the line under the artist. Saving or skipping a track moves it out of To review, and the next track takes its place.
+Each row shows the cover (the suggested one if there is one), title and artist, then Genre, Label and Year, then its status in two short lines. A match says whether the audio or only the names matched, then its confidence and how many suggestions wait, such as `100% · 3 to accept`. A track with only fixes read from its own tags or name says Not searched, then `2 fixes from filename`, so a tidy-up is never mistaken for a match. An empty column shows a dash, and a missing artist, title or cover is named under the artist. Clicking a column header sorts by it, A to Z, then Z to A, then back to Prep's order. Status sorts by stage. As the list narrows, Label goes first, then Genre and Year, and the missing tags move into the line under the artist. The order is fixed when the list loads or is sorted. Saving, skipping or searching changes a track's status in place, so nothing moves while the user works; sorting again brings the new order, and Show them first after a search does the same for new matches. When the open track leaves the view, the track that took its place opens. There are no pages. The list is as tall as every track in the view from the start, and only the rows in sight are drawn and fetched, so the scrollbar stays put and a long library stays quick.
 
 ## Review
 
@@ -54,22 +51,22 @@ If a file has changed or cannot be written, Prep lists it with the reason and ke
 
 ## Keyboard
 
-| Key                    | Action                                                                |
-| ---------------------- | --------------------------------------------------------------------- |
-| `2` or `Ctrl+2`        | Open Prep                                                             |
-| `↑` or `↓`             | Move between tracks                                                   |
-| `Shift+↑` or `Shift+↓` | Tick tracks while moving                                              |
-| `X`                    | Tick or untick this track                                             |
-| `Ctrl+A`               | Tick or untick every track in the tab                                 |
-| `Enter`                | Accept every suggestion, or search a track that has not been searched |
-| `S`                    | Skip this track's suggestions                                         |
-| `1` to `9`             | Choose that match                                                     |
-| `F`                    | Find matches for the ticked tracks, or this track                     |
-| `Shift+A`              | Save every suggestion for the ticked tracks                           |
-| `E` or `B`             | Edit tags                                                             |
-| `W`                    | Preview edits before writing them to the files                        |
-| `Space` on a track     | Preview it                                                            |
-| `Ctrl+Z`               | Undo the last save                                                    |
+| Key                    | Action                                                          |
+| ---------------------- | --------------------------------------------------------------- |
+| `2` or `Ctrl+2`        | Open Prep                                                       |
+| `↑` or `↓`             | Move between tracks                                             |
+| `Shift+↑` or `Shift+↓` | Tick tracks while moving                                        |
+| `X`                    | Tick or untick this track                                       |
+| `Ctrl+A`               | Tick or untick every track in the list                          |
+| `Enter`                | Accept every suggestion, or search the track when nothing waits |
+| `S`                    | Skip this track's suggestions or fixes                          |
+| `1` to `9`             | Choose that match                                               |
+| `F`                    | Find matches for the ticked tracks, or this track               |
+| `Shift+A`              | Save every suggestion for the ticked tracks                     |
+| `E` or `B`             | Edit tags                                                       |
+| `W`                    | Preview edits before writing them to the files                  |
+| `Space` on a track     | Preview it                                                      |
+| `Ctrl+Z`               | Undo the last save                                              |
 
 ## Layout
 

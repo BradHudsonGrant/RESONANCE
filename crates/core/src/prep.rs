@@ -4,6 +4,7 @@
 
 use crate::identify::{normalise_tags, parse_path};
 use crate::library::TagField;
+use crate::search::SortDirection;
 use crate::staging::{
     Proposal, ProposalStatus, StoredProposal, changing_proposals, normalise_value, title_with_mix,
 };
@@ -284,30 +285,57 @@ fn collapse_spaces_and_empty_brackets(text: &str) -> String {
 }
 
 /// Where a track stands in Prep. The order is the order a user works through them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PrepStage {
-    /// Suggestions are waiting for a decision, from a search or from the file's own name.
+    /// An online match's suggestions are waiting for a decision.
     Review,
-    /// No online search has run for the track yet.
+    /// No online search has run for the track yet. Tidy-ups read from its own tags or name may
+    /// be waiting, but nothing has been matched.
     NotSearched,
-    /// An online search ran and found nothing usable.
+    /// An online search ran and found nothing usable. Tidy-ups from the file may be waiting.
     NoMatch,
     /// Matched online and every suggestion has been saved or skipped.
     Done,
 }
 
 impl PrepStage {
-    /// Waiting suggestions come first, because they are the only stage with a decision to make.
+    /// Only an online match puts a track up for review. Tidy-ups read from the file alone do
+    /// not: a track with nothing but those is still waiting to be searched, and the list says so.
     pub fn of(has_pending: bool, searched_online: bool, matched_online: bool) -> Self {
-        if has_pending {
-            Self::Review
-        } else if !searched_online {
-            Self::NotSearched
-        } else if matched_online {
-            Self::Done
-        } else {
+        if matched_online {
+            if has_pending {
+                Self::Review
+            } else {
+                Self::Done
+            }
+        } else if searched_online {
             Self::NoMatch
+        } else {
+            Self::NotSearched
         }
+    }
+}
+
+/// The tags a DJ notices are missing, in the order a row names them. BPM and key come from
+/// analysis, so they are left out.
+pub const NOTICED_TAGS: [TagField; 5] = [
+    TagField::Artist,
+    TagField::Title,
+    TagField::Genre,
+    TagField::Label,
+    TagField::Year,
+];
+
+/// Groups tracks by stage, keeping the view's own order inside each stage. Ascending puts the
+/// tracks waiting for a decision first.
+pub fn order_by_stage(
+    ids: &mut [i64],
+    stage_of: impl Fn(i64) -> PrepStage,
+    direction: SortDirection,
+) {
+    match direction {
+        SortDirection::Asc => ids.sort_by_key(|&id| stage_of(id)),
+        SortDirection::Desc => ids.sort_by_key(|&id| std::cmp::Reverse(stage_of(id))),
     }
 }
 
@@ -592,13 +620,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prep_stage_puts_waiting_suggestions_first() {
-        assert_eq!(PrepStage::of(true, false, false), PrepStage::Review);
-        assert_eq!(PrepStage::of(true, true, false), PrepStage::Review);
+    fn only_an_online_match_puts_a_track_up_for_review() {
+        assert_eq!(PrepStage::of(true, false, false), PrepStage::NotSearched);
+        assert_eq!(PrepStage::of(true, true, false), PrepStage::NoMatch);
         assert_eq!(PrepStage::of(true, true, true), PrepStage::Review);
         assert_eq!(PrepStage::of(false, false, false), PrepStage::NotSearched);
         assert_eq!(PrepStage::of(false, true, false), PrepStage::NoMatch);
         assert_eq!(PrepStage::of(false, true, true), PrepStage::Done);
+    }
+
+    #[test]
+    fn ordering_by_stage_groups_tracks_and_keeps_their_order_inside_a_group() {
+        let stage_of = |id: i64| match id % 3 {
+            0 => PrepStage::Review,
+            1 => PrepStage::NotSearched,
+            _ => PrepStage::Done,
+        };
+        let mut ids = vec![1, 2, 3, 4, 5, 6];
+        order_by_stage(&mut ids, stage_of, SortDirection::Asc);
+        assert_eq!(ids, [3, 6, 1, 4, 2, 5]);
+        order_by_stage(&mut ids, stage_of, SortDirection::Desc);
+        assert_eq!(ids, [2, 5, 1, 4, 3, 6]);
     }
 
     #[test]

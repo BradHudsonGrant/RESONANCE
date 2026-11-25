@@ -581,6 +581,21 @@ pub fn is_viable_alternative(top: &RankedCandidate, alt: &RankedCandidate) -> bo
     true
 }
 
+/// The stored matches worth showing the user, by position: the best, the one they picked, and
+/// any alternative that is relevant beside the best.
+pub fn visible_candidates(ranked: &[RankedCandidate], selected: usize) -> Vec<usize> {
+    let Some(top) = ranked.first() else {
+        return Vec::new();
+    };
+    ranked
+        .iter()
+        .enumerate()
+        .filter(|(index, item)| {
+            *index == 0 || *index == selected || is_viable_alternative(top, item)
+        })
+        .map(|(index, _)| index)
+        .collect()
+}
 /// Keeps only viable identifications and relevant alternatives; drops low-confidence false
 /// positives and unrelated sibling tracks from the same release.
 pub fn retain_viable_candidates(ranked: Vec<RankedCandidate>) -> Vec<RankedCandidate> {

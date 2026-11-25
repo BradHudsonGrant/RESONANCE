@@ -346,3 +346,32 @@ fn tracks_in_same_release_narrows_to_exact_folder_without_prefix_leak() {
     );
     let _ = &mut db;
 }
+
+#[test]
+fn only_a_suggestion_the_user_can_take_keeps_a_track_waiting() {
+    let mut db = library(&[
+        scanned("A.flac", &[(TagField::Title, "One")]),
+        scanned("B.flac", &[(TagField::Title, "Two")]),
+        scanned("C.flac", &[(TagField::Title, "Three")]),
+    ]);
+    let ids = track_ids(&db);
+    db.store_proposals(ids[0], &[proposal(TagField::Label, "Label", 0.9)])
+        .unwrap();
+    db.store_proposals(ids[1], &[proposal(TagField::Mix, "Dub", 0.9)])
+        .unwrap();
+    db.set_user_tags(&[ids[2]], &[(TagField::Genre, Some("House".to_owned()))])
+        .unwrap();
+    db.store_proposals(ids[2], &[proposal(TagField::Genre, "Techno", 0.9)])
+        .unwrap();
+
+    let facts = db.prep_stage_facts().unwrap();
+    assert!(facts.pending.contains(&ids[0]));
+    assert!(
+        !facts.pending.contains(&ids[1]),
+        "no file holds a mix of its own"
+    );
+    assert!(
+        !facts.pending.contains(&ids[2]),
+        "the user's own genre is kept"
+    );
+}

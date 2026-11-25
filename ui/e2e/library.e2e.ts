@@ -1390,12 +1390,14 @@ test('a batch of 50 mixed files goes from untagged to tagged in Prep using the k
     await page.setViewportSize({ width: 1586, height: 992 });
     await page.keyboard.press('Shift+A');
     await expect(prep.getByText('Saved to 50 files')).toBeVisible({ timeout: 30_000 });
-    await expect(prep.getByRole('heading', { name: 'No tracks missing artist' })).toBeVisible();
+    // Saved tracks keep their places in the list, now showing the artist they were missing.
+    await expect(prep.locator('.row .artist').first()).toContainText('Kaden');
     expect(files.every((file) => readFileSync(file).includes(id3ArtistFrame))).toBe(true);
     await prep.getByRole('button', { name: 'Undo save' }).press('Enter');
     await expect(prep.getByText('Restored 50 files')).toBeVisible({ timeout: 30_000 });
     expect(files.every((file) => !readFileSync(file).includes(id3ArtistFrame))).toBe(true);
-    await selectAll.press('Space');
+    // The tracks stayed in the list through the save and the undo, so they are still ticked.
+    await expect(prep.getByText('50 ticked')).toBeVisible();
     await prep.getByRole('button', { name: 'Save ticked' }).press('Enter');
     await expect(prep.getByText('Saved to 50 files')).toBeVisible({ timeout: 30_000 });
 

@@ -10,14 +10,14 @@ import type { StagedField } from '../ipc/bindings/StagedField';
 import type { TagName } from '../ipc/bindings/TagName';
 import type { TrackCandidateArtwork } from '../ipc/bindings/TrackCandidateArtwork';
 import Prep, { type PrepClient } from './Prep.svelte';
+import { keepPlaces, nextActive, rowsToFetch } from './prep-order';
 import {
   basisSentence,
-  firstWorkingTab,
   formatSaveNotice,
   lengthDifference,
   missingNow,
   rowStatus,
-  stillMissing,
+  stageSummary,
 } from './prep-view';
 
 HTMLElement.prototype.showPopover ??= () => {};
@@ -97,6 +97,7 @@ function makeItem(index: number, stage: PrepStageName = 'review'): PrepItem {
   const review = stage === 'review';
   return {
     track,
+    missing: ['artist', 'title', 'genre', 'label', 'year'],
     review_token: 'review-' + track.id,
     fields: makeFields(
       review
@@ -129,27 +130,31 @@ function makeItem(index: number, stage: PrepStageName = 'review'): PrepItem {
 function makeClient(items: PrepItem[]) {
   const inStage = (stage: PrepStageName | null) =>
     items.filter((item) => stage === null || item.stage === stage);
-  const count = (stage: PrepStageName) => items.filter((item) => item.stage === stage).length;
+  const stageRank: PrepStageName[] = ['review', 'not_searched', 'no_match', 'done'];
   const client = {
     trackIds: vi.fn(async (_query, _ids, stage: PrepStageName | null) =>
       inStage(stage).map((item) => item.track.id),
     ),
-    prepPage: vi.fn(async (_query, _ids, stage: PrepStageName | null, offset, limit) => {
-      const shown = inStage(stage);
+    prepOrder: vi.fn(async (_query, ids: number[] | null, byStage: 'asc' | 'desc' | null) => {
+      let shown = ids ? items.filter((item) => ids.includes(item.track.id)) : [...items];
+      if (byStage) {
+        const rank = (item: PrepItem) => stageRank.indexOf(item.stage);
+        shown = shown.sort((a, b) => (byStage === 'asc' ? rank(a) - rank(b) : rank(b) - rank(a)));
+      }
+      const count = (stage: PrepStageName) => shown.filter((item) => item.stage === stage).length;
       return {
-        total: shown.length,
-        offset,
+        ids: shown.map((item) => item.track.id),
         stages: {
           review: count('review'),
           not_searched: count('not_searched'),
           no_match: count('no_match'),
           done: count('done'),
         },
-        items: shown.slice(offset, offset + limit),
-        unwritten_tracks: 0,
-        last_operation: null,
       };
     }),
+    prepItems: vi.fn(async (ids: number[]) =>
+      ids.flatMap((id) => items.filter((item) => item.track.id === id)),
+    ),
     acceptAndWrite: vi.fn(async (ids: number[]) => ({
       written: ids.length,
       library_fields: 0,
@@ -194,17 +199,49 @@ function makeClient(items: PrepItem[]) {
 }
 
 describe('Prep', () => {
-  it('opens on the first tab with work in it and shows a count on every tab', async () => {
+  it('lists every track in one list with a summary of where they stand', async () => {
     const items = [makeItem(0, 'not_searched'), makeItem(1), makeItem(2, 'no_match')];
     const client = makeClient(items);
     render(Prep, { client });
-    const review = await screen.findByRole('tab', { name: /To review/ });
-    await waitFor(() => expect(review.getAttribute('aria-selected')).toBe('true'));
-    expect(client.prepPage).toHaveBeenLastCalledWith(null, null, 'review', 0, 50);
-    expect(screen.getByRole('tab', { name: /Not searched/ }).textContent).toContain('1');
-    expect(screen.getByRole('tab', { name: /All/ }).textContent).toContain('3');
-    expect(await screen.findByText('94%', { selector: '.confidence' })).toBeTruthy();
-    expect(screen.getByText(/The audio fingerprint matches/)).toBeTruthy();
+    await waitFor(() =>
+      expect(document.querySelector('.summary')?.textContent).toBe(
+        '1 to review · 1 not searched · 1 with no match',
+      ),
+    );
+    expect(screen.queryByRole('tab')).toBeNull();
+    expect(document.querySelectorAll('.row')).toHaveLength(3);
+    expect(screen.getByText('Not searched online yet')).toBeTruthy();
+  });
+
+  it('keeps every track in its place when a save changes its status', async () => {
+    const items = [makeItem(0, 'not_searched'), makeItem(1), makeItem(2, 'not_searched')];
+    const client = makeClient(items);
+    render(Prep, { client });
+    const titles = () =>
+      [...document.querySelectorAll('.row .title')].map((node) => node.textContent);
+    await screen.findByText('Not searched online yet');
+    const before = titles();
+    await fireEvent.click(document.querySelectorAll<HTMLButtonElement>('.track-name')[1]!);
+    items[1] = { ...items[1]!, stage: 'done', fields: makeFields({}), pending_fields: 0 };
+    await fireEvent.click(await screen.findByRole('button', { name: 'Accept all' }));
+    await waitFor(() => expect(client.acceptAndWrite).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Accept all' })).toBeNull());
+    expect(titles()).toEqual(before);
+  });
+
+  it('sorts by status with work first, then the other way', async () => {
+    const items = [makeItem(0, 'done'), makeItem(1, 'not_searched'), makeItem(2)];
+    const client = makeClient(items);
+    render(Prep, { client });
+    await waitFor(() => expect(document.querySelectorAll('.row')).toHaveLength(3));
+    await fireEvent.click(screen.getByRole('button', { name: 'Sort by status' }));
+    await waitFor(() =>
+      expect(document.querySelector('.row .status')?.getAttribute('data-stage')).toBe('review'),
+    );
+    await fireEvent.click(screen.getByRole('button', { name: /Sort by status/ }));
+    await waitFor(() =>
+      expect(document.querySelector('.row .status')?.getAttribute('data-stage')).toBe('done'),
+    );
   });
 
   it('finds matches for every track in the tab without ticking any', async () => {
@@ -305,10 +342,10 @@ describe('Prep', () => {
     const view = render(Prep, { client });
     await fireEvent.click(await screen.findByRole('button', { name: 'Find matches for 2' }));
     expect(await screen.findByText(/Search finished for/)).toBeTruthy();
-    expect(client.trackIds).toHaveBeenCalledWith(
+    expect(client.prepOrder).toHaveBeenCalledWith(
       null,
       [items[0]!.track.id, items[1]!.track.id],
-      'review',
+      null,
     );
     await view.rerender({
       client,
@@ -396,13 +433,13 @@ describe('Prep', () => {
     );
   });
 
-  it('ticks every track in the tab across pages', async () => {
+  it('ticks every track in the view, drawn or not', async () => {
     const items = Array.from({ length: 120 }, (_, i) => makeItem(i));
     const client = makeClient(items);
     render(Prep, { client });
     await fireEvent.click(await screen.findByRole('checkbox', { name: 'Select all tracks' }));
-    await waitFor(() => expect(client.trackIds).toHaveBeenCalledWith(null, null, 'review'));
     expect(await screen.findByText('120 ticked')).toBeTruthy();
+    expect(document.querySelectorAll('.row').length).toBeLessThan(120);
     await fireEvent.click(screen.getByRole('button', { name: 'Save ticked' }));
     await waitFor(() =>
       expect(client.acceptAndWrite).toHaveBeenCalledWith(
@@ -420,34 +457,98 @@ describe('Prep', () => {
       target: { value: 'artwork' },
     });
     await waitFor(() =>
-      expect(client.prepPage).toHaveBeenCalledWith(
+      expect(client.prepOrder).toHaveBeenCalledWith(
         {
           text: 'crate',
           filters: [{ any_of: [{ column: 'artwork', condition: { op: 'missing' } }] }],
         },
         [1, 2],
-        expect.anything(),
-        0,
-        50,
+        null,
       ),
     );
+  });
+
+  it('accepts the fixes with Enter before it searches a track not yet searched', async () => {
+    const items = [{ ...makeItem(0), stage: 'not_searched' as const, candidates: [] }];
+    const client = makeClient(items);
+    render(Prep, { client });
+    await screen.findByRole('button', { name: 'Accept 3 changes' });
+    await fireEvent.keyDown(window, { key: 'Enter' });
+    await waitFor(() => expect(client.acceptAndWrite).toHaveBeenCalled());
+    expect(client.identifyOnline).not.toHaveBeenCalled();
+  });
+
+  it('moves new matches to the top even when already sorted by status', async () => {
+    const items = [makeItem(0, 'not_searched'), makeItem(1, 'not_searched')];
+    const client = makeClient(items);
+    client.identifyOnline.mockImplementationOnce(async () => {
+      items[1] = { ...items[1]!, stage: 'review' };
+      return {
+        active: [],
+        recent: [{ id: 9, kind: 'identify_online', status: 'done' }],
+        mix_backoff_active: false,
+      } as never;
+    });
+    render(Prep, { client });
+    await fireEvent.click(await screen.findByRole('button', { name: 'Sort by status' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Find matches for 2' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Show them first' }));
+    await waitFor(() =>
+      expect(document.querySelector('.row .title')?.textContent).toBe(items[1]!.track.title),
+    );
+  });
+
+  it('drops a track the core no longer has instead of asking for it again', async () => {
+    const items = [makeItem(0), makeItem(1)];
+    const client = makeClient(items);
+    client.prepItems.mockImplementation(async (ids: number[]) =>
+      ids.flatMap((id) => items.filter((item) => item.track.id === id && item !== items[1])),
+    );
+    render(Prep, { client });
+    await waitFor(() => expect(document.querySelectorAll('.row')).toHaveLength(1));
+    const calls = client.prepItems.mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(client.prepItems.mock.calls.length).toBe(calls);
+  });
+});
+
+describe('prep order', () => {
+  it('keeps every place and adds new tracks at the end', () => {
+    expect(keepPlaces([3, 1, 2], [1, 2, 4, 3])).toEqual([3, 1, 2, 4]);
+    expect(keepPlaces([3, 1, 2], [2, 3])).toEqual([3, 2]);
+  });
+
+  it('opens the track that took the place of one that left', () => {
+    expect(nextActive([5, 6, 7], [5, 7], 6)).toBe(7);
+    expect(nextActive([5, 6, 7], [5, 6], 7)).toBe(6);
+    expect(nextActive([5, 6], [5, 6], 6)).toBe(6);
+    expect(nextActive([5], [], 5)).toBeNull();
+    expect(nextActive([], [8, 9], null)).toBe(8);
+  });
+
+  it('fetches the window and the open track', () => {
+    expect(rowsToFetch([1, 2, 3, 4, 5], 0, 2, 5)).toEqual([1, 2, 5]);
+    expect(rowsToFetch([1, 2, 3], 0, 2, 1)).toEqual([1, 2]);
   });
 });
 
 describe('prep view', () => {
-  it('opens on review, then unsearched, then no match', () => {
-    const none = { review: 0, not_searched: 0, no_match: 0, done: 4 };
-    expect(firstWorkingTab({ ...none, review: 1, not_searched: 2 })).toBe('review');
-    expect(firstWorkingTab({ ...none, not_searched: 2, no_match: 1 })).toBe('not_searched');
-    expect(firstWorkingTab({ ...none, no_match: 1 })).toBe('no_match');
-    expect(firstWorkingTab(none)).toBe('all');
+  it('sums up where the tracks stand, leaving out empty stages', () => {
+    expect(stageSummary({ review: 36, not_searched: 1395, no_match: 0, done: 2 })).toEqual([
+      { number: '36', words: 'to review' },
+      { number: '1,395', words: 'not searched' },
+      { number: '2', words: 'done' },
+    ]);
+    expect(stageSummary({ review: 0, not_searched: 0, no_match: 0, done: 0 })).toEqual([]);
   });
 
   it('describes each row by its stage', () => {
     expect(rowStatus(makeItem(0))).toEqual({
       primary: 'Audio match',
-      secondary: '3 changes',
-      confidence: '94%',
+      secondary: [
+        { number: '94%', words: '' },
+        { number: '3', words: 'to accept' },
+      ],
     });
     const base = makeItem(1);
     const local = {
@@ -456,12 +557,16 @@ describe('prep view', () => {
       evidence: null,
       fields: base.fields.map((field) => ({ ...field, provider: field.provider && 'filename' })),
     };
-    expect(rowStatus(local).primary).toBe('From filename');
+    expect(rowStatus({ ...local, stage: 'not_searched', online_checked: false })).toEqual({
+      primary: 'Not searched',
+      secondary: [{ number: '3', words: 'fixes from filename' }],
+    });
     expect(rowStatus({ ...makeItem(2, 'no_match'), needs_url: true })).toEqual({
       primary: 'No match',
-      secondary: 'Needs a release link',
-      confidence: null,
+      secondary: [{ words: 'Paste a release link' }],
     });
+    const lockedOnly = { ...makeItem(3), candidates: [], fields: makeFields({}) };
+    expect(rowStatus(lockedOnly)).toEqual({ primary: 'Matched online', secondary: [] });
   });
 
   it('words the evidence for a DJ', () => {
@@ -471,9 +576,9 @@ describe('prep view', () => {
     expect(lengthDifference(null)).toBe('');
   });
 
-  it('lists only the core tags still missing after the suggestions', () => {
-    expect(stillMissing(makeItem(0))).toEqual(['Artwork', 'Genre', 'Year']);
+  it('names the missing tags with the cover after the artist and title', () => {
     expect(missingNow(makeItem(0))).toEqual(['artist', 'title', 'cover', 'genre', 'label', 'year']);
+    expect(missingNow({ ...makeItem(0), missing: ['genre'] })).toEqual(['cover', 'genre']);
   });
 
   it('formats save notices with digits', () => {

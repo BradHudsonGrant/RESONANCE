@@ -2,9 +2,6 @@
   import { tick, untrack } from 'svelte';
   import Button from '../design/Button.svelte';
   import Icon from '../design/Icon.svelte';
-  import SegmentedTabs from '../design/SegmentedTabs.svelte';
-  import Thumb from '../design/Thumb.svelte';
-  import { artworkUrl } from '../ipc/artwork';
   import type { AcceptedTagWriteReport } from '../ipc/bindings/AcceptedTagWriteReport';
   import type { AcceptedProposals } from '../ipc/bindings/AcceptedProposals';
   import type { ActivityJob } from '../ipc/bindings/ActivityJob';
@@ -13,7 +10,7 @@
   import type { FileTagWrite } from '../ipc/bindings/FileTagWrite';
   import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
   import type { PrepItem } from '../ipc/bindings/PrepItem';
-  import type { PrepPageSnapshot } from '../ipc/bindings/PrepPageSnapshot';
+  import type { PrepOrderSnapshot } from '../ipc/bindings/PrepOrderSnapshot';
   import type { PrepStageCounts } from '../ipc/bindings/PrepStageCounts';
   import type { PrepStageName } from '../ipc/bindings/PrepStageName';
   import type { RenameScope } from '../ipc/bindings/RenameScope';
@@ -25,35 +22,28 @@
   import type { UndoReport } from '../ipc/bindings/UndoReport';
   import BatchTagSheet from './BatchTagSheet.svelte';
   import PrepReview from './PrepReview.svelte';
+  import PrepTrackList from './PrepTrackList.svelte';
   import WriteTagsSheet from './WriteTagsSheet.svelte';
+  import { keepPlaces, nextActive, rowsToFetch } from './prep-order';
   import {
-    LIST_COLUMNS,
     MISSING_FIELDS,
     MISSING_LABELS,
-    STAGE_TABS,
     buildMissingQuery,
     nextListSort,
     withFindText,
     withListSort,
     createSelectionSet,
-    emptyStageText,
-    firstWorkingTab,
     formatSaveNotice,
     formatUrlLookupNotice,
     formatWriteNotice,
     intersectSelection,
-    missingNow,
     pruneSelection,
-    rowStatus,
-    stageCount,
+    reviewableFields,
+    stageSummary,
     type ListColumn,
     type ListSort,
     type MissingField,
-    type StageTab,
   } from './prep-view';
-
-  /** Columns whose gaps the row already shows as an empty cell. */
-  const COLUMN_GAPS = new Set(['genre', 'label', 'year']);
 
   export interface PrepClient {
     trackIds: (
@@ -61,13 +51,14 @@
       trackIds: number[] | null,
       stage: PrepStageName | null,
     ) => Promise<number[]>;
-    prepPage: (
+    /** The view's order and stage counts; `byStage` groups it by stage instead. */
+    prepOrder: (
       query: TrackQuery | null,
       trackIds: number[] | null,
-      stage: PrepStageName | null,
-      offset: number,
-      limit: number,
-    ) => Promise<PrepPageSnapshot>;
+      byStage: 'asc' | 'desc' | null,
+    ) => Promise<PrepOrderSnapshot>;
+    /** The rows for these tracks, in the order given. */
+    prepItems: (trackIds: number[]) => Promise<PrepItem[]>;
     acceptAndWrite: (
       trackIds: number[],
       fields: TagName[] | null,
@@ -127,23 +118,25 @@
     onfocustrack,
   }: Props = $props();
 
-  const pageSize = 50;
   const noCounts: PrepStageCounts = { review: 0, not_searched: 0, no_match: 0, done: 0 };
   let missing = $state<MissingField | ''>('');
-  let stage = $state<StageTab>('all');
-  // The first load in a scope opens the tab with work in it; after that the user's choice stands.
-  let stageChosen = false;
   let counts = $state<PrepStageCounts>(noCounts);
-  let totalCount = $state(0);
-  let items = $state.raw<PrepItem[]>([]);
-  let page = $state(0);
+  // The order of the whole view, fixed when the view loads or the user sorts. Saving or
+  // searching refreshes rows in place, so a track never jumps while it is being worked on.
+  let order = $state.raw<number[]>([]);
+  const totalCount = $derived(order.length);
+  // Tracks fetched so far, by ID. Only the rows in view are drawn, and the list is as tall as the
+  // whole view from the start, so the scrollbar never jumps as more rows arrive.
+  let byId = $state.raw<Readonly<Record<number, PrepItem>>>({});
+  // Plain bookkeeping for rows already requested, and for rows the core no longer has, which are
+  // dropped from the list rather than asked for again. Nothing renders from either.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const fetching = new Set<number>();
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const gone = new Set<number>();
   let activeId = $state<number | null>(null);
-  let activePosition = 0;
   const selected = createSelectionSet();
   let selectionVersion = $state(0);
-  let selectingAll = $state(false);
-  let selectAllPromise: Promise<void> | null = null;
-  let pendingSelectToggles: number[] = [];
   let loading = $state(true);
   let loadError = $state('');
   let notice = $state('');
@@ -165,39 +158,32 @@
   let history = $state.raw<SavedChange[]>([]);
   const lastAction = $derived(history.at(-1) ?? null);
   let workspace: HTMLElement;
+  let list = $state<ReturnType<typeof PrepTrackList>>();
   let review = $state<ReturnType<typeof PrepReview>>();
   let width = $state(0);
   let reviewing = $state(false);
   const compact = $derived(width > 0 && width <= 800);
   let keyboardTarget: number | null = null;
-  let pendingEdge = $state<'first' | 'last' | null>(null);
-  let pendingShiftSelect = false;
   let reloading = $state(false);
-  let scopeGeneration = 0;
   let fetchGeneration = 0;
   let suppressRevisions = 0;
   let lastOwnWriteAt = 0;
   let prevRevision = untrack(() => revision);
   let prevRefresh = 0;
-  let prevPage = 0;
 
-  const stageFilter = $derived<PrepStageName | null>(stage === 'all' ? null : stage);
   let findText = $state('');
   let appliedFind = $state('');
   let findTimer: ReturnType<typeof setTimeout> | undefined;
   let listSort = $state<ListSort | null>(null);
+  // Bumped to sort again by the same column, such as after a search finds new matches.
+  let sortGeneration = $state(0);
   const filterQuery = $derived(withFindText(buildMissingQuery(batchQuery, missing), appliedFind));
   const scopeQuery = $derived(withListSort(filterQuery, listSort));
-  const current = $derived(items.find((item) => item.track.id === activeId) ?? null);
+  const current = $derived(activeId == null ? null : (byId[activeId] ?? null));
   const detailOpen = $derived(compact && reviewing && current !== null);
   const selectedCount = $derived((void selectionVersion, selected.size));
-  const pageCount = $derived(Math.ceil(totalCount / pageSize));
-  const searchBusy = $derived(busy || !!activeOnlineJob || selectingAll);
-  const viewCount = $derived(stageCount(counts, 'all'));
-  const tabs = $derived(
-    STAGE_TABS.map((tab) => ({ id: tab.id, label: tab.label, count: stageCount(counts, tab.id) })),
-  );
-  const findCount = $derived(selectedCount || (stage === 'done' ? 0 : totalCount));
+  const searchBusy = $derived(busy || !!activeOnlineJob);
+  const findCount = $derived(selectedCount || counts.not_searched);
   const toolsScopeLabel = $derived(
     selectedCount > 0
       ? selectedCount === 1
@@ -208,9 +194,9 @@
         : 'This track',
   );
   let scopeKey = '';
+  let sortKey = '';
   let finishedJob = untrack(() => recentOnlineJob?.id ?? null);
-  // The stage and the sort are left out: moving between tabs or reordering keeps the ticks,
-  // which stay valid across them.
+  // The sort is left out: reordering keeps the ticks, which stay valid.
   const contextKey = $derived(JSON.stringify([filterQuery, batchTrackIds]));
 
   function typeFind(value: string) {
@@ -221,7 +207,12 @@
 
   function sortBy(column: ListColumn) {
     listSort = nextListSort(listSort, column);
-    page = 0;
+  }
+
+  /** Sorts by status again even when it already is, so new matches move to the top. */
+  function showMatchesFirst() {
+    listSort = { column: 'status', direction: 'asc' };
+    sortGeneration++;
   }
 
   function markOwnWrite() {
@@ -229,121 +220,93 @@
     lastOwnWriteAt = Date.now();
   }
 
+  /** The view's order and counts: the query's own sort, or grouped by stage in the core. */
+  function viewOrder(): Promise<PrepOrderSnapshot> {
+    const byStage = listSort?.column === 'status' ? listSort.direction : null;
+    return client.prepOrder(byStage ? filterQuery : scopeQuery, batchTrackIds, byStage);
+  }
+
+  /** Items for these tracks, in the order given. Tracks the core no longer has are noted. */
+  async function itemsFor(ids: number[]): Promise<PrepItem[]> {
+    const chunks: number[][] = [];
+    for (let start = 0; start < ids.length; start += 500)
+      chunks.push(ids.slice(start, start + 500));
+    const items = (await Promise.all(chunks.map((chunk) => client.prepItems(chunk)))).flat();
+    const found = new Set(items.map((item) => item.track.id));
+    for (const id of ids) if (!found.has(id)) gone.add(id);
+    return items;
+  }
+
   $effect(() => {
     const key = contextKey;
-    const query = scopeQuery;
-    const scope = batchTrackIds;
-    const wanted = stageFilter;
-    const currentPage = page;
+    const sorting = JSON.stringify([listSort, sortGeneration]);
     const currentRefresh = refresh;
     const currentRevision = revision;
+    void scopeQuery;
 
+    const newScope = key !== scopeKey;
+    const newSort = sorting !== sortKey;
     const onlyRevisionChanged =
-      key === scopeKey &&
-      currentPage === prevPage &&
-      currentRefresh === prevRefresh &&
-      currentRevision !== prevRevision;
+      !newScope && !newSort && currentRefresh === prevRefresh && currentRevision !== prevRevision;
     prevRevision = currentRevision;
     prevRefresh = currentRefresh;
-    prevPage = currentPage;
     if (onlyRevisionChanged && suppressRevisions > 0 && Date.now() - lastOwnWriteAt < 1500) {
       suppressRevisions--;
       return;
     }
-    if (onlyRevisionChanged) {
-      suppressRevisions = 0;
-    }
+    if (onlyRevisionChanged) suppressRevisions = 0;
 
     const request = ++fetchGeneration;
     reloading = true;
+    clearTimeout(fetchTimer);
+    const hadFocus = untrack(() => !!workspace?.contains(document.activeElement));
     untrack(() => {
-      if (scopeKey !== key) {
+      if (newScope) {
         scopeKey = key;
-        scopeGeneration++;
         selected.clear();
         selectionVersion++;
-        selectingAll = false;
-        selectAllPromise = null;
-        totalCount = 0;
-        items = [];
-        page = 0;
-        prevPage = 0;
+        order = [];
+        byId = {};
         activeId = null;
-        activePosition = 0;
         reviewing = false;
         chosenCoverByTrack = {};
         loading = true;
         keyboardTarget = null;
-        pendingEdge = null;
-        pendingShiftSelect = false;
-      } else if (!items.length) {
+      } else if (!order.length) {
         loading = true;
       }
+      sortKey = sorting;
       loadError = '';
     });
 
-    const offset = untrack(() => page) * pageSize;
-    void client
-      .prepPage(query, scope, wanted, offset, pageSize)
-      .then((result) => {
+    // A new view draws from the top; anything else refreshes the rows on screen.
+    const shown = untrack(() => (newScope || !list ? { start: 0, end: 40 } : list.range()));
+    const previous = untrack(() => order);
+    const previousActive = untrack(() => activeId);
+    const reorder = newScope || newSort || onlyRevisionChanged;
+    void (async () => {
+      const next = reorder
+        ? await viewOrder()
+        : {
+            ids: previous,
+            stages: (await client.prepOrder(scopeQuery, batchTrackIds, null)).stages,
+          };
+      gone.clear();
+      // Only a new view or a new sort reorders; a library change keeps every place.
+      const ids = reorder && !newScope && !newSort ? keepPlaces(previous, next.ids) : next.ids;
+      const active = nextActive(previous, ids, previousActive);
+      const loaded = await itemsFor(rowsToFetch(ids, shown.start, shown.end, active));
+      return { ids: ids.filter((id) => !gone.has(id)), loaded, stages: next.stages, active };
+    })()
+      .then(({ ids, loaded, stages, active }) => {
         if (request !== fetchGeneration) return;
-        counts = result.stages;
-        if (!stageChosen) {
-          stageChosen = true;
-          const opening = firstWorkingTab(result.stages);
-          if (opening !== stage) {
-            stage = opening;
-            return;
-          }
-        }
-        totalCount = result.total;
-        if (result.total > 0 && offset >= result.total) {
-          page = Math.max(0, Math.ceil(result.total / pageSize) - 1);
-          return;
-        }
-        items = result.items;
-        if (viewCount === 0) {
-          if (selected.size > 0) {
-            selected.clear();
-            selectionVersion++;
-          }
-        } else if (
-          wanted === null &&
-          page === 0 &&
-          result.items.length === result.total &&
-          selected.size > 0 &&
-          pruneSelection(
-            selected,
-            result.items.map((item) => item.track.id),
-          )
-        ) {
-          selectionVersion++;
-        }
-
-        if (pendingEdge && result.items.length > 0) {
-          const edgeItem =
-            pendingEdge === 'first' ? result.items[0] : result.items[result.items.length - 1];
-          pendingEdge = null;
-          const shiftSelect = pendingShiftSelect;
-          pendingShiftSelect = false;
-          if (edgeItem) {
-            if (shiftSelect && !selected.has(edgeItem.track.id)) {
-              selected.add(edgeItem.track.id);
-              selectionVersion++;
-            }
-            setActive(edgeItem.track.id);
-            keyboardTarget = edgeItem.track.id;
-          }
-        } else {
-          pendingEdge = null;
-          pendingShiftSelect = false;
-          if (!items.some((item) => item.track.id === activeId)) {
-            // A saved track leaves its tab, so the next one moves up into its place.
-            const next = items[Math.min(activePosition, items.length - 1)] ?? null;
-            const hadFocus = workspace.contains(document.activeElement);
-            setActive(next?.track.id ?? null);
-            if (next && hadFocus) keyboardTarget = next.track.id;
-          }
+        order = ids;
+        counts = stages;
+        byId = Object.fromEntries(loaded.map((item) => [item.track.id, item]));
+        if (selected.size > 0 && pruneSelection(selected, ids)) selectionVersion++;
+        if (active !== activeId) {
+          setActive(active);
+          if (hadFocus && active != null) keyboardTarget = active;
         }
         reloading = false;
         loading = false;
@@ -351,16 +314,40 @@
       })
       .catch((err: unknown) => {
         if (request !== fetchGeneration) return;
-        pendingEdge = null;
-        pendingShiftSelect = false;
-        items = [];
-        totalCount = 0;
+        byId = {};
+        order = [];
         activeId = null;
         loadError = message(err);
         reloading = false;
         loading = false;
       });
   });
+
+  // Rows that scroll into view are fetched in one request after scrolling settles briefly.
+  let fetchTimer: ReturnType<typeof setTimeout> | undefined;
+  function fetchWindow(ids: number[]) {
+    if (reloading) return;
+    const missing = ids.filter((id) => !(id in byId) && !fetching.has(id) && !gone.has(id));
+    if (!missing.length) return;
+    clearTimeout(fetchTimer);
+    fetchTimer = setTimeout(() => void fetchRows(missing), 60);
+  }
+
+  async function fetchRows(ids: number[]) {
+    const request = fetchGeneration;
+    for (const id of ids) fetching.add(id);
+    try {
+      const next = await itemsFor(ids);
+      if (request !== fetchGeneration) return;
+      byId = { ...byId, ...Object.fromEntries(next.map((item) => [item.track.id, item])) };
+      if (ids.some((id) => gone.has(id))) order = order.filter((id) => !gone.has(id));
+      void focusKeyboardRow();
+    } catch (err) {
+      notice = message(err);
+    } finally {
+      for (const id of ids) fetching.delete(id);
+    }
+  }
 
   $effect(() => {
     const job = recentOnlineJob;
@@ -387,11 +374,12 @@
       return;
     }
     try {
-      const [review, noMatch] = await Promise.all([
-        client.trackIds(scopeQuery, searched, 'review'),
-        client.trackIds(scopeQuery, searched, 'no_match'),
-      ]);
-      searchSummary = { searched: searched.length, review: review.length, noMatch: noMatch.length };
+      const { stages } = await client.prepOrder(scopeQuery, searched, null);
+      searchSummary = {
+        searched: searched.length,
+        review: stages.review,
+        noMatch: stages.no_match,
+      };
     } catch (err) {
       notice = message(err);
     }
@@ -401,85 +389,33 @@
   }
   function setActive(id: number | null) {
     activeId = id;
-    const position = items.findIndex((item) => item.track.id === id);
-    if (position >= 0) activePosition = position;
   }
-  function chooseStage(id: string) {
-    stageChosen = true;
-    stage = id as StageTab;
-    page = 0;
-    activePosition = 0;
-    reviewing = false;
-  }
+
   function isSelected(id: number) {
-    void selectionVersion;
-    const toggled = pendingSelectToggles.includes(id);
-    return selectAllPromise ? (selectingAll ? !toggled : toggled) : selected.has(id);
+    return selected.has(id);
   }
   function selectOne(id: number) {
-    if (selectAllPromise) {
-      const idx = pendingSelectToggles.indexOf(id);
-      if (idx >= 0) pendingSelectToggles.splice(idx, 1);
-      else pendingSelectToggles.push(id);
-      selectionVersion++;
-      return;
-    }
     if (selected.has(id)) selected.delete(id);
     else selected.add(id);
     selectionVersion++;
   }
   function clearTicks() {
-    scopeGeneration++;
-    selectingAll = false;
-    selectAllPromise = null;
-    pendingSelectToggles = [];
     selected.clear();
     selectionVersion++;
   }
+  /** The whole view's order is always known, so ticking everything needs no request. */
   function selectAll() {
     if (!totalCount) return;
-    if ((selectedCount === totalCount && !selectAllPromise) || (selectAllPromise && selectingAll)) {
+    if (selectedCount === totalCount) {
       clearTicks();
       return;
     }
-    if (page === 0 && items.length === totalCount) {
-      selected.clear();
-      for (const item of items) selected.add(item.track.id);
-      pendingSelectToggles = [];
-      selectionVersion++;
-      return;
-    }
-    const gen = scopeGeneration;
-    pendingSelectToggles = [];
-    selectingAll = true;
-    const promise = client
-      .trackIds(scopeQuery, batchTrackIds, stageFilter)
-      .then((allIds) => {
-        if (gen !== scopeGeneration) return;
-        selected.clear();
-        for (const id of allIds) selected.add(id);
-        for (const id of pendingSelectToggles) {
-          if (selected.has(id)) selected.delete(id);
-          else selected.add(id);
-        }
-        pendingSelectToggles = [];
-        selectionVersion++;
-      })
-      .catch((err: unknown) => {
-        if (gen === scopeGeneration) notice = message(err);
-      })
-      .finally(() => {
-        if (gen === scopeGeneration) {
-          selectingAll = false;
-          selectAllPromise = null;
-        }
-      });
-    selectAllPromise = promise;
+    for (const id of order) selected.add(id);
+    selectionVersion++;
   }
   async function resolveSelectedIds() {
-    if (selectAllPromise) await selectAllPromise;
     if (!selected.size) return [];
-    if (missing !== '' && totalCount > items.length) {
+    if (missing !== '' && selected.size > 0) {
       const validIds = await client.trackIds(scopeQuery, batchTrackIds, null);
       const kept = intersectSelection(selected, validIds);
       if (kept.length !== selected.size) {
@@ -493,12 +429,12 @@
   }
   async function focusKeyboardRow() {
     const target = keyboardTarget;
-    if (target == null || !items.some((item) => item.track.id === target)) return;
+    if (target == null || !(target in byId)) return;
     await tick();
     if (keyboardTarget !== target || activeId !== target) return;
     keyboardTarget = null;
     workspace.querySelector<HTMLElement>('[data-active="true"] .track-name')?.focus();
-    const row = items.find((item) => item.track.id === target);
+    const row = byId[target];
     if (row) onfocustrack?.(row.track);
   }
 
@@ -526,7 +462,7 @@
     }
   }
   function updateItem(updated: PrepItem) {
-    items = items.map((item) => (item.track.id === updated.track.id ? updated : item));
+    byId = { ...byId, [updated.track.id]: updated };
   }
   async function run(action: () => Promise<void>) {
     if (busy) return;
@@ -628,7 +564,7 @@
       return;
     }
     void client
-      .trackIds(scopeQuery, batchTrackIds, stageFilter)
+      .trackIds(scopeQuery, batchTrackIds, 'not_searched')
       .then(runOnlineSearch)
       .catch((err: unknown) => (notice = message(err)));
   }
@@ -776,13 +712,12 @@
       return;
     }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      if (!items.length || detailOpen) return;
-      if (target instanceof HTMLElement && target.closest('[role="tablist"]')) return;
+      if (!order.length || detailOpen) return;
       const offset = event.key === 'ArrowDown' ? 1 : -1;
-      const currentIdx = items.findIndex((item) => item.track.id === activeId);
-      const nextIdx = (currentIdx === -1 ? (offset > 0 ? -1 : items.length) : currentIdx) + offset;
-      if (nextIdx >= 0 && nextIdx < items.length) {
-        const id = items[nextIdx]!.track.id;
+      const currentIdx = activeId == null ? -1 : order.indexOf(activeId);
+      const nextIdx = (currentIdx === -1 ? (offset > 0 ? -1 : order.length) : currentIdx) + offset;
+      if (nextIdx >= 0 && nextIdx < order.length) {
+        const id = order[nextIdx]!;
         event.preventDefault();
         if (event.shiftKey && !selected.has(id)) {
           selected.add(id);
@@ -790,22 +725,8 @@
         }
         setActive(id);
         keyboardTarget = id;
+        list?.reveal(nextIdx);
         void focusKeyboardRow();
-        return;
-      }
-      if (offset > 0 && page + 1 < pageCount) {
-        event.preventDefault();
-        pendingEdge = 'first';
-        pendingShiftSelect = event.shiftKey;
-        page++;
-        return;
-      }
-      if (offset < 0 && page > 0) {
-        event.preventDefault();
-        pendingEdge = 'last';
-        pendingShiftSelect = event.shiftKey;
-        page--;
-        return;
       }
       return;
     }
@@ -825,9 +746,15 @@
     } else if (event.key === 'Enter' && current && plainTarget) {
       event.preventDefault();
       if (compact && !detailOpen) focusItem(current);
-      else if (current.stage === 'not_searched') findMatch(current);
-      else review?.acceptAll();
-    } else if (key === 's' && !event.shiftKey && current && current.stage === 'review') {
+      else if (reviewableFields(current).length > 0 || current.artwork.proposed)
+        review?.acceptAll();
+      else if (current.stage !== 'done') findMatch(current);
+    } else if (
+      key === 's' &&
+      !event.shiftKey &&
+      current &&
+      (reviewableFields(current).length > 0 || !!current.artwork.proposed)
+    ) {
       event.preventDefault();
       skipTrack(current);
     } else if (key === 'f' && !event.shiftKey) {
@@ -867,9 +794,6 @@
   bind:clientWidth={width}
 >
   <div class="bar" hidden={detailOpen}>
-    <div class="stages">
-      <SegmentedTabs items={tabs} value={stage} ariaLabel="Prep stages" onChange={chooseStage} />
-    </div>
     <div class="tools" role="toolbar" aria-label="Prep controls">
       <input
         class="find"
@@ -905,6 +829,12 @@
           <Icon name="close" size="xs" />
         </Button>
       {/if}
+      {#if stageSummary(counts).length}<span class="summary"
+          >{#each stageSummary(counts) as part, index (part.words)}{index > 0 ? ' · ' : ''}<span
+              class="numeric">{part.number}</span
+            >
+            {part.words}{/each}</span
+        >{/if}
       <span class="spacer"></span>
       {#if !activeOnlineJob}
         {#if selectedCount > 0}
@@ -912,7 +842,7 @@
           <Button size="sm" onclick={clearTicks}>Clear</Button>
           <Button
             size="sm"
-            disabled={busy || reloading || !!loadError || selectingAll}
+            disabled={busy || reloading || !!loadError}
             title="Save every suggestion for the ticked tracks (Shift+A)"
             onclick={saveTicked}>Save ticked</Button
           >
@@ -977,8 +907,8 @@
         <span class="numeric">{summary.review.toLocaleString('en-GB')}</span> to review ·
         <span class="numeric">{summary.noMatch.toLocaleString('en-GB')}</span> with no match
       </span>
-      {#if summary.review > 0 && stage !== 'review'}
-        <Button size="sm" onclick={() => chooseStage('review')}>Review them</Button>
+      {#if summary.review > 0}
+        <Button size="sm" onclick={showMatchesFirst}>Show them first</Button>
       {/if}
       <Button size="sm" variant="icon" ariaLabel="Dismiss" onclick={() => (searchSummary = null)}
         ><Icon name="close" size="xs" /></Button
@@ -1015,14 +945,14 @@
   {:else if !totalCount}
     <div class="empty">
       <h2>
-        {missing && (viewCount === 0 || stage === 'all')
+        {missing
           ? 'No tracks missing ' + MISSING_LABELS[missing].toLowerCase()
-          : viewCount === 0
-            ? 'No tracks in this view'
-            : emptyStageText(stage)}
+          : appliedFind
+            ? 'No tracks match ' + appliedFind
+            : 'No tracks in this view'}
       </h2>
-      {#if viewCount > 0 && stage !== 'all'}
-        <Button size="sm" onclick={() => chooseStage('all')}>Show all tracks</Button>
+      {#if appliedFind}
+        <Button size="sm" onclick={() => typeFind('')}>Clear find</Button>
       {:else if missing}
         <Button size="sm" onclick={() => (missing = '')}>Show all tracks</Button>
       {:else if onopenlibrary}
@@ -1031,113 +961,24 @@
     </div>
   {:else}
     <div class="workspace" class:detail-open={detailOpen}>
-      <section class="tracks" aria-label="Track list">
-        <div class="list-head">
-          <input
-            type="checkbox"
-            aria-label={selectedCount === totalCount ? 'Deselect all tracks' : 'Select all tracks'}
-            title="Tick every track in this tab (Ctrl+A)"
-            checked={selectedCount === totalCount && totalCount > 0}
-            indeterminate={selectedCount > 0 && selectedCount < totalCount}
-            onchange={selectAll}
-          />
-          <div class="columns">
-            {#each LIST_COLUMNS as column (column.id)}
-              {@const sorted = listSort?.column === column.id ? listSort.direction : null}
-              <button
-                type="button"
-                class="column"
-                data-column={column.id}
-                aria-label={'Sort by ' +
-                  column.label.toLowerCase() +
-                  (sorted === 'asc' ? ', A to Z' : sorted === 'desc' ? ', Z to A' : '')}
-                data-sorted={sorted ?? undefined}
-                onclick={() => sortBy(column.id)}
-                >{column.label}{#if column.id === 'title'}<span class="numeric count"
-                    >{totalCount.toLocaleString('en-GB')}</span
-                  >{/if}{#if sorted}<Icon
-                    name={sorted === 'asc' ? 'chevron-up' : 'chevron-down'}
-                    size="xs"
-                  />{/if}</button
-              >
-            {/each}
-            <span class="column status-head">Status</span>
-          </div>
-        </div>
-        <ul class="list-scroll" aria-busy={loading}>
-          {#each items as item (item.track.id)}
-            {@const status = rowStatus(item)}
-            {@const gaps = missingNow(item)}
-            {@const searching = !!activeOnlineJob && searchingIds.has(item.track.id)}
-            {@const art = item.artwork.proposed?.artwork ?? item.artwork.artwork}
-            <li
-              class="row"
-              class:active={item.track.id === activeId}
-              data-active={item.track.id === activeId}
-            >
-              <input
-                type="checkbox"
-                aria-label={'Tick ' + item.track.title}
-                checked={isSelected(item.track.id)}
-                onchange={() => selectOne(item.track.id)}
-              />
-              <button
-                type="button"
-                class="track-name"
-                aria-pressed={item.track.id === activeId}
-                onclick={() => focusItem(item)}
-                title={item.track.location}
-              >
-                <Thumb seed={item.track.id} size="sm" src={art ? artworkUrl(art) : null} alt="" />
-                <span class="names">
-                  <span class="title">{item.track.title}</span>
-                  <span class="artist"
-                    >{#if item.track.artist}{item.track.artist}{/if}{#if gaps.length}<span
-                        class="gaps">{item.track.artist ? ' · ' : ''}Missing {gaps.join(', ')}</span
-                      >{#if gaps.some((gap) => !COLUMN_GAPS.has(gap))}<span class="gaps-wide"
-                          >{item.track.artist ? ' · ' : ''}Missing {gaps
-                            .filter((gap) => !COLUMN_GAPS.has(gap))
-                            .join(', ')}</span
-                        >{/if}{/if}</span
-                  >
-                </span>
-                {#each ['genre', 'label', 'year'] as const as column (column)}
-                  {@const value = item.track[column]}
-                  <span
-                    class="cell"
-                    data-column={column}
-                    class:numeric={column === 'year'}
-                    class:empty-cell={!value}
-                    title={value ?? undefined}
-                    >{#if value}{value}{:else}<span aria-label={'No ' + column}>–</span>{/if}</span
-                  >
-                {/each}
-                <span class="status" data-stage={searching ? 'searching' : item.stage}>
-                  {#if searching && item.stage === 'not_searched'}
-                    <span class="status-main">Searching</span>
-                  {:else}
-                    <span class="status-main"
-                      >{#if status.confidence}<span class="numeric">{status.confidence}</span
-                        >{/if}{status.primary}</span
-                    >
-                    {#if status.secondary}<span class="status-sub">{status.secondary}</span>{/if}
-                  {/if}
-                </span>
-              </button>
-            </li>
-          {/each}
-        </ul>
-        {#if pageCount > 1}
-          <nav aria-label="Track pages">
-            <Button size="sm" disabled={page === 0} onclick={() => page--}>Previous</Button>
-            <span class="numeric"
-              >{(page + 1).toLocaleString('en-GB')} / {pageCount.toLocaleString('en-GB')}</span
-            >
-            <Button size="sm" disabled={page + 1 >= pageCount} onclick={() => page++}>Next</Button>
-          </nav>
-        {/if}
-      </section>
-
+      <PrepTrackList
+        bind:this={list}
+        {order}
+        {byId}
+        {activeId}
+        sort={listSort}
+        tickedCount={selectedCount}
+        tickVersion={selectionVersion}
+        isTicked={isSelected}
+        {searchingIds}
+        searching={!!activeOnlineJob}
+        {loading}
+        onsort={sortBy}
+        ontickall={selectAll}
+        ontick={selectOne}
+        onopen={focusItem}
+        onwindow={fetchWindow}
+      />
       {#if current}
         {@const item = current}
         <PrepReview
@@ -1228,14 +1069,7 @@
   .bar[hidden] {
     display: none;
   }
-  .stages {
-    min-width: 0;
-    overflow-x: auto;
-  }
-  /* Each tab as wide as its own label, so five tabs fit the narrowest window. */
-  .stages :global([role='tablist']) {
-    grid-auto-columns: auto;
-  }
+
   .tools {
     display: flex;
     flex-wrap: wrap;
@@ -1282,16 +1116,9 @@
     transform-origin: left;
     transition: transform var(--duration-fast) var(--ease-out);
   }
-  .gaps,
-  .gaps-wide {
-    color: var(--color-muted);
-  }
-  .status[data-stage='searching'] {
-    color: var(--color-text);
-  }
   .ticked,
   .feedback,
-  nav {
+  .summary {
     color: var(--color-text-2);
     font-size: var(--text-sm);
   }
@@ -1308,14 +1135,6 @@
     border: var(--border-width) solid var(--color-border-control);
     border-radius: var(--radius-sm);
     padding-inline: var(--space-2-5);
-  }
-  input[type='checkbox'] {
-    width: var(--checkbox-size);
-    height: var(--checkbox-size);
-    accent-color: var(--color-text);
-    display: block;
-    margin: 0;
-    cursor: pointer;
   }
   .feedback {
     display: flex;
@@ -1339,225 +1158,8 @@
     min-width: 0;
     min-height: 0;
   }
-  .tracks {
-    min-width: 0;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    background: var(--color-surface);
-    border-right: var(--border-width) solid var(--color-border);
-  }
-  .tracks {
-    container: tracks / inline-size;
-    --col-genre: 96px;
-    --col-label: 120px;
-    --col-year: 40px;
-    --col-status: 120px;
-    --row-columns: var(--thumb-sm) minmax(0, 1fr) var(--col-genre) var(--col-label) var(--col-year)
-      var(--col-status);
-  }
-  .list-head {
-    display: grid;
-    grid-template-columns: var(--checkbox-size) minmax(0, 1fr);
-    align-items: center;
-    gap: var(--space-3);
-    height: var(--table-header-height);
-    padding-left: var(--space-4);
-    color: var(--color-text-2);
-    font-size: var(--text-sm);
-    border-bottom: var(--border-width) solid var(--color-border);
-  }
-  .columns {
-    min-width: 0;
-    height: 100%;
-    display: grid;
-    grid-template-columns: var(--row-columns);
-    align-items: center;
-    gap: var(--space-3);
-    padding-right: var(--space-4);
-  }
-  .column {
-    min-width: 0;
-    height: 100%;
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1-5);
-    padding: 0;
-    font: inherit;
-    color: inherit;
-    background: transparent;
-    border: 0;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: color var(--duration-fast) var(--ease-out);
-  }
-  .column:hover,
-  .column[data-sorted] {
-    color: var(--color-text);
-  }
-  .column:focus-visible {
-    outline: var(--focus-ring-width) solid var(--color-text);
-    outline-offset: -2px;
-  }
-  .column[data-column='title'] {
-    grid-column: 1 / 3;
-  }
-  .column[data-column='year'] {
-    justify-content: end;
-  }
-  .status-head {
-    justify-content: end;
-    cursor: default;
-  }
-  .count {
-    color: var(--color-muted);
-  }
-  .cell {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: var(--text-sm);
-    color: var(--color-text-2);
-  }
-  .cell[data-column='year'] {
-    text-align: right;
-  }
-  .empty-cell {
-    color: var(--color-muted);
-  }
-  .gaps {
-    display: none;
-  }
   .find {
     width: 12rem;
-  }
-  @container tracks (max-width: 640px) {
-    .columns,
-    .track-name {
-      --row-columns: var(--thumb-sm) minmax(0, 1fr) var(--col-genre) var(--col-year)
-        var(--col-status);
-    }
-    [data-column='label'] {
-      display: none;
-    }
-  }
-  @container tracks (max-width: 520px) {
-    .columns,
-    .track-name {
-      --row-columns: var(--thumb-sm) minmax(0, 1fr) var(--col-status);
-    }
-    [data-column='genre'],
-    [data-column='year'],
-    .gaps-wide {
-      display: none;
-    }
-    .gaps {
-      display: inline;
-    }
-  }
-  .list-scroll {
-    flex: 1;
-    min-width: 0;
-    min-height: 0;
-    overflow-y: auto;
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-  .row {
-    position: relative;
-    display: grid;
-    grid-template-columns: var(--checkbox-size) minmax(0, 1fr);
-    align-items: center;
-    gap: var(--space-3);
-    padding-left: var(--space-4);
-    border-bottom: var(--border-width) solid var(--color-border);
-    transition: background-color var(--duration-fast) var(--ease-out);
-  }
-  .row:hover {
-    background: var(--color-surface-2);
-  }
-  .row.active {
-    background: var(--color-raised);
-  }
-  .row.active::before {
-    content: '';
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: 2px;
-    background: var(--color-accent);
-  }
-  .track-name {
-    min-width: 0;
-    display: grid;
-    grid-template-columns: var(--row-columns);
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-2) var(--space-4) var(--space-2) 0;
-    font: inherit;
-    text-align: left;
-    color: inherit;
-    background: transparent;
-    border: 0;
-    cursor: pointer;
-  }
-  .track-name:focus-visible {
-    outline: var(--focus-ring-width) solid var(--color-text);
-    outline-offset: -2px;
-  }
-  .names,
-  .status {
-    min-width: 0;
-    display: grid;
-    gap: var(--space-1);
-  }
-  .title,
-  .artist {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .title {
-    font-size: var(--text-md);
-  }
-  .artist,
-  .status {
-    font-size: var(--text-sm);
-    color: var(--color-text-2);
-  }
-  .status {
-    justify-items: end;
-    text-align: right;
-  }
-  .status-main {
-    display: inline-flex;
-    gap: var(--space-2);
-    max-width: 100%;
-    overflow: hidden;
-    white-space: nowrap;
-  }
-  .status-main .numeric {
-    color: var(--color-text);
-  }
-  .status[data-stage='review'] .status-main {
-    color: var(--color-text);
-  }
-  .status[data-stage='not_searched'],
-  .status[data-stage='done'] {
-    color: var(--color-muted);
-  }
-  .status-sub {
-    color: var(--color-muted);
-    white-space: nowrap;
-  }
-  nav {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-3);
-    padding: var(--space-2) var(--space-4);
-    border-top: var(--border-width) solid var(--color-border);
   }
   .empty {
     display: grid;
@@ -1587,15 +1189,14 @@
       grid-template-columns: minmax(0, 1fr);
     }
     .workspace:not(.detail-open) > :global(.review),
-    .workspace.detail-open > .tracks {
+    .workspace.detail-open > :global(.tracks) {
       display: none;
     }
-    .tracks {
+    .workspace :global(.tracks) {
       border-right: 0;
     }
   }
   @media (forced-colors: active) {
-    .row.active::before,
     .search-fill {
       background: Highlight;
     }
