@@ -20,6 +20,8 @@
   import { FilterState } from './lib/library/filters.svelte';
   import Inspector from './lib/library/Inspector.svelte';
   import Library from './lib/library/Library.svelte';
+  import DeleteSheet, { type DeleteClient } from './lib/library/DeleteSheet.svelte';
+  import HistorySheet, { type HistoryClient } from './lib/library/HistorySheet.svelte';
   import RelinkSheet, { type RelinkClient } from './lib/library/RelinkSheet.svelte';
   import RenameSheet, { type RenameClient } from './lib/library/RenameSheet.svelte';
   import ScanFolder from './lib/library/ScanFolder.svelte';
@@ -90,6 +92,13 @@
     preview: (scope, template, limit) => core.call('preview_rename', { scope, template, limit }),
     apply: (scope, template) => core.call('apply_rename', { scope, template }),
     recentOperations: () => core.call('recent_operations', { limit: 20 }),
+    undo: (operation_id) => core.call('undo_operation', { operation_id }),
+  };
+  const deleteClient: DeleteClient = {
+    deleteTracks: (track_ids, for_good) => core.call('delete_tracks', { track_ids, for_good }),
+  };
+  const historyClient: HistoryClient = {
+    recentOperations: () => core.call('recent_operations', { limit: 50 }),
     undo: (operation_id) => core.call('undo_operation', { operation_id }),
   };
   const activityClient: ActivityClient = {
@@ -175,6 +184,11 @@
   let renameMounted = $state(false);
   let renameScope = $state<RenameScope>({ kind: 'tracks', track_ids: [] });
   let renameLabel = $state('');
+  let deleteOpen = $state(false);
+  let deleteMounted = $state(false);
+  let deleteTrackIds = $state<number[]>([]);
+  let historyOpen = $state(false);
+  let historyMounted = $state(false);
   let batchTagOpen = $state(false);
   let batchTagMounted = $state(false);
   let batchTagTrackIds = $state<number[]>([]);
@@ -408,6 +422,18 @@
     renameLabel = label;
     renameMounted = true;
     renameOpen = true;
+  }
+
+  function openDelete(trackIds: number[]) {
+    if (trackIds.length === 0) return;
+    deleteTrackIds = trackIds;
+    deleteMounted = true;
+    deleteOpen = true;
+  }
+
+  function openHistory() {
+    historyMounted = true;
+    historyOpen = true;
   }
 
   function openBatchTag(trackIds: number[]) {
@@ -882,6 +908,8 @@
             onfocustrack={(item) => void preview.focus(item.id)}
             onrelink={openRelink}
             onrename={openRename}
+            ondelete={openDelete}
+            onhistory={openHistory}
             onscan={openScan}
             ontogglefavourite={toggleFavourite}
             onclearsearch={clearSearch}
@@ -1018,6 +1046,23 @@
     scopeLabel={renameLabel}
     client={renameClient}
     onrenamed={() => void pages.refresh()}
+  />
+{/if}
+
+{#if deleteMounted}
+  <DeleteSheet
+    bind:open={deleteOpen}
+    trackIds={deleteTrackIds}
+    client={deleteClient}
+    ondeleted={() => void pages.refresh()}
+  />
+{/if}
+
+{#if historyMounted}
+  <HistorySheet
+    bind:open={historyOpen}
+    client={historyClient}
+    onundone={() => void pages.refresh()}
   />
 {/if}
 

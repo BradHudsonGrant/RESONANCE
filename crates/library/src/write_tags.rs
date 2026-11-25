@@ -40,6 +40,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::file_tags::{self, has_leading_id3v2};
 use crate::identity::{compute_identity, full_asset_path};
+use crate::journal::JournalError;
 use crate::scan::stamp;
 
 #[derive(Debug)]
@@ -543,10 +544,14 @@ struct WorkingCopy {
 }
 
 impl WorkingCopy {
-    fn of(original: &Path) -> Result<Self, FileProblem> {
+    fn path_of(original: &Path) -> PathBuf {
         let mut name = original.file_name().unwrap_or_default().to_os_string();
         name.push(".resonance-tmp");
-        let path = original.with_file_name(name);
+        original.with_file_name(name)
+    }
+
+    fn of(original: &Path) -> Result<Self, FileProblem> {
+        let path = Self::path_of(original);
         let mut target = File::create_new(&path).map_err(FileProblem::Io)?;
         let copy = Self { path, kept: false };
         let mut source = File::open(original).map_err(FileProblem::Io)?;
@@ -1263,6 +1268,48 @@ pub fn undo_operation(
         operation,
         restored,
     })
+}
+
+/// Brings a tag write the app stopped in the middle of to rest. Each file's swap is recorded in
+/// the same transaction that records its new tags, so the journal knows which files changed:
+/// the write stands for those, a working copy left beside any file is removed, and the rest are
+/// as they were.
+pub(crate) fn recover(
+    database: &mut Database,
+    operation: &StoredOperation,
+) -> Result<(OperationState, String), JournalError> {
+    let forward: Vec<ForwardFile> = serde_json::from_str(&operation.forward_json)?;
+    let inverse: Inverse = serde_json::from_str(&operation.inverse_json)?;
+    let mut removed = 0;
+    for file in &forward {
+        let Some(asset) = database.asset_file(file.asset_id)? else {
+            continue;
+        };
+        let original = full_asset_path(&asset.source_folder, &file.path);
+        let copy = WorkingCopy::path_of(&original);
+        if fs::symlink_metadata(&copy).is_ok() {
+            fs::remove_file(&copy).map_err(|source| JournalError::File {
+                path: copy.clone(),
+                source,
+            })?;
+            removed += 1;
+        }
+    }
+    let written = inverse.files.len() + inverse.library_tracks.len();
+    let state = if written == 0 {
+        OperationState::Failed
+    } else {
+        OperationState::Applied
+    };
+    Ok((
+        state,
+        format!(
+            "The app stopped part way. {} kept and {} working {} removed.",
+            file_count(written),
+            removed,
+            if removed == 1 { "copy" } else { "copies" }
+        ),
+    ))
 }
 
 #[cfg(test)]

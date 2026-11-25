@@ -47,6 +47,10 @@
     onrelink?: (track: LibraryTrack) => void;
     /** Opens the Rename sheet for `scope`, named `label`. */
     onrename?: (scope: RenameScope, label: string) => void;
+    /** Asks before moving the selected tracks' files to the bin. */
+    ondelete?: (trackIds: number[]) => void;
+    /** Opens the history of changes to files, where each can be undone. */
+    onhistory?: () => void;
     onscan: () => void;
     ontogglefavourite?: (track: LibraryTrack) => void;
     onclearsearch?: () => void;
@@ -106,6 +110,8 @@
     onfocustrack,
     onrelink,
     onrename,
+    ondelete,
+    onhistory,
     onscan,
     ontogglefavourite,
     onclearsearch,
@@ -311,6 +317,9 @@
               Rename files
             </Button>
           {/if}
+          {#if onhistory}
+            <Button variant="quiet" onclick={onhistory}>History</Button>
+          {/if}
           <div class="filter-action">
             <Tooltip
               text={drawerFilterCount > 0 ? `Filters (${drawerFilterCount} active)` : 'Filters'}
@@ -433,6 +442,11 @@
                 )}
             >
               Rename
+            </Button>
+          {/if}
+          {#if ondelete}
+            <Button size="sm" onclick={() => ondelete(table?.checkedTrackIds() ?? [])}>
+              Move to bin
             </Button>
           {/if}
           {#if activeCollection}

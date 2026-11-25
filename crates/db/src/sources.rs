@@ -59,20 +59,25 @@ fn recompute_source_included(
     excluded_subfolders: &[String],
     ignored_folders: &[String],
 ) -> Result<(), DbError> {
-    let mut select =
-        transaction.prepare("SELECT id, path, included FROM asset WHERE source_id = ?1")?;
+    let mut select = transaction.prepare(
+        "SELECT id, path, included, trashed_by IS NOT NULL FROM asset WHERE source_id = ?1",
+    )?;
     let mut rows = select.query([source.0])?;
     let mut updates: Vec<(i64, i64)> = Vec::new();
     while let Some(row) = rows.next()? {
         let asset_id: i64 = row.get(0)?;
         let path: String = row.get(1)?;
         let current: i64 = row.get(2)?;
-        let next = i64::from(is_asset_path_included(
-            &path,
-            include_subfolders,
-            excluded_subfolders,
-            ignored_folders,
-        ));
+        let trashed: bool = row.get(3)?;
+        let next = i64::from(
+            !trashed
+                && is_asset_path_included(
+                    &path,
+                    include_subfolders,
+                    excluded_subfolders,
+                    ignored_folders,
+                ),
+        );
         if next != current {
             updates.push((asset_id, next));
         }

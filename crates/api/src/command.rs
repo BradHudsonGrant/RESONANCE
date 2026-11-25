@@ -286,6 +286,15 @@ pub enum Request {
         #[ts(type = "number")]
         asset_id: i64,
     },
+    /// Moves every file of `track_ids` to the bin as one journaled operation that can be
+    /// undone. With `for_good`, which the user confirms when the bin refuses the files, they are
+    /// deleted and cannot come back.
+    DeleteTracks {
+        #[ts(type = "Array<number>")]
+        track_ids: Vec<i64>,
+        #[serde(default)]
+        for_good: bool,
+    },
     /// What the quality check measured and flagged in the file a track plays.
     TrackQuality {
         #[ts(type = "number")]
@@ -562,6 +571,7 @@ pub enum Response {
     SkipProposal(TrackStagingDiff),
     TrackCopies(TrackCopies),
     KeepCopy(TrackCopies),
+    DeleteTracks(DeleteReport),
     TrackQuality(TrackQuality),
     TrackArtwork(TrackArtwork),
     AcceptProposedArtwork(TrackArtwork),
@@ -648,6 +658,8 @@ pub struct AcceptedTagWriteReport {
 pub enum OperationKindName {
     WriteTags,
     RenameFiles,
+    DeleteFiles,
+    DeleteFilesForGood,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
@@ -714,9 +726,11 @@ pub struct RenameReport {
 #[ts(export)]
 pub enum OperationStateName {
     Pending,
+    Executing,
     Applied,
     Failed,
     Undone,
+    RolledBack,
 }
 
 /// One change to files in the journal. Only an `applied` one can be undone.
@@ -735,6 +749,17 @@ pub struct JournalOperation {
     pub applied_ms: Option<i64>,
     #[ts(type = "number | null")]
     pub undone_ms: Option<i64>,
+    /// How the operation was brought to rest after the app stopped in the middle of it.
+    pub recovery: Option<String>,
+}
+
+/// What deleting tracks did. When the bin refused a file nothing changed, `operation` is
+/// null, and `no_bin` says why, so the user can choose to delete for good.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct DeleteReport {
+    pub operation: Option<JournalOperation>,
+    pub no_bin: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]

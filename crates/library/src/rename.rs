@@ -15,8 +15,10 @@ use resonance_core::template::{
     NameClaims, NamePlan, RenameStatus, Template, is_case_only, plan_name,
 };
 use resonance_db::{Database, DbError, RenameTarget, StoredOperation};
+use serde::{Deserialize, Serialize};
 
 use crate::identity::full_asset_path;
+use crate::journal::JournalError;
 
 /// The name a case-only rename passes through, so file systems that ignore case see a change.
 const CASE_STEP_SUFFIX: &str = ".resonance-rename";
@@ -330,7 +332,19 @@ pub fn apply_renames(
         return Ok(report);
     }
     let total = ready.len() as u64;
-    let forward = serde_json::json!({ "template": template_text, "files": total }).to_string();
+    let files: Vec<ForwardRename> = ready
+        .iter()
+        .filter_map(|plan| {
+            let new_name = plan.new_name.as_deref()?;
+            Some(ForwardRename {
+                asset_id: plan.asset_id,
+                from: plan.full_path(&plan.old_name),
+                to: plan.full_path(new_name),
+            })
+        })
+        .collect();
+    let forward =
+        serde_json::json!({ "template": template_text, "files": total, "plan": files }).to_string();
     let operation_id = locked(database).begin_operation(
         OperationKind::RenameFiles,
         &format!("Renaming {}", file_count(total)),
@@ -370,6 +384,70 @@ pub fn apply_renames(
     };
     locked(database).finish_operation(operation_id, state, &summary)?;
     Ok(report)
+}
+
+/// One file a rename plans to move, written to the journal before any file is renamed.
+#[derive(Debug, Serialize, Deserialize)]
+struct ForwardRename {
+    asset_id: i64,
+    from: PathBuf,
+    to: PathBuf,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct Forward {
+    #[serde(default)]
+    plan: Vec<ForwardRename>,
+}
+
+/// Brings a rename the app stopped in the middle of to rest. A file is renamed and its new path
+/// recorded under one lock, so a file renamed on disk but not in the journal is the one that
+/// was being renamed when the app stopped: it gets its old name back, as does a file left at
+/// the in-between name of a case-only rename. The renames the journal recorded stand.
+pub(crate) fn recover(
+    database: &mut Database,
+    operation: &StoredOperation,
+) -> Result<(OperationState, String), JournalError> {
+    let forward: Forward = serde_json::from_str(&operation.forward_json).unwrap_or_default();
+    let recorded: Vec<i64> = database
+        .operation_renames(operation.id)?
+        .into_iter()
+        .map(|rename| rename.asset_id)
+        .collect();
+    let mut put_back = 0;
+    for file in forward
+        .plan
+        .iter()
+        .filter(|file| !recorded.contains(&file.asset_id))
+    {
+        let mut step_name = file.to.file_name().unwrap_or_default().to_os_string();
+        step_name.push(CASE_STEP_SUFFIX);
+        let step = file.to.with_file_name(step_name);
+        let renamed = [&file.to, &step].into_iter().find(|current| {
+            fs::symlink_metadata(current).is_ok() && fs::symlink_metadata(&file.from).is_err()
+        });
+        if let Some(current) = renamed {
+            fs::rename(current, &file.from).map_err(|source| JournalError::File {
+                path: current.clone(),
+                source,
+            })?;
+            put_back += 1;
+        }
+    }
+    let state = if recorded.is_empty() {
+        OperationState::Failed
+    } else {
+        OperationState::Applied
+    };
+    Ok((
+        state,
+        format!(
+            "The app stopped part way. {} kept and {} given {} old name back.",
+            file_count(recorded.len() as u64),
+            file_count(put_back),
+            if put_back == 1 { "its" } else { "their" }
+        ),
+    ))
 }
 
 /// Gives every file an applied rename moved its old name back, newest first. Nothing changes
