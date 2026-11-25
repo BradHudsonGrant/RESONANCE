@@ -119,7 +119,7 @@ Accept:
 ## M4 Quality and replace, v0.5.0
 
 - [x] Integrity and transcode checks ([#160](https://github.com/BradHudsonGrant/RESONANCE/issues/160)). Evidence: merged in [#164](https://github.com/BradHudsonGrant/RESONANCE/pull/164); the identity decode also measures loudness, loudness range, true peak, crest factors, clipping, dropouts and the high end of the spectrum, judged by `crates/core/src/quality.rs` into confirmed or likely flags with a reason, and stored in `asset_quality` and `quality_flag` ([ADR 0025](adr/0025-quality-checks-in-the-identity-decode.md)); `crates/library/tests/quality.rs` shows a truncated WAV and a bad FLAC MD5 confirmed damaged, a hard-clipped sine confirmed clipping, a spliced gap a likely dropout, a 16 kHz brickwall FLAC a likely transcode and a 12 dB per octave roll-off left alone; the check ran cleanly over the 50 local fixtures, and the Quality filter, Inspector and Prep show the flags.
-- [ ] Duplicates and versions
+- [x] Duplicates and versions ([#162](https://github.com/BradHudsonGrant/RESONANCE/issues/162)). Evidence: merged in [#165](https://github.com/BradHudsonGrant/RESONANCE/pull/165); `classify_asset_pair` in `crates/core/src/duplicates.rs` sorts two files into same file, same audio, another encode (Chromaprint agreement of at least 0.88 within 2.5 s and the same mix name) or a different version, ranks copies by flags, lossless and bitrate, and never calls a version a duplicate ([ADR 0026](adr/0026-copies-and-versions.md)); `crates/library/tests/copies.rs` shows a byte copy, a FLAC of the same WAV and a padded re-encode sorted into the three copy tiers and keeping one copy moving the others to the bin with collections and favourite kept; the Inspector and Prep list copies and versions, and Prep asks once more before moving anything.
 - [ ] The replace flow with alignment
 - [ ] Journal, undo and trash
 - [ ] The adapter interface, plus M3U
@@ -128,7 +128,7 @@ Accept:
 
 - [ ] On synthetic pairs with known offsets the measured alignment is within 1 ms.
 - [ ] Replacing an MP3 with a FLAC of the same recording updates collections and lands fixture cues within 5 ms.
-- [ ] A different-length file is recognised as a different version.
+- [x] A different-length file is recognised as a different version. Evidence: `a_radio_edit_and_an_extended_mix_of_one_stem_are_versions_and_never_removed` in `crates/library/tests/copies.rs` sorts a 3-minute radio edit and a 6-minute extended mix cut from one stem, and the same title 10 s longer, as different versions, and refuses to keep one in place of another ([#165](https://github.com/BradHudsonGrant/RESONANCE/pull/165)).
 - [ ] Undo restores everything.
 - [ ] A crash mid-operation recovers cleanly.
 

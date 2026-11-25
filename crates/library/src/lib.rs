@@ -1,3 +1,4 @@
+pub mod copies;
 pub mod file_tags;
 pub mod folders;
 pub mod identity;

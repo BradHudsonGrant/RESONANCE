@@ -3,12 +3,14 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
 import { fakeTrack } from '../library/fake-library';
+import type { CopyFile } from '../ipc/bindings/CopyFile';
 import type { MatchCandidateSummary } from '../ipc/bindings/MatchCandidateSummary';
 import type { PrepItem } from '../ipc/bindings/PrepItem';
 import type { PrepStageName } from '../ipc/bindings/PrepStageName';
 import type { StagedField } from '../ipc/bindings/StagedField';
 import type { TagName } from '../ipc/bindings/TagName';
 import type { TrackCandidateArtwork } from '../ipc/bindings/TrackCandidateArtwork';
+import type { TrackCopies } from '../ipc/bindings/TrackCopies';
 import Prep, { type PrepClient } from './Prep.svelte';
 import { keepPlaces, nextActive, rowsToFetch } from './prep-order';
 import {
@@ -195,8 +197,78 @@ function makeClient(items: PrepItem[]) {
         undone_ms: 2,
       },
     })),
+    trackCopies: vi.fn(async (id: number) => copiesOf(id)),
+    keepCopy: vi.fn(async (id: number) => ({ ...copiesOf(id), copies: [], removed: 1 })),
   };
   return client satisfies PrepClient;
+}
+
+function copyFile(assetId: number, overrides: Partial<CopyFile> = {}): CopyFile {
+  return {
+    asset_id: assetId,
+    track_id: assetId,
+    kind: 'this_file',
+    relation: 'This file',
+    similarity: null,
+    title: 'First Light',
+    artist: 'Ada Marsh',
+    format: 'mp3',
+    location: `D:/Music/First Light ${assetId}.mp3`,
+    audio: {
+      duration_ms: 301_000,
+      sample_rate: 44_100,
+      channels: null,
+      bit_depth: null,
+      bitrate_kbps: 320,
+    },
+    flagged: false,
+    missing: false,
+    ...overrides,
+  };
+}
+
+/** The first track has a FLAC copy on another track and a radio edit; the others have none. */
+function copiesOf(trackId: number): TrackCopies {
+  const files = [copyFile(trackId, { track_id: trackId })];
+  if (trackId !== 1) {
+    return { track_id: trackId, files, copies: [], versions: [], keep_asset_id: null, removed: 0 };
+  }
+  return {
+    track_id: trackId,
+    files,
+    copies: [
+      copyFile(90, {
+        kind: 'same_recording',
+        relation: 'Another encode',
+        similarity: 0.97,
+        format: 'flac',
+        location: 'D:/Music/First Light.flac',
+        audio: {
+          duration_ms: 301_000,
+          sample_rate: 44_100,
+          channels: null,
+          bit_depth: 16,
+          bitrate_kbps: null,
+        },
+      }),
+    ],
+    versions: [
+      copyFile(91, {
+        kind: 'version',
+        relation: 'Different mix',
+        title: 'First Light (Radio Edit)',
+        audio: {
+          duration_ms: 180_000,
+          sample_rate: 44_100,
+          channels: null,
+          bit_depth: null,
+          bitrate_kbps: 320,
+        },
+      }),
+    ],
+    keep_asset_id: 90,
+    removed: 0,
+  };
 }
 
 describe('Prep', () => {
@@ -212,6 +284,28 @@ describe('Prep', () => {
     expect(screen.queryByRole('tab')).toBeNull();
     expect(document.querySelectorAll('.row')).toHaveLength(3);
     expect(screen.getByText('Not searched online yet')).toBeTruthy();
+  });
+
+  it('shows copies and versions and keeps one copy only once confirmed', async () => {
+    const items = [makeItem(0), makeItem(1)];
+    const client = makeClient(items);
+    render(Prep, { client });
+    await waitFor(() => expect(document.querySelectorAll('.track-name')).toHaveLength(2));
+    await fireEvent.click(document.querySelectorAll<HTMLButtonElement>('.track-name')[0]!);
+    const section = await screen.findByRole('region', { name: 'Copies and versions' });
+    expect(section.textContent).toContain('Another encode · 97% match');
+    expect(section.textContent).toContain('Best copy');
+    expect(section.textContent).toContain('First Light (Radio Edit)');
+    expect(section.textContent).toContain('Different mix');
+
+    const keeps = screen.getAllByRole('button', { name: 'Keep this copy' });
+    expect(keeps).toHaveLength(2);
+    await fireEvent.click(keeps[1]!);
+    expect(client.keepCopy).not.toHaveBeenCalled();
+    expect(section.textContent).toContain('move 1 other to the Recycle Bin');
+    await fireEvent.click(screen.getByRole('button', { name: 'Move to the bin' }));
+    await waitFor(() => expect(client.keepCopy).toHaveBeenCalledWith(1, 90));
+    await screen.findByText('Moved 1 copy to the Recycle Bin');
   });
 
   it('keeps every track in its place when a save changes its status', async () => {

@@ -93,7 +93,7 @@ pub struct StoredRelinkCandidate {
     pub chromaprint_raw: Option<Vec<u32>>,
 }
 
-fn parse_format(name: String) -> Result<AudioFormat, DbError> {
+pub(crate) fn parse_format(name: String) -> Result<AudioFormat, DbError> {
     AudioFormat::from_name(&name).ok_or(DbError::UnknownName {
         column: "asset.format",
         name,
@@ -1018,41 +1018,12 @@ impl Database {
             && dup_asset_id != original_asset_id
         {
             if dup_track_id != track_id {
-                tx.execute(
-                    "UPDATE track
-                     SET favourite = CASE
-                         WHEN favourite = 1 OR COALESCE((SELECT favourite FROM track WHERE id = ?2), 0) = 1
-                         THEN 1 ELSE 0
-                     END
-                     WHERE id = ?1",
-                    params![track_id, dup_track_id],
-                )?;
-                tx.execute(
-                    "INSERT OR IGNORE INTO collection_item (collection_id, track_id, position, added_ns)
-                     SELECT collection_id, ?1, position, added_ns
-                     FROM collection_item
-                     WHERE track_id = ?2",
-                    params![track_id, dup_track_id],
-                )?;
-                tx.execute(
-                    "INSERT OR IGNORE INTO user_tag (track_id, field, value, dirty_on_disk, updated_ns)
-                     SELECT ?1, field, value, dirty_on_disk, updated_ns
-                     FROM user_tag
-                     WHERE track_id = ?2",
-                    params![track_id, dup_track_id],
-                )?;
+                crate::copies::merge_track_into(&tx, track_id, dup_track_id)?;
             }
             tx.execute("DELETE FROM asset_fts WHERE rowid = ?1", [dup_asset_id])?;
             tx.execute("DELETE FROM asset WHERE id = ?1", [dup_asset_id])?;
             if dup_track_id != track_id {
-                let remaining: i64 = tx.query_row(
-                    "SELECT count(*) FROM asset WHERE track_id = ?1",
-                    [dup_track_id],
-                    |row| row.get(0),
-                )?;
-                if remaining == 0 {
-                    tx.execute("DELETE FROM track WHERE id = ?1", [dup_track_id])?;
-                }
+                crate::copies::delete_track_without_files(&tx, dup_track_id)?;
             }
         }
 
