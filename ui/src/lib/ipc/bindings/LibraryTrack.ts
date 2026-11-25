@@ -2,6 +2,7 @@
 import type { TrackAudio } from "./TrackAudio";
 import type { TrackCollection } from "./TrackCollection";
 import type { TrackKey } from "./TrackKey";
+import type { TrackQualityFlag } from "./TrackQualityFlag";
 
 /**
  * One track as the library table and the inspector show it.
@@ -23,6 +24,10 @@ missing_since: number | null,
  * The hash of the picture the track shows, loaded from `/artwork/<hash>`.
  */
 artwork: string | null, 
+/**
+ * The most serious problem the quality check found.
+ */
+quality: TrackQualityFlag | null, 
 /**
  * Unix epoch milliseconds when the track came into the library.
  */

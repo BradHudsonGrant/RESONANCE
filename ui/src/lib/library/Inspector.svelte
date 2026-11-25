@@ -10,9 +10,11 @@
   import type { LibraryCollection } from '../ipc/bindings/LibraryCollection';
   import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
   import type { TrackArtwork } from '../ipc/bindings/TrackArtwork';
+  import type { TrackQuality } from '../ipc/bindings/TrackQuality';
   import CollectionMenu from './CollectionMenu.svelte';
-  import { audioSummary, duration, fileSize, tempo, trackSeed } from './format';
+  import { audioSummary, duration, fileSize, level, tempo, trackSeed } from './format';
   import { keyDetail } from './key-notation.svelte';
+  import QualityFlags from './QualityFlags.svelte';
 
   interface Props {
     track: LibraryTrack | undefined;
@@ -37,6 +39,8 @@
     onpickartwork?: (trackId: number, file: File) => void;
     onacceptartwork?: (trackId: number) => void;
     onskipartwork?: (trackId: number) => void;
+    /** The selected track's quality check. */
+    quality?: TrackQuality | null;
   }
 
   let {
@@ -61,7 +65,22 @@
     onpickartwork,
     onacceptartwork,
     onskipartwork,
+    quality = null,
   }: Props = $props();
+
+  const checked = $derived(quality && track && quality.track_id === track.id ? quality : null);
+
+  function qualityRow(item: TrackQuality): DetailCell[] {
+    return [
+      { label: 'Loudness', value: level(item.integrated_lufs, 'LUFS') || null, numeric: true },
+      { label: 'Range', value: level(item.loudness_range_lu, 'LU') || null, numeric: true },
+      {
+        label: 'True peak',
+        value: level(item.true_peak_dbtp, 'dBTP', true) || null,
+        numeric: true,
+      },
+    ];
+  }
 
   const proposed = $derived(
     artwork && track && artwork.track_id === track.id ? artwork.proposed : null,
@@ -334,6 +353,29 @@
           {/each}
         </div>
       </div>
+
+      {#if checked?.checked}
+        <ModularDivider />
+
+        <section class="quality" aria-label="Quality">
+          <MonoLabel text="Quality" size="xs" tone="muted" />
+          <div class="detail-row quality-levels">
+            {#each qualityRow(checked) as cell (cell.label)}
+              <div class="cell">
+                <MonoLabel text={cell.label} size="xs" tone="muted" />
+                <span class={['value', { numeric: cell.numeric, missing: !cell.value }]}>
+                  {cell.value ?? '—'}
+                </span>
+              </div>
+            {/each}
+          </div>
+          {#if checked.flags.length > 0}
+            <QualityFlags flags={checked.flags} />
+          {:else}
+            <p class="quality-clean">No problems found</p>
+          {/if}
+        </section>
+      {/if}
 
       <ModularDivider />
 
@@ -643,6 +685,7 @@
   }
 
   .details,
+  .quality,
   .collections-section,
   .file-facts {
     display: grid;
@@ -676,6 +719,16 @@
 
   .detail-row.secondary {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr);
+  }
+
+  .detail-row.quality-levels {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .quality-clean {
+    margin: 0;
+    color: var(--color-muted);
+    font-size: var(--text-sm);
   }
 
   .detail-row.compact {

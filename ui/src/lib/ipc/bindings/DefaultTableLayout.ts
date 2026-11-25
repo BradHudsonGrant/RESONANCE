@@ -307,6 +307,18 @@ export const DEFAULT_TABLE_LAYOUT: LibraryTableLayout = {
       "removable": true
     },
     {
+      "id": "quality",
+      "label": "Quality",
+      "group": "audio",
+      "shown": false,
+      "width_px": null,
+      "default_width_px": 112,
+      "floor_width_px": 112,
+      "numeric": false,
+      "sortable": false,
+      "removable": true
+    },
+    {
       "id": "file_size",
       "label": "File size",
       "group": "file",

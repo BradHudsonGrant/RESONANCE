@@ -399,7 +399,10 @@
               title={wheel ? `${keyCode(wheel)} · ${keySecond(wheel)}` : undefined}
               onclick={() => toggleValue(draft.id, index, member, choice.value)}
             >
-              <span class="numeric">{wheel ? keyCode(wheel) : choice.label}</span>
+              <!-- Keys and formats are codes; quality flags are words. -->
+              <span class={{ numeric: field.column !== 'quality' }}
+                >{wheel ? keyCode(wheel) : choice.label}</span
+              >
             </button>
           {/each}
         </div>

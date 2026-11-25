@@ -38,6 +38,7 @@ export function fakeTrack(index: number): LibraryTrack {
     size_bytes: 9_000_000,
     missing_since: null,
     artwork: null,
+    quality: null,
     added_ms: 1_700_000_000_000 + index,
     modified_ms: 1_700_000_000_000,
     audio: {

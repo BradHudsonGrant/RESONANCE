@@ -9,6 +9,7 @@
   import type { RenameScope } from './lib/ipc/bindings/RenameScope';
   import type { SmartView } from './lib/ipc/bindings/SmartView';
   import type { TrackArtwork } from './lib/ipc/bindings/TrackArtwork';
+  import type { TrackQuality } from './lib/ipc/bindings/TrackQuality';
   import type { TrackQuery } from './lib/ipc/bindings/TrackQuery';
   import { pictureBase64 } from './lib/ipc/artwork';
   import BatchTagSheet from './lib/prep/BatchTagSheet.svelte';
@@ -506,6 +507,24 @@
     trackArtwork = null;
     if (trackId !== undefined) void loadArtwork(trackId);
   });
+
+  let trackQuality = $state<TrackQuality | null>(null);
+
+  async function loadQuality(trackId: number) {
+    try {
+      const loaded = await core.call('track_quality', { track_id: trackId });
+      if (track?.id === trackId) trackQuality = loaded;
+    } catch {
+      if (track?.id === trackId) trackQuality = null;
+    }
+  }
+
+  // Keyed on the row itself, so a finished check that changes the row reloads it.
+  $effect(() => {
+    const shown = track;
+    if (trackQuality?.track_id !== shown?.id) trackQuality = null;
+    if (shown) void loadQuality(shown.id);
+  });
   const inspectorDocked = $derived(space === 'Library' && !inspectorHidden);
 
   /** What the stylesheet decided, read only when the user asks for the opposite. */
@@ -875,6 +894,7 @@
         onremovefromcollection={removeTracksFromCollection}
         oncreatecollectionandadd={createCollectionAndAdd}
         artwork={trackArtwork}
+        quality={trackQuality}
         {artworkError}
         onpickartwork={pickArtwork}
         onacceptartwork={acceptArtwork}
@@ -946,6 +966,7 @@
       onremovefromcollection={removeTracksFromCollection}
       oncreatecollectionandadd={createCollectionAndAdd}
       artwork={trackArtwork}
+      quality={trackQuality}
       {artworkError}
       onpickartwork={pickArtwork}
       onacceptartwork={acceptArtwork}

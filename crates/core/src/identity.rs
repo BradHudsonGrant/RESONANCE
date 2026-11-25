@@ -1,5 +1,7 @@
 use std::fmt;
 
+use crate::quality::{QualityFlag, QualityMeasurements};
+
 /// Maximum seconds of audio fed into Chromaprint, matching `fpcalc`'s default `-length 120`.
 pub const CHROMAPRINT_MAX_SECONDS: u32 = 120;
 
@@ -114,6 +116,10 @@ pub struct DecodedAudioFacts {
     pub decode_errors: u32,
     /// `Some(true)` or `Some(false)` when the codec carries a stream checksum such as FLAC MD5.
     pub checksum_ok: Option<bool>,
+    /// The length the container states, which a cut-short file no longer reaches.
+    pub header_frames: Option<u64>,
+    /// Whether the codec is lossless (PCM, FLAC, ALAC), whatever the container.
+    pub lossless: bool,
 }
 
 impl DecodedAudioFacts {
@@ -123,6 +129,11 @@ impl DecodedAudioFacts {
         }
         ((u128::from(self.frames) * 1000 + u128::from(self.sample_rate) / 2)
             / u128::from(self.sample_rate)) as u64
+    }
+
+    pub fn header_duration_ms(&self) -> Option<u64> {
+        let frames = self.header_frames.filter(|&frames| frames > 0)?;
+        Some(Self { frames, ..*self }.duration_ms())
     }
 
     pub fn effective_bitrate_kbps(&self, size_bytes: u64) -> Option<u32> {
@@ -135,12 +146,21 @@ impl DecodedAudioFacts {
 }
 
 /// Full identity computed for an audio file on disk.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AssetIdentity {
     pub byte_hash: ContentHash,
     pub audio: Option<AudioHash>,
     pub chromaprint: Option<Chromaprint>,
     pub decoded_facts: Option<DecodedAudioFacts>,
+    /// What the same decode found about the file's quality. `None` when it was not checked.
+    pub quality: Option<AssetQuality>,
+}
+
+/// A file's quality numbers and the flags they earned.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssetQuality {
+    pub measurements: QualityMeasurements,
+    pub flags: Vec<QualityFlag>,
 }
 
 /// Maps between canonical track sample positions and a specific asset's sample positions.

@@ -691,6 +691,8 @@ enum FilterTarget {
     /// A generic tag, held in `asset_tag_value` and `asset_tag_missing`.
     Tag(&'static str),
     Artwork,
+    /// Flags in `quality_flag`.
+    Quality,
     /// When the track came in, kept on `track`.
     Added,
 }
@@ -740,6 +742,7 @@ fn filter_target(column: LibraryColumn) -> FilterTarget {
         // The path inside the music folder up to its last slash.
         LibraryColumn::Folder => column_of("rtrim(asset.path, replace(asset.path, '/', ''))"),
         LibraryColumn::Artwork => FilterTarget::Artwork,
+        LibraryColumn::Quality => FilterTarget::Quality,
         LibraryColumn::Tag(field) => FilterTarget::Tag(field.name()),
     }
 }
@@ -799,6 +802,21 @@ fn filter_sql(filter: &FieldFilter, plain: bool, params: &mut Vec<Value>) -> Str
             match filter.condition {
                 Condition::Missing => format!("(asset.artwork_hash IS NULL AND NOT {user})"),
                 _ => format!("(asset.artwork_hash IS NOT NULL OR {user})"),
+            }
+        }
+        FilterTarget::Quality => {
+            let flags = "SELECT 1 FROM quality_flag WHERE quality_flag.asset_id = asset.id";
+            match &filter.condition {
+                Condition::AnyOf(kinds) => format!(
+                    "EXISTS ({flags} AND quality_flag.kind IN ({}))",
+                    text_list(kinds, params)
+                ),
+                Condition::NoneOf(kinds) => format!(
+                    "NOT EXISTS ({flags} AND quality_flag.kind IN ({}))",
+                    text_list(kinds, params)
+                ),
+                Condition::Missing => format!("NOT EXISTS ({flags})"),
+                _ => format!("EXISTS ({flags})"),
             }
         }
         FilterTarget::Tag(field) => tag_filter_sql(field, &filter.condition, params),
@@ -1352,11 +1370,12 @@ pub(crate) fn load_tracks_by_ids(
         "SELECT asset.id, asset.track_id, source.folder, asset.path, asset.size_bytes,
                 asset.modified_ns, asset.format, asset.duration_ms, asset.sample_rate,
                 asset.channels, asset.bit_depth, asset.bitrate_kbps, track.favourite,
-                asset.missing_since, asset.artwork_hash, track.added_ns
+                asset.missing_since, asset.artwork_hash, track.added_ns, {worst}
          FROM asset
          JOIN source ON source.id = asset.source_id
          JOIN track ON track.id = asset.track_id
-         WHERE asset.id IN ({in_list})"
+         WHERE asset.id IN ({in_list})",
+        worst = crate::quality::worst_flag_sql!(),
     );
     let mut track_stmt = connection.prepare(&track_sql)?;
     let mut by_id: HashMap<i64, TrackRow> = HashMap::with_capacity(ids.len());

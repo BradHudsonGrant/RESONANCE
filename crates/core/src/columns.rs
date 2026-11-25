@@ -48,6 +48,8 @@ pub enum LibraryColumn {
     SampleRate,
     BitDepth,
     Channels,
+    /// The most serious problem the quality check found.
+    Quality,
     FileSize,
     Added,
     Modified,
@@ -57,7 +59,7 @@ pub enum LibraryColumn {
     Tag(TagField),
 }
 
-const FIXED: [LibraryColumn; 25] = [
+const FIXED: [LibraryColumn; 26] = [
     LibraryColumn::Title,
     LibraryColumn::Artist,
     LibraryColumn::Bpm,
@@ -78,6 +80,7 @@ const FIXED: [LibraryColumn; 25] = [
     LibraryColumn::SampleRate,
     LibraryColumn::BitDepth,
     LibraryColumn::Channels,
+    LibraryColumn::Quality,
     LibraryColumn::FileSize,
     LibraryColumn::Added,
     LibraryColumn::Modified,
@@ -152,6 +155,7 @@ impl LibraryColumn {
             Self::SampleRate => "sample_rate",
             Self::BitDepth => "bit_depth",
             Self::Channels => "channels",
+            Self::Quality => "quality",
             Self::FileSize => "file_size",
             Self::Added => "added",
             Self::Modified => "modified",
@@ -201,6 +205,7 @@ impl LibraryColumn {
             Self::SampleRate => "Sample rate",
             Self::BitDepth => "Bit depth",
             Self::Channels => "Channels",
+            Self::Quality => "Quality",
             Self::FileSize => "File size",
             Self::Added => "Date added",
             Self::Modified => "Date modified",
@@ -224,9 +229,12 @@ impl LibraryColumn {
             Self::Album | Self::Genre | Self::Label | Self::CatNo | Self::Year | Self::Artwork => {
                 ColumnGroup::Release
             }
-            Self::Format | Self::Bitrate | Self::SampleRate | Self::BitDepth | Self::Channels => {
-                ColumnGroup::Audio
-            }
+            Self::Format
+            | Self::Bitrate
+            | Self::SampleRate
+            | Self::BitDepth
+            | Self::Channels
+            | Self::Quality => ColumnGroup::Audio,
             Self::FileSize | Self::Added | Self::Modified | Self::Path | Self::Folder => {
                 ColumnGroup::File
             }
@@ -246,7 +254,7 @@ impl LibraryColumn {
             Self::Format | Self::Year => Some(64),
             Self::Bitrate | Self::SampleRate | Self::FileSize => Some(84),
             Self::Added | Self::Modified => Some(96),
-            Self::CatNo => Some(112),
+            Self::CatNo | Self::Quality => Some(112),
             Self::Path => Some(280),
             Self::Comment | Self::Folder => Some(180),
             Self::Composer
@@ -284,7 +292,7 @@ impl LibraryColumn {
         )
     }
 
-    /// How a click on the column's header sorts. Artwork has no order.
+    /// How a click on the column's header sorts. Artwork and quality have no order.
     pub fn sort_field(self) -> Option<TrackSortField> {
         Some(match self {
             Self::Title => TrackSortField::Title,
@@ -301,7 +309,7 @@ impl LibraryColumn {
             Self::Label => TrackSortField::Label,
             Self::CatNo => TrackSortField::CatNo,
             Self::Year => TrackSortField::Year,
-            Self::Artwork => return None,
+            Self::Artwork | Self::Quality => return None,
             Self::Format => TrackSortField::Format,
             Self::Bitrate => TrackSortField::Bitrate,
             Self::SampleRate => TrackSortField::SampleRate,

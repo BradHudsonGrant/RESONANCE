@@ -7,6 +7,7 @@ use resonance_core::filter::{
 };
 use resonance_core::key::Key;
 use resonance_core::library::AudioFormat;
+use resonance_core::quality::QualityKind;
 use resonance_core::quick_filters::{QuickFilterBar, QuickFilterChange as CoreChange};
 use resonance_core::search::FilterPill;
 use resonance_db::{Database, DbError, now_unix_ms};
@@ -219,6 +220,13 @@ fn filter_field(column: LibraryColumn) -> FilterField {
             .map(|key| FilterChoice {
                 value: key.camelot(),
                 label: key.camelot(),
+            })
+            .collect(),
+        LibraryColumn::Quality => QualityKind::ALL
+            .into_iter()
+            .map(|kind| FilterChoice {
+                value: kind.name().to_owned(),
+                label: kind.label().to_owned(),
             })
             .collect(),
         _ => Vec::new(),

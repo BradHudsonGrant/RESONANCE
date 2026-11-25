@@ -273,6 +273,11 @@ pub enum Request {
         #[serde(default)]
         fields: Vec<TagName>,
     },
+    /// What the quality check measured and flagged in the file a track plays.
+    TrackQuality {
+        #[ts(type = "number")]
+        track_id: i64,
+    },
     /// The picture a track shows and the release picture identification proposes for it.
     TrackArtwork {
         #[ts(type = "number")]
@@ -542,6 +547,7 @@ pub enum Response {
     AcceptProposedFields(TrackStagingDiff),
     AcceptAllAboveThreshold(AcceptedProposals),
     SkipProposal(TrackStagingDiff),
+    TrackQuality(TrackQuality),
     TrackArtwork(TrackArtwork),
     AcceptProposedArtwork(TrackArtwork),
     SkipProposedArtwork(TrackArtwork),
@@ -792,6 +798,58 @@ pub struct TrackStagingDiff {
     #[ts(type = "number")]
     pub track_id: i64,
     pub fields: Vec<StagedField>,
+}
+
+/// What a quality flag says is wrong.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum QualityFlagKind {
+    Damaged,
+    Clipping,
+    Dropout,
+    Transcode,
+}
+
+/// `Confirmed` is a fact about the file. `Likely` is a strong sign worth checking by ear.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum QualityCertainty {
+    Confirmed,
+    Likely,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct TrackQualityFlag {
+    pub kind: QualityFlagKind,
+    pub label: String,
+    pub certainty: QualityCertainty,
+    /// Why, in the words the app shows.
+    pub reason: String,
+}
+
+/// A track's loudness, peaks and flags. Levels are in LUFS, LU, dBFS, dBTP and dB.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, TS)]
+#[ts(export)]
+pub struct TrackQuality {
+    #[ts(type = "number")]
+    pub track_id: i64,
+    /// False until the file has been through the check.
+    pub checked: bool,
+    pub integrated_lufs: Option<f64>,
+    pub loudness_range_lu: Option<f64>,
+    pub sample_peak_dbfs: Option<f64>,
+    pub true_peak_dbtp: Option<f64>,
+    /// Peak over RMS below 150 Hz.
+    pub crest_low_db: Option<f64>,
+    /// Peak over RMS from 400 Hz to 4 kHz.
+    pub crest_mid_db: Option<f64>,
+    /// Where a lossy encoder's low-pass cut the sound, when one was found.
+    pub spectral_cutoff_hz: Option<f64>,
+    /// Most serious first.
+    pub flags: Vec<TrackQualityFlag>,
 }
 
 /// A track's picture by hash. The page loads the bytes from `/artwork/<hash>`.
@@ -1228,6 +1286,8 @@ pub struct LibraryTrack {
     pub missing_since: Option<i64>,
     /// The hash of the picture the track shows, loaded from `/artwork/<hash>`.
     pub artwork: Option<String>,
+    /// The most serious problem the quality check found.
+    pub quality: Option<TrackQualityFlag>,
     /// Unix epoch milliseconds when the track came into the library.
     #[ts(type = "number")]
     pub added_ms: i64,
@@ -1765,6 +1825,8 @@ pub struct PrepItem {
     pub review_token: String,
     pub fields: Vec<StagedField>,
     pub artwork: TrackArtwork,
+    /// Every quality flag on the track's file, most serious first.
+    pub quality: Vec<TrackQualityFlag>,
     pub pending_fields: u32,
     pub provider: Option<String>,
     pub confidence: f64,

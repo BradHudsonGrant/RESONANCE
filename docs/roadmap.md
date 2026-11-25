@@ -118,7 +118,7 @@ Accept:
 
 ## M4 Quality and replace, v0.5.0
 
-- [ ] Integrity and transcode checks
+- [x] Integrity and transcode checks ([#160](https://github.com/BradHudsonGrant/RESONANCE/issues/160)). Evidence: merged in [#164](https://github.com/BradHudsonGrant/RESONANCE/pull/164); the identity decode also measures loudness, loudness range, true peak, crest factors, clipping, dropouts and the high end of the spectrum, judged by `crates/core/src/quality.rs` into confirmed or likely flags with a reason, and stored in `asset_quality` and `quality_flag` ([ADR 0025](adr/0025-quality-checks-in-the-identity-decode.md)); `crates/library/tests/quality.rs` shows a truncated WAV and a bad FLAC MD5 confirmed damaged, a hard-clipped sine confirmed clipping, a spliced gap a likely dropout, a 16 kHz brickwall FLAC a likely transcode and a 12 dB per octave roll-off left alone; the check ran cleanly over the 50 local fixtures, and the Quality filter, Inspector and Prep show the flags.
 - [ ] Duplicates and versions
 - [ ] The replace flow with alignment
 - [ ] Journal, undo and trash

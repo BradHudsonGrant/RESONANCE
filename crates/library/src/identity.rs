@@ -8,12 +8,19 @@ use std::sync::{Mutex, OnceLock, RwLock};
 use std::thread;
 
 use resonance_core::identity::{
-    AUDIO_HASH_DOMAIN, AssetIdentity, AudioHash, CHROMAPRINT_MAX_SECONDS, Chromaprint, ContentHash,
-    DecodedAudioFacts, encode_base64_url_unpadded,
+    AUDIO_HASH_DOMAIN, AssetIdentity, AssetQuality, AudioHash, CHROMAPRINT_MAX_SECONDS,
+    Chromaprint, ContentHash, DecodedAudioFacts, encode_base64_url_unpadded,
 };
+use resonance_core::library::AudioFormat;
+use resonance_core::quality::{self, QualityInput, QualityMeasurements};
 use resonance_db::{Database, DbError, IdentityMatch, PendingAsset};
 use rusty_chromaprint::{Configuration, FingerprintCompressor, Fingerprinter};
-use symphonia::core::codecs::audio::{AudioCodecParameters, AudioDecoder, AudioDecoderOptions};
+use symphonia::core::codecs::audio::well_known::{
+    CODEC_ID_ALAC, CODEC_ID_FLAC, CODEC_ID_PCM_F64BE_PLANAR, CODEC_ID_PCM_S32LE,
+};
+use symphonia::core::codecs::audio::{
+    AudioCodecId, AudioCodecParameters, AudioDecoder, AudioDecoderOptions,
+};
 use symphonia::core::errors::Error as DecodeError;
 use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::{FormatOptions, FormatReader, TrackType};
@@ -21,8 +28,11 @@ use symphonia::core::io::{MediaSource, MediaSourceStream};
 use symphonia::core::meta::MetadataOptions;
 
 use crate::file_tags::open_audio_reader;
+use crate::quality::QualityMeter;
 
 const EXCERPT_TARGET_SAMPLE_RATE: u32 = 11_025;
+/// Symphonia hands out `i32` samples with full scale at 2^31.
+const I32_FULL_SCALE: f32 = 2_147_483_648.0;
 const MAX_EXCERPT_FALLBACK_SAMPLES: usize = 15 * 60 * EXCERPT_TARGET_SAMPLE_RATE as usize;
 
 struct OpenedAudio {
@@ -32,6 +42,14 @@ struct OpenedAudio {
     sample_rate: u32,
     channels: usize,
     total_frames: Option<u64>,
+    lossless: bool,
+}
+
+/// PCM (but not A-law or mu-law), FLAC and ALAC keep every sample.
+fn is_lossless(codec: AudioCodecId) -> bool {
+    (CODEC_ID_PCM_S32LE..=CODEC_ID_PCM_F64BE_PLANAR).contains(&codec)
+        || codec == CODEC_ID_FLAC
+        || codec == CODEC_ID_ALAC
 }
 
 fn open_audio_decoder(
@@ -72,6 +90,7 @@ fn open_audio_decoder(
         .ok_or(LibraryAudioError::NoAudioTrack)?;
     let track_id = track.id;
     let total_frames = track.num_frames;
+    let lossless = is_lossless(params.codec);
     let mut decoder_options = AudioDecoderOptions::default().gapless(true);
     if verify {
         decoder_options = decoder_options.verify(true);
@@ -86,6 +105,7 @@ fn open_audio_decoder(
         sample_rate,
         channels,
         total_frames,
+        lossless,
     })
 }
 
@@ -233,24 +253,40 @@ pub fn compute_byte_hash(path: &Path) -> io::Result<ContentHash> {
 /// and `chromaprint` set to `None`.
 pub fn compute_identity(path: &Path) -> io::Result<AssetIdentity> {
     let byte_hash = compute_byte_hash(path)?;
-    let (audio, chromaprint, decoded_facts) = decode_audio_identity(path);
+    let decoded = decode_audio_identity(path);
+    let quality = AudioFormat::of(path).map(|format| {
+        let measurements = decoded.measurements.unwrap_or_default();
+        let flags = quality::assess(&QualityInput {
+            format,
+            facts: decoded.facts,
+            measurements,
+        });
+        AssetQuality {
+            measurements,
+            flags,
+        }
+    });
     Ok(AssetIdentity {
         byte_hash,
-        audio,
-        chromaprint,
-        decoded_facts,
+        audio: decoded.audio,
+        chromaprint: decoded.chromaprint,
+        decoded_facts: decoded.facts,
+        quality,
     })
 }
 
-fn decode_audio_identity(
-    path: &Path,
-) -> (
-    Option<AudioHash>,
-    Option<Chromaprint>,
-    Option<DecodedAudioFacts>,
-) {
+#[derive(Default)]
+struct DecodedIdentity {
+    audio: Option<AudioHash>,
+    chromaprint: Option<Chromaprint>,
+    facts: Option<DecodedAudioFacts>,
+    measurements: Option<QualityMeasurements>,
+}
+
+/// Decodes every packet once, feeding the audio hash, the fingerprint and the quality meter.
+fn decode_audio_identity(path: &Path) -> DecodedIdentity {
     let Ok(reader) = open_audio_reader(path) else {
-        return (None, None, None);
+        return DecodedIdentity::default();
     };
     let ext = path.extension().and_then(|ext| ext.to_str());
     let Ok(OpenedAudio {
@@ -259,11 +295,15 @@ fn decode_audio_identity(
         track_id,
         sample_rate,
         channels,
-        ..
+        total_frames: header_frames,
+        lossless,
     }) = open_audio_decoder(Box::new(reader), ext, true)
     else {
-        return (None, None, None);
+        return DecodedIdentity::default();
     };
+    let spectrum = AudioFormat::of(path)
+        .is_some_and(|format| quality::checks_for_transcode(format, lossless, sample_rate));
+    let mut meter = QualityMeter::new(sample_rate, channels, spectrum);
 
     let mut audio_hasher = blake3::Hasher::new();
     audio_hasher.update(AUDIO_HASH_DOMAIN);
@@ -282,6 +322,7 @@ fn decode_audio_identity(
 
     let mut pcm32: Vec<i32> = Vec::new();
     let mut pcm32_bytes: Vec<u8> = Vec::new();
+    let mut pcm_f32: Vec<f32> = Vec::new();
     let mut pcm16: Vec<i16> = Vec::new();
     let mut total_frames: u64 = 0;
     let mut decode_errors: u32 = 0;
@@ -315,6 +356,14 @@ fn decode_audio_identity(
         }
         audio_hasher.update(&pcm32_bytes);
 
+        pcm_f32.clear();
+        pcm_f32.extend(
+            pcm32[..whole_samples]
+                .iter()
+                .map(|&sample| sample as f32 / I32_FULL_SCALE),
+        );
+        meter.push(&pcm_f32);
+
         if fp_enabled && fp_samples_fed < max_fp_samples {
             decoded.copy_to_vec_interleaved(&mut pcm16);
             let remaining = max_fp_samples - fp_samples_fed;
@@ -327,16 +376,18 @@ fn decode_audio_identity(
     }
 
     if total_frames == 0 {
-        return (None, None, None);
+        return DecodedIdentity::default();
     }
 
     let checksum_ok = decoder.finalize().verify_ok;
-    let decoded_facts = Some(DecodedAudioFacts {
+    let facts = Some(DecodedAudioFacts {
         sample_rate,
         channels: channels as u16,
         frames: total_frames,
         decode_errors,
         checksum_ok,
+        header_frames,
+        lossless,
     });
 
     let audio = Some(AudioHash {
@@ -364,7 +415,12 @@ fn decode_audio_identity(
         None
     };
 
-    (audio, chromaprint, decoded_facts)
+    DecodedIdentity {
+        audio,
+        chromaprint,
+        facts,
+        measurements: Some(meter.finish()),
+    }
 }
 
 /// Decodes in-memory audio bytes (such as a 30-second MP3/M4A preview) into raw Chromaprint
@@ -404,6 +460,7 @@ pub fn extract_pcm_wav_excerpt(
         sample_rate,
         channels,
         total_frames,
+        ..
     } = open_audio_decoder(Box::new(reader), ext, false)?;
 
     let known_window = total_frames.filter(|&frames| frames > 0).map(|frames| {

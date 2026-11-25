@@ -53,7 +53,7 @@ The table opens with Title, Artist, BPM, Key and Time, the same five a new libra
 A 24 px columns button sits in the header cell above the row actions, and right-clicking anywhere on the header opens the same menu under the pointer. It is a `role="menu"` popover on Surface with a 1 px control border:
 
 - A search field at the top. Typing narrows the list by column name.
-- The columns in five groups, each under a mono label: Track (Title, Artist, BPM, Key, Time, Composer, Remixer, Mix, Comment), Release (Album, Genre, Label, Catalogue number, Year, Artwork), Audio (Format, Bitrate, Sample rate, Bit depth, Channels), File (File size, Date added, Date modified, Path, Folder) and Tags. Tags lists the tags the library holds that have no column of their own, as "Tag: Album artist", "Tag: Track number" and so on, and only the ones at least one track has.
+- The columns in five groups, each under a mono label: Track (Title, Artist, BPM, Key, Time, Composer, Remixer, Mix, Comment), Release (Album, Genre, Label, Catalogue number, Year, Artwork), Audio (Format, Bitrate, Sample rate, Bit depth, Channels, Quality), File (File size, Date added, Date modified, Path, Folder) and Tags. Tags lists the tags the library holds that have no column of their own, as "Tag: Album artist", "Tag: Track number" and so on, and only the ones at least one track has.
 - Each column is a `menuitemcheckbox`. Title is always ticked and cannot be cleared.
 - Under the list, "Wrap long text" as a checkbox, and "Reset to default", which puts back the five columns, their widths, library order and no wrap.
 
@@ -94,11 +94,11 @@ Any column can narrow the table, with conditions that suit what it holds. The ru
 | Text (Title, Artist, Album, Genre, Label, Catalogue number, Composer, Remixer, Mix, Comment, tags) | contains, is, is not, starts with, is any of, is none of |
 | A number (BPM, Time, Year, Bitrate, Sample rate, Bit depth, Channels, File size) | between, under, over |
 | A date (Date added, Date modified) | between, before, after |
-| A choice (Key, Format) | is any of, is none of |
+| A choice (Key, Format, Quality) | is any of, is none of |
 | Artwork | is missing, is present |
 | Path, Folder | contains, starts with |
 
-Every column that a track can lack also has "is missing" and "is present", so "No genre" and "No artwork" are one step. "Is not" and "is none of" keep tracks that have no value, so hiding a genre never hides untagged tracks. Conditions combine with AND. One level of "any of these" groups conditions with OR, for example "No genre or no label".
+Every column that a track can lack also has "is missing" and "is present", so "No genre" and "No artwork" are one step. Quality's choices are its flags (Damaged, Clipping, Dropouts, Fake lossless), its cell shows the most serious one, and "Has quality flags" is one of the starter quick filters. "Is not" and "is none of" keep tracks that have no value, so hiding a genre never hides untagged tracks. Conditions combine with AND. One level of "any of these" groups conditions with OR, for example "No genre or no label".
 
 ### Adding a filter
 
@@ -152,6 +152,7 @@ The column on the right, 420 px at the reference size, on Surface with a 1 px bo
 - Track: 96 px artwork with 10 px corners, the title in 20 px Space Grotesk 600 and the artist in 14 px Text 2, star and more buttons on the right, then an Analysed status pill and the audio format (for example `WAV 44.1 kHz 24-bit`) in 12 px mono. The artwork is the user's picture, else the file's front cover, and a track with neither shows a still frame of the dot wave seeded from the track. The artwork is a button: it opens a picker for a JPEG or PNG, and takes one dropped on it, with a dashed control border while a file is over it. A picked picture shows at once and goes into the file with the next tag write ([ADR 0021](../adr/0021-artwork-store-and-layers.md)).
 - Cover: only while identification has a release cover waiting. A 60 px thumb of it, a mono Cover label, "Release cover from MusicBrainz" (or Discogs) in 13 px Text 2, and Use cover and Skip buttons. Use cover makes it the track's picture.
 - Details: two rows of mono labels over 13 px values. BPM, Key, Time and Release, then Genre, Subgenre and Label. File facts show from #52, tags from M3, BPM and key from M5.
+- Quality: once the file has been checked. A mono Quality label, then Loudness, Range and True peak as mono labels over values such as `-9.8 LUFS`. Under them each flag: its name in 13 px Text 500, Confirmed or Likely in 11 px Text 2 beside it, and the reason in 11 px Text 2 on the next line. A file with no flags says "No problems found" in Muted. Prep shows the same flags above the matches ([ADR 0025](../adr/0025-quality-checks-in-the-identity-decode.md)).
 - Tags: removable 26 px tags and a round add button. Editing arrives in M3.
 - Audio traits: five `TraitBar` rows (Danceability, Energy, Warmth, Vocal presence, Groove), filled by M5 and M6.
 - Energy: an Energy pill over the energy curve (`Waveform mode="curve"`) with five time labels under it. The curve arrives with M5.
