@@ -190,20 +190,21 @@
   let copies = $state<TrackCopies | null>(null);
   let keepingCopy = $state(false);
 
-  // Read again when the library changes, since a scan can bring in another copy.
+  const currentId = $derived(current?.track.id);
+
+  // Read once per track, not on every library change, so a large save is not slowed by it.
   $effect(() => {
-    const trackId = current?.track.id;
-    void revision;
+    const trackId = currentId;
     if (trackId === undefined) {
       copies = null;
       return;
     }
     client.trackCopies(trackId).then(
       (loaded) => {
-        if (current?.track.id === trackId) copies = loaded;
+        if (untrack(() => currentId) === trackId) copies = loaded;
       },
       () => {
-        if (current?.track.id === trackId) copies = null;
+        if (untrack(() => currentId) === trackId) copies = null;
       },
     );
   });
