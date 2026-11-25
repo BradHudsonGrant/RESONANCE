@@ -21,7 +21,6 @@
   import Inspector from './lib/library/Inspector.svelte';
   import Library from './lib/library/Library.svelte';
   import DeleteSheet, { type DeleteClient } from './lib/library/DeleteSheet.svelte';
-  import HistorySheet, { type HistoryClient } from './lib/library/HistorySheet.svelte';
   import RelinkSheet, { type RelinkClient } from './lib/library/RelinkSheet.svelte';
   import RenameSheet, { type RenameClient } from './lib/library/RenameSheet.svelte';
   import ScanFolder from './lib/library/ScanFolder.svelte';
@@ -29,6 +28,7 @@
   import { TableLayoutState } from './lib/library/table-layout.svelte';
   import { TrackPages } from './lib/library/track-pages.svelte';
   import ActivitySheet, { type ActivityClient } from './lib/shell/ActivitySheet.svelte';
+  import type { HistoryClient } from './lib/shell/OperationHistory.svelte';
   import CommandBar, { type Command } from './lib/shell/CommandBar.svelte';
   import PlayerBar from './lib/shell/PlayerBar.svelte';
   import { PreviewPlayer } from './lib/shell/preview.svelte';
@@ -187,8 +187,7 @@
   let deleteOpen = $state(false);
   let deleteMounted = $state(false);
   let deleteTrackIds = $state<number[]>([]);
-  let historyOpen = $state(false);
-  let historyMounted = $state(false);
+  let undoRequest = $state(0);
   let batchTagOpen = $state(false);
   let batchTagMounted = $state(false);
   let batchTagTrackIds = $state<number[]>([]);
@@ -431,9 +430,11 @@
     deleteOpen = true;
   }
 
-  function openHistory() {
-    historyMounted = true;
-    historyOpen = true;
+  /** Ctrl+Z in the Library: Activity opens, undoes the newest change to files and shows it. */
+  function undoLatestChange() {
+    undoRequest += 1;
+    activityMounted = true;
+    activityOpen = true;
   }
 
   function openBatchTag(trackIds: number[]) {
@@ -715,6 +716,15 @@
     void refreshPrepCount();
   }
 
+  /** A field where Ctrl+Z belongs to the text. A ticked checkbox is not one. */
+  function editingText(target: EventTarget | null): boolean {
+    return (
+      target instanceof HTMLElement &&
+      (target.isContentEditable ||
+        target.matches('input:not([type=checkbox]):not([type=radio]), textarea, select'))
+    );
+  }
+
   function typing(target: EventTarget | null): boolean {
     return (
       target instanceof HTMLElement &&
@@ -758,6 +768,15 @@
       event.preventDefault();
       if (space === 'Prep') prepPaletteOpen = true;
       void tick().then(() => document.getElementById(commandInput)?.focus());
+    } else if (
+      command &&
+      key === 'z' &&
+      !event.shiftKey &&
+      space === 'Library' &&
+      !editingText(event.target)
+    ) {
+      event.preventDefault();
+      undoLatestChange();
     } else if (command && (key === '1' || key === '2' || key === '4')) {
       event.preventDefault();
       keys[key]?.();
@@ -909,7 +928,6 @@
             onrelink={openRelink}
             onrename={openRename}
             ondelete={openDelete}
-            onhistory={openHistory}
             onscan={openScan}
             ontogglefavourite={toggleFavourite}
             onclearsearch={clearSearch}
@@ -1058,14 +1076,6 @@
   />
 {/if}
 
-{#if historyMounted}
-  <HistorySheet
-    bind:open={historyOpen}
-    client={historyClient}
-    onundone={() => void pages.refresh()}
-  />
-{/if}
-
 {#if batchTagMounted}
   <BatchTagSheet
     bind:open={batchTagOpen}
@@ -1089,6 +1099,9 @@
     onsnapshot={(next) => {
       activitySnapshot = next;
     }}
+    {historyClient}
+    {undoRequest}
+    onundone={() => void pages.refresh()}
   />
 {/if}
 

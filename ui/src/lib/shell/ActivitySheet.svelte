@@ -5,6 +5,7 @@
   import Sheet from '../design/Sheet.svelte';
   import type { ActivityJob } from '../ipc/bindings/ActivityJob';
   import type { ActivitySnapshot } from '../ipc/bindings/ActivitySnapshot';
+  import OperationHistory, { type HistoryClient } from './OperationHistory.svelte';
 
   export interface ActivityClient {
     snapshot: () => Promise<ActivitySnapshot>;
@@ -20,6 +21,11 @@
     snapshot?: ActivitySnapshot;
     client?: ActivityClient;
     onsnapshot?: (next: ActivitySnapshot) => void;
+    /** Lists the journal of changes to files, each with its undo. */
+    historyClient?: HistoryClient;
+    /** Each new value undoes the newest change to files, as Ctrl+Z asks. */
+    undoRequest?: number;
+    onundone?: () => void;
   }
 
   let {
@@ -27,6 +33,9 @@
     snapshot = { active: [], recent: [], mix_backoff_active: false },
     client,
     onsnapshot,
+    historyClient,
+    undoRequest = 0,
+    onundone,
   }: Props = $props();
 
   let busyJobId = $state<number | null>(null);
@@ -213,6 +222,11 @@
         </ul>
       {/if}
     </section>
+
+    {#if historyClient}
+      <ModularDivider />
+      <OperationHistory {open} client={historyClient} {undoRequest} {onundone} />
+    {/if}
 
     <ModularDivider />
 
