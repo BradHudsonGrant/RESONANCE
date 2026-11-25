@@ -5,11 +5,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use resonance_core::identify::{
-    Candidate, RankedCandidate, has_online_attempt, is_viable_alternative, should_expand_candidates,
+    Candidate, RankedCandidate, has_online_attempt, should_expand_candidates, visible_candidates,
 };
 use resonance_core::library::TagField;
-use resonance_core::prep::{PrepStage, TextCase, release_group};
-use resonance_core::staging::{dirty_file_fields, normalise_value, staging_diff};
+use resonance_core::prep::{NOTICED_TAGS, PrepStage, TextCase, order_by_stage, release_group};
+use resonance_core::staging::{dirty_file_fields, normalise_value, staging_diff, title_with_mix};
 use resonance_db::{
     BatchTagOperation, CachedArtworkSource, Database, IdentificationPass, StoredIdentification,
     TrackArtworkState, TrackRow,
@@ -24,13 +24,14 @@ use resonance_identify::provider::{CACHE_TTL, IdentifyError, display_name};
 
 use crate::command::{
     AcceptedProposals, BatchTagTool, CandidateArtworkState, IdentifyStepOutcome,
-    MatchCandidateSummary, PrepItem, PrepPageSnapshot, PrepQueueSnapshot, PrepReleaseGroup,
-    PrepStageCounts, PrepStageName, ProposedTrackArtwork, StagedField, TagName, TextCaseName,
-    TrackArtwork, TrackCandidateArtwork, TrackQuery,
+    MatchCandidateSummary, PrepItem, PrepOrderSnapshot, PrepQueueSnapshot, PrepReleaseGroup,
+    PrepStageCounts, PrepStageName, ProposedTrackArtwork, SortDirection, StagedField, TagName,
+    TextCaseName, TrackArtwork, TrackCandidateArtwork, TrackQuery,
 };
 use crate::error::ApiError;
 use crate::online::{to_command_evidence, to_command_step_reports};
-use crate::staging::{fields_of, staged_field, tag_field};
+use crate::staging::{fields_of, staged_field, tag_field, tag_name};
+use crate::table_layout::core_direction;
 use crate::tag_writes::journal_operation;
 use crate::{Api, core_track_query, library_track};
 
@@ -174,17 +175,7 @@ fn prepare_identification_data(
         .map(|id| parse_ranked_candidates(&id.candidates_json))
         .unwrap_or_default();
     let selected_candidate = stored_id.as_ref().map_or(0, |id| id.selected_candidate);
-    let anchor = ranked.first();
-    let visible_indices: Vec<usize> = ranked
-        .iter()
-        .enumerate()
-        .filter(|(index, item)| {
-            *index == 0
-                || *index as u32 == selected_candidate
-                || anchor.is_some_and(|top| is_viable_alternative(top, item))
-        })
-        .map(|(index, _)| index)
-        .collect();
+    let visible_indices = visible_candidates(&ranked, selected_candidate as usize);
     let visible_slice: Vec<RankedCandidate> = visible_indices
         .iter()
         .map(|&idx| ranked[idx].clone())
@@ -251,8 +242,10 @@ fn build_prep_items(
         };
         let dirty_fields = dirty_file_fields(&layers.file, &layers.dirty_user);
         let diffs = staging_diff(&layers.file, &layers.user, &layers.proposals);
+        // Prep shows what a file holds; the mix is part of the title there.
         let fields: Vec<StagedField> = diffs
             .into_iter()
+            .filter(|diff| diff.field.is_written_to_files())
             .map(|diff| staged_field(diff, &dirty_fields))
             .collect();
         let artwork_state: TrackArtworkState =
@@ -283,7 +276,9 @@ fn build_prep_items(
         let mut changeable_confidences = Vec::new();
 
         for field in &fields {
-            if field.changes {
+            // The same rule as the stage facts: only a field the user has not set waits for a
+            // decision.
+            if field.changes && !field.locked_by_user {
                 pending_fields += 1;
                 let conf = field.confidence.unwrap_or(0.0);
                 if !field.locked_by_user {
@@ -338,7 +333,10 @@ fn build_prep_items(
                     confidence: item.confidence,
                     audio_matched: item.audio_matched,
                     artist: c.artist.clone(),
-                    title: c.title.clone(),
+                    title: c
+                        .title
+                        .as_deref()
+                        .map(|title| title_with_mix(title, c.mix.as_deref())),
                     mix: c.mix.clone(),
                     album: c.album.clone(),
                     label: c.label.clone(),
@@ -401,8 +399,31 @@ fn build_prep_items(
             subtitle: group.subtitle,
         });
 
+        let track = library_track(row);
+        // A tag counts as missing when neither the file nor the user has given it a value.
+        let missing = NOTICED_TAGS
+            .into_iter()
+            .filter(|&tag| {
+                let current = fields
+                    .iter()
+                    .find(|field| tag_field(field.field) == tag)
+                    .and_then(|field| field.current_value.clone())
+                    .or_else(|| match tag {
+                        TagField::Artist => track.artist.clone(),
+                        TagField::Title => Some(track.title.clone()),
+                        TagField::Genre => track.genre.clone(),
+                        TagField::Label => track.label.clone(),
+                        TagField::Year => track.year.clone(),
+                        _ => None,
+                    });
+                current.is_none_or(|value| value.trim().is_empty())
+            })
+            .map(tag_name)
+            .collect();
+
         items.push(PrepItem {
-            track: library_track(row),
+            track,
+            missing,
             review_token,
             fields,
             artwork,
@@ -484,19 +505,14 @@ impl Api {
         })
     }
 
-    pub(crate) fn prep_page(
+    pub(crate) fn prep_order(
         &self,
         query: Option<TrackQuery>,
         track_ids: Option<Vec<i64>>,
-        stage: Option<PrepStageName>,
-        offset: u32,
-        limit: u32,
-    ) -> Result<PrepPageSnapshot, ApiError> {
-        let limit = limit.clamp(1, MAX_PREP_ITEMS);
+        by_stage: Option<SortDirection>,
+    ) -> Result<PrepOrderSnapshot, ApiError> {
         let core_query = core_track_query(query)?;
-        // Every page counts the stages over the whole view, so the view's IDs are read in full,
-        // and the filename pass runs over all of them first so its suggestions count as Review.
-        let ordered = {
+        let mut ids = {
             let library = self.locked_library();
             if let Some(selected) = track_ids {
                 let mut seen = HashSet::with_capacity(selected.len());
@@ -520,13 +536,11 @@ impl Api {
             }
         };
 
+        // The filename pass runs over the whole view first, so its fixes show in the counts.
         if self.core.local_pass_dirty.load(Ordering::Acquire) {
-            if !ordered.is_empty() {
-                let _ = run_local_pass_for_tracks(
-                    &self.core.library,
-                    &ordered,
-                    &AtomicBool::new(false),
-                );
+            if !ids.is_empty() {
+                let _ =
+                    run_local_pass_for_tracks(&self.core.library, &ids, &AtomicBool::new(false));
             }
             if !self
                 .locked_library()
@@ -537,47 +551,23 @@ impl Api {
             }
         }
 
-        let library = self.locked_library();
-        let facts = library
+        let facts = self
+            .locked_library()
             .prep_stage_facts()
             .map_err(ApiError::library_unreadable)?;
         let mut stages = PrepStageCounts::default();
-        let wanted = stage.map(core_stage);
-        let mut shown = Vec::with_capacity(if wanted.is_some() { 0 } else { ordered.len() });
-        for id in ordered {
-            let track_stage = facts.stage(id);
-            match track_stage {
+        for &id in &ids {
+            match facts.stage(id) {
                 PrepStage::Review => stages.review += 1,
                 PrepStage::NotSearched => stages.not_searched += 1,
                 PrepStage::NoMatch => stages.no_match += 1,
                 PrepStage::Done => stages.done += 1,
             }
-            if wanted.is_none_or(|wanted| wanted == track_stage) {
-                shown.push(id);
-            }
         }
-        let total = shown.len() as u32;
-        let start = (offset as usize).min(shown.len());
-        let end = start.saturating_add(limit as usize).min(shown.len());
-        let page_ids = &shown[start..end];
-
-        let rows: Vec<TrackRow> = if page_ids.is_empty() {
-            Vec::new()
-        } else {
-            let mut by_id = library
-                .tracks_by_ids(page_ids)
-                .map_err(ApiError::library_unreadable)?;
-            page_ids.iter().filter_map(|id| by_id.remove(id)).collect()
-        };
-        let snapshot = self.finish_prep_queue(&library, &rows, false)?;
-        Ok(PrepPageSnapshot {
-            total,
-            offset,
-            stages,
-            items: snapshot.items,
-            unwritten_tracks: snapshot.unwritten_tracks,
-            last_operation: snapshot.last_operation,
-        })
+        if let Some(direction) = by_stage {
+            order_by_stage(&mut ids, |id| facts.stage(id), core_direction(direction));
+        }
+        Ok(PrepOrderSnapshot { ids, stages })
     }
 
     pub(crate) fn prep_queue(

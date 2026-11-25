@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 
+use resonance_core::identify::Step;
 use resonance_core::library::TagField;
 use resonance_core::prep::{
     PrepStage, TextCase, find_and_replace_edits, fix_case_edits, parent_folder, release_edits_from,
@@ -64,22 +65,41 @@ impl PrepStageFacts {
 }
 
 impl Database {
+    /// What decides each track's Prep stage, read for the whole library at once. The rules match
+    /// the ones a Prep item is built with: a suggestion waits only for a field written to files
+    /// that the user has not set, and a track counts as searched once any online step ran.
     pub fn prep_stage_facts(&self) -> Result<PrepStageFacts, DbError> {
         let mut facts = PrepStageFacts::default();
-        let mut pending = self.connection.prepare_cached(
-            "SELECT track_id FROM proposed_tag WHERE status = 'pending'
+        let library_only: Vec<String> = TagField::ALL
+            .into_iter()
+            .filter(|field| !field.is_written_to_files())
+            .map(|field| format!("'{}'", field.name()))
+            .collect();
+        let mut pending = self.connection.prepare_cached(&format!(
+            "SELECT p.track_id FROM proposed_tag p
+             WHERE p.status = 'pending' AND p.field NOT IN ({})
+               AND NOT EXISTS (
+                   SELECT 1 FROM user_tag u WHERE u.track_id = p.track_id AND u.field = p.field
+               )
              UNION
              SELECT track_id FROM proposed_artwork WHERE status = 'pending'",
-        )?;
+            library_only.join(", ")
+        ))?;
         for id in pending.query_map([], |row| row.get(0))? {
             facts.pending.insert(id?);
         }
-        let mut online = self.connection.prepare_cached(
-            // A search that ran but had a provider fail is stored as not complete, so the next
-            // pass retries it. It has still been searched, and the stage says so.
+        // A search that ran but had a provider fail is stored as not complete, so the next pass
+        // retries it. It has still been searched, and the stage says so.
+        let online_steps: Vec<String> = Step::ALL
+            .into_iter()
+            .filter(|step| step.is_online())
+            .map(|step| format!("steps_json LIKE '%\"step\":\"{}\"%'", step.name()))
+            .collect();
+        let mut online = self.connection.prepare_cached(&format!(
             "SELECT track_id, best_json IS NOT NULL FROM track_identification
-             WHERE online = 1 OR best_json IS NOT NULL OR steps_json LIKE '%\"step\":\"text_search\"%'",
-        )?;
+             WHERE online = 1 OR best_json IS NOT NULL OR {}",
+            online_steps.join(" OR ")
+        ))?;
         for row in online.query_map([], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, bool>(1)?))
         })? {
@@ -91,7 +111,6 @@ impl Database {
         }
         Ok(facts)
     }
-
     /// Track IDs with pending field or artwork proposals, in track order.
     pub fn pending_prep_track_ids(&self, limit: u32) -> Result<Vec<i64>, DbError> {
         let mut stmt = self.connection.prepare_cached(

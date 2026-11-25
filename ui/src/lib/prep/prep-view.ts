@@ -35,17 +35,8 @@ export const MISSING_LABELS: Record<MissingField, string> = {
 
 export const MISSING_FIELDS = Object.keys(MISSING_LABELS) as MissingField[];
 
-/** The tags a DJ notices are missing. BPM and key come from analysis, so they are left out. */
-const CORE_FIELDS: MissingField[] = ['artist', 'title', 'artwork', 'genre', 'label', 'year'];
-
-/** Fields the common tag formats have no frame for. Prep shows only what a file carries, so the
- * mix appears as part of the title instead. */
-const LIBRARY_ONLY_FIELDS: ReadonlySet<TagName> = new Set(['mix', 'subgenre']);
-
-/** The tags a file can hold, in the order staging shows them. */
-export function fileFields(item: PrepItem): StagedField[] {
-  return item.fields.filter((field) => !LIBRARY_ONLY_FIELDS.has(field.field));
-}
+/** The stages in the order the core sorts them, work first. */
+const STAGE_ORDER: readonly PrepStageName[] = ['review', 'not_searched', 'no_match', 'done'];
 
 const STAGE_WORDS: Record<PrepStageName, string> = {
   review: 'to review',
@@ -54,12 +45,18 @@ const STAGE_WORDS: Record<PrepStageName, string> = {
   done: 'done',
 };
 
+/** A number and the words after it, kept apart so the number can be set in monospace. */
+export interface CountedPart {
+  number?: string;
+  words: string;
+}
+
 /** How the view's tracks stand, in a few words: "36 to review · 395 not searched". */
-export function stageSummary(counts: PrepStageCounts): string {
-  return (['review', 'not_searched', 'no_match', 'done'] as const)
-    .filter((stage) => counts[stage] > 0)
-    .map((stage) => counts[stage].toLocaleString('en-GB') + ' ' + STAGE_WORDS[stage])
-    .join(' · ');
+export function stageSummary(counts: PrepStageCounts): CountedPart[] {
+  return STAGE_ORDER.filter((stage) => counts[stage] > 0).map((stage) => ({
+    number: counts[stage].toLocaleString('en-GB'),
+    words: STAGE_WORDS[stage],
+  }));
 }
 export function createSelectionSet(): Set<number> {
   return new Set<number>();
@@ -118,9 +115,6 @@ export const LIST_COLUMNS: ReadonlyArray<{ id: ListColumn; label: string }> = [
   { id: 'status', label: 'Status' },
 ];
 
-/** Stages in the order a status sort lists them, work first. */
-export const STAGE_ORDER: readonly PrepStageName[] = ['review', 'not_searched', 'no_match', 'done'];
-
 /** Ascending, then descending, then back to the order Prep chose. */
 export function nextListSort(sort: ListSort | null, column: ListColumn): ListSort | null {
   if (sort?.column !== column) return { column, direction: 'asc' };
@@ -144,34 +138,18 @@ export function withFindText(query: TrackQuery | null, text: string): TrackQuery
   return { ...query, text: [query?.text, text].filter(Boolean).join(' ') };
 }
 
-/** Core tags the track will still lack after its suggestions are saved. */
-export function stillMissing(item: PrepItem): string[] {
-  return CORE_FIELDS.filter((name) => {
-    if (name === 'artwork') return !item.artwork.artwork && !item.artwork.proposed;
-    const field = item.fields.find((entry) => entry.field === name);
-    const value = field ? field.current_value || field.proposed_value : item.track[name];
-    return !String(value ?? '').trim();
-  }).map((name) => MISSING_LABELS[name]);
-}
-
-/** Core tags the track lacks right now, in the short words a list row has room for. */
+/** The tags the track lacks right now, in the short words a list row has room for. The core
+ * decides which tags count; the cover is read from the track's artwork. */
 export function missingNow(item: PrepItem): string[] {
-  return CORE_FIELDS.filter((name) => {
-    if (name === 'artwork') return !item.artwork.artwork;
-    const field = item.fields.find((entry) => entry.field === name);
-    const value = field ? field.current_value : item.track[name];
-    return !String(value ?? '').trim();
-  }).map((name) => (name === 'artwork' ? 'cover' : MISSING_LABELS[name].toLowerCase()));
+  const tags = item.missing.map((name) => MISSING_LABELS[name].toLowerCase());
+  // The cover is named after the artist and title, before the other tags.
+  const afterNames = item.missing.filter((name) => name === 'artist' || name === 'title').length;
+  if (!item.artwork.artwork) tags.splice(afterNames, 0, 'cover');
+  return tags;
 }
-
 /** Suggestions the user can still take: changing, and not a value the user set by hand. */
 export function reviewableFields(item: PrepItem): StagedField[] {
-  return fileFields(item).filter((field) => field.changes && !field.locked_by_user);
-}
-
-/** Suggestions held back because the user typed that field. */
-export function keptFields(item: PrepItem): StagedField[] {
-  return fileFields(item).filter((field) => field.changes && field.locked_by_user);
+  return item.fields.filter((field) => field.changes && !field.locked_by_user);
 }
 
 export function percent(confidence: number): string {
@@ -191,8 +169,7 @@ export function releaseLine(
 }
 
 export function candidateTitle(candidate: MatchCandidateSummary): string {
-  const title = candidate.mix ? `${candidate.title ?? ''} (${candidate.mix})` : candidate.title;
-  return [candidate.artist, title].filter(Boolean).join(' – ') || 'Untitled release';
+  return [candidate.artist, candidate.title].filter(Boolean).join(' – ') || 'Untitled release';
 }
 
 /** How the match was made, in the words a DJ would use to decide whether to trust it. */
@@ -240,12 +217,12 @@ export function localSource(item: PrepItem): string | null {
 export interface RowStatus {
   /** One plain phrase for where the track stands. */
   primary: string;
-  /** What is waiting, in a few words, or empty. */
-  secondary: string;
+  /** What is waiting, in a few words, or nothing. */
+  secondary: CountedPart[];
 }
 
-function count(n: number, one: string, many: string): string {
-  return n.toLocaleString('en-GB') + ' ' + (n === 1 ? one : many);
+function counted(n: number, one: string, many: string): CountedPart {
+  return { number: n.toLocaleString('en-GB'), words: n === 1 ? one : many };
 }
 
 export function rowStatus(item: PrepItem): RowStatus {
@@ -253,16 +230,23 @@ export function rowStatus(item: PrepItem): RowStatus {
   // Without an online match, waiting suggestions are tidy-ups read from the file itself.
   const source = localSource(item);
   const fixes = waiting
-    ? count(waiting, 'fix', 'fixes') + (source ? ' from ' + source.toLowerCase() : '')
-    : '';
+    ? [
+        {
+          ...counted(waiting, 'fix', 'fixes'),
+          words:
+            (waiting === 1 ? 'fix' : 'fixes') + (source ? ' from ' + source.toLowerCase() : ''),
+        },
+      ]
+    : [];
   switch (item.stage) {
     case 'review': {
       const match = selectedCandidate(item);
+      const secondary: CountedPart[] = [];
+      if (match) secondary.push({ number: percent(match.confidence), words: '' });
+      if (waiting) secondary.push(counted(waiting, 'to accept', 'to accept'));
       return {
-        primary: match ? (match.audio_matched ? 'Audio match' : 'Name match') : 'Match',
-        secondary:
-          (match ? percent(match.confidence) + ' · ' : '') +
-          count(waiting, 'to accept', 'to accept'),
+        primary: match ? (match.audio_matched ? 'Audio match' : 'Name match') : 'Matched online',
+        secondary,
       };
     }
     case 'not_searched':
@@ -270,13 +254,10 @@ export function rowStatus(item: PrepItem): RowStatus {
     case 'no_match':
       return {
         primary: 'No match',
-        secondary: fixes || (item.needs_url ? 'Paste a release link' : ''),
+        secondary: fixes.length ? fixes : item.needs_url ? [{ words: 'Paste a release link' }] : [],
       };
     case 'done':
-      return {
-        primary: item.has_unwritten ? 'Edits not written' : 'Done',
-        secondary: '',
-      };
+      return { primary: item.has_unwritten ? 'Edits not written' : 'Done', secondary: [] };
   }
 }
 export function resolveActiveCoverIndex(

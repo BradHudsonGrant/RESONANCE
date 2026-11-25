@@ -2,8 +2,6 @@
   import { tick, untrack } from 'svelte';
   import Button from '../design/Button.svelte';
   import Icon from '../design/Icon.svelte';
-  import Thumb from '../design/Thumb.svelte';
-  import { artworkUrl } from '../ipc/artwork';
   import type { AcceptedTagWriteReport } from '../ipc/bindings/AcceptedTagWriteReport';
   import type { AcceptedProposals } from '../ipc/bindings/AcceptedProposals';
   import type { ActivityJob } from '../ipc/bindings/ActivityJob';
@@ -12,7 +10,7 @@
   import type { FileTagWrite } from '../ipc/bindings/FileTagWrite';
   import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
   import type { PrepItem } from '../ipc/bindings/PrepItem';
-  import type { PrepPageSnapshot } from '../ipc/bindings/PrepPageSnapshot';
+  import type { PrepOrderSnapshot } from '../ipc/bindings/PrepOrderSnapshot';
   import type { PrepStageCounts } from '../ipc/bindings/PrepStageCounts';
   import type { PrepStageName } from '../ipc/bindings/PrepStageName';
   import type { RenameScope } from '../ipc/bindings/RenameScope';
@@ -24,12 +22,12 @@
   import type { UndoReport } from '../ipc/bindings/UndoReport';
   import BatchTagSheet from './BatchTagSheet.svelte';
   import PrepReview from './PrepReview.svelte';
+  import PrepTrackList from './PrepTrackList.svelte';
   import WriteTagsSheet from './WriteTagsSheet.svelte';
+  import { keepPlaces, nextActive, rowsToFetch } from './prep-order';
   import {
-    LIST_COLUMNS,
     MISSING_FIELDS,
     MISSING_LABELS,
-    STAGE_ORDER,
     buildMissingQuery,
     nextListSort,
     withFindText,
@@ -39,18 +37,13 @@
     formatUrlLookupNotice,
     formatWriteNotice,
     intersectSelection,
-    missingNow,
     pruneSelection,
     reviewableFields,
-    rowStatus,
     stageSummary,
     type ListColumn,
     type ListSort,
     type MissingField,
   } from './prep-view';
-
-  /** Columns whose gaps the row already shows as an empty cell. */
-  const COLUMN_GAPS = new Set(['genre', 'label', 'year']);
 
   export interface PrepClient {
     trackIds: (
@@ -58,13 +51,14 @@
       trackIds: number[] | null,
       stage: PrepStageName | null,
     ) => Promise<number[]>;
-    prepPage: (
+    /** The view's order and stage counts; `byStage` groups it by stage instead. */
+    prepOrder: (
       query: TrackQuery | null,
       trackIds: number[] | null,
-      stage: PrepStageName | null,
-      offset: number,
-      limit: number,
-    ) => Promise<PrepPageSnapshot>;
+      byStage: 'asc' | 'desc' | null,
+    ) => Promise<PrepOrderSnapshot>;
+    /** The rows for these tracks, in the order given. */
+    prepItems: (trackIds: number[]) => Promise<PrepItem[]>;
     acceptAndWrite: (
       trackIds: number[],
       fields: TagName[] | null,
@@ -124,8 +118,6 @@
     onfocustrack,
   }: Props = $props();
 
-  // Rows beyond the visible ones that are drawn and fetched, so a short scroll shows no gaps.
-  const overscan = 15;
   const noCounts: PrepStageCounts = { review: 0, not_searched: 0, no_match: 0, done: 0 };
   let missing = $state<MissingField | ''>('');
   let counts = $state<PrepStageCounts>(noCounts);
@@ -136,23 +128,15 @@
   // Tracks fetched so far, by ID. Only the rows in view are drawn, and the list is as tall as the
   // whole view from the start, so the scrollbar never jumps as more rows arrive.
   let byId = $state.raw<Readonly<Record<number, PrepItem>>>({});
-  let scrollTop = $state(0);
-  let viewHeight = $state(0);
-  let rowHeight = $state(56);
-  const windowStart = $derived(Math.max(0, Math.floor(scrollTop / rowHeight) - overscan));
-  const windowEnd = $derived(
-    Math.min(order.length, Math.ceil((scrollTop + viewHeight) / rowHeight) + overscan),
-  );
-  const visibleIds = $derived(order.slice(windowStart, windowEnd));
-  // Plain bookkeeping for rows already requested; nothing renders from it.
+  // Plain bookkeeping for rows already requested, and for rows the core no longer has, which are
+  // dropped from the list rather than asked for again. Nothing renders from either.
   // eslint-disable-next-line svelte/prefer-svelte-reactivity
   const fetching = new Set<number>();
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const gone = new Set<number>();
   let activeId = $state<number | null>(null);
   const selected = createSelectionSet();
   let selectionVersion = $state(0);
-  let selectingAll = $state(false);
-  let selectAllPromise: Promise<void> | null = null;
-  let pendingSelectToggles: number[] = [];
   let loading = $state(true);
   let loadError = $state('');
   let notice = $state('');
@@ -174,14 +158,13 @@
   let history = $state.raw<SavedChange[]>([]);
   const lastAction = $derived(history.at(-1) ?? null);
   let workspace: HTMLElement;
-  let listScroll = $state<HTMLElement>();
+  let list = $state<ReturnType<typeof PrepTrackList>>();
   let review = $state<ReturnType<typeof PrepReview>>();
   let width = $state(0);
   let reviewing = $state(false);
   const compact = $derived(width > 0 && width <= 800);
   let keyboardTarget: number | null = null;
   let reloading = $state(false);
-  let scopeGeneration = 0;
   let fetchGeneration = 0;
   let suppressRevisions = 0;
   let lastOwnWriteAt = 0;
@@ -192,12 +175,14 @@
   let appliedFind = $state('');
   let findTimer: ReturnType<typeof setTimeout> | undefined;
   let listSort = $state<ListSort | null>(null);
+  // Bumped to sort again by the same column, such as after a search finds new matches.
+  let sortGeneration = $state(0);
   const filterQuery = $derived(withFindText(buildMissingQuery(batchQuery, missing), appliedFind));
   const scopeQuery = $derived(withListSort(filterQuery, listSort));
   const current = $derived(activeId == null ? null : (byId[activeId] ?? null));
   const detailOpen = $derived(compact && reviewing && current !== null);
   const selectedCount = $derived((void selectionVersion, selected.size));
-  const searchBusy = $derived(busy || !!activeOnlineJob || selectingAll);
+  const searchBusy = $derived(busy || !!activeOnlineJob);
   const findCount = $derived(selectedCount || counts.not_searched);
   const toolsScopeLabel = $derived(
     selectedCount > 0
@@ -224,39 +209,37 @@
     listSort = nextListSort(listSort, column);
   }
 
+  /** Sorts by status again even when it already is, so new matches move to the top. */
+  function showMatchesFirst() {
+    listSort = { column: 'status', direction: 'asc' };
+    sortGeneration++;
+  }
+
   function markOwnWrite() {
     suppressRevisions++;
     lastOwnWriteAt = Date.now();
   }
 
-  /** The view's track order: the query's own, or grouped by stage when sorting by status. */
-  async function viewOrder(): Promise<number[]> {
-    if (listSort?.column !== 'status') return client.trackIds(scopeQuery, batchTrackIds, null);
-    const groups = await Promise.all(
-      STAGE_ORDER.map((stage) => client.trackIds(filterQuery, batchTrackIds, stage)),
-    );
-    if (listSort.direction === 'desc') groups.reverse();
-    return groups.flat();
+  /** The view's order and counts: the query's own sort, or grouped by stage in the core. */
+  function viewOrder(): Promise<PrepOrderSnapshot> {
+    const byStage = listSort?.column === 'status' ? listSort.direction : null;
+    return client.prepOrder(byStage ? filterQuery : scopeQuery, batchTrackIds, byStage);
   }
 
-  async function viewCounts(): Promise<PrepStageCounts> {
-    return (await client.prepPage(scopeQuery, batchTrackIds, null, 0, 1)).stages;
-  }
-
-  /** Items for these tracks, in the order given. */
+  /** Items for these tracks, in the order given. Tracks the core no longer has are noted. */
   async function itemsFor(ids: number[]): Promise<PrepItem[]> {
     const chunks: number[][] = [];
     for (let start = 0; start < ids.length; start += 500)
       chunks.push(ids.slice(start, start + 500));
-    const pages = await Promise.all(
-      chunks.map((chunk) => client.prepPage(null, chunk, null, 0, chunk.length)),
-    );
-    return pages.flatMap((page) => page.items);
+    const items = (await Promise.all(chunks.map((chunk) => client.prepItems(chunk)))).flat();
+    const found = new Set(items.map((item) => item.track.id));
+    for (const id of ids) if (!found.has(id)) gone.add(id);
+    return items;
   }
 
   $effect(() => {
     const key = contextKey;
-    const sorting = JSON.stringify(listSort);
+    const sorting = JSON.stringify([listSort, sortGeneration]);
     const currentRefresh = refresh;
     const currentRevision = revision;
     void scopeQuery;
@@ -275,14 +258,13 @@
 
     const request = ++fetchGeneration;
     reloading = true;
+    clearTimeout(fetchTimer);
+    const hadFocus = untrack(() => !!workspace?.contains(document.activeElement));
     untrack(() => {
       if (newScope) {
         scopeKey = key;
-        scopeGeneration++;
         selected.clear();
         selectionVersion++;
-        selectingAll = false;
-        selectAllPromise = null;
         order = [];
         byId = {};
         activeId = null;
@@ -297,45 +279,34 @@
       loadError = '';
     });
 
-    const shown = untrack(() => ({
-      start: windowStart,
-      end: Math.max(windowEnd, windowStart + 40),
-      active: activeId,
-    }));
+    // A new view draws from the top; anything else refreshes the rows on screen.
+    const shown = untrack(() => (newScope || !list ? { start: 0, end: 40 } : list.range()));
     const previous = untrack(() => order);
+    const previousActive = untrack(() => activeId);
     const reorder = newScope || newSort || onlyRevisionChanged;
     void (async () => {
-      const [nextOrder, nextCounts] = await Promise.all([
-        reorder ? viewOrder() : Promise.resolve(previous),
-        viewCounts(),
-      ]);
-      // Tracks already in the list keep their places when the library changes underneath; new
-      // ones join at the end. Only a new view or a new sort reorders.
-      let ids = nextOrder;
-      if (reorder && !newScope && !newSort) {
-        const fresh = new Set(nextOrder);
-        const kept = previous.filter((id) => fresh.has(id));
-        const known = new Set(kept);
-        ids = [...kept, ...nextOrder.filter((id) => !known.has(id))];
-      }
-      // Saving, searching or sorting refetches only what is in view; the rest loads on scroll.
-      const wanted = ids.slice(shown.start, shown.end);
-      if (shown.active != null && !wanted.includes(shown.active) && ids.includes(shown.active)) {
-        wanted.push(shown.active);
-      }
-      const loaded = await itemsFor(wanted);
-      return { ids, loaded, nextCounts };
+      const next = reorder
+        ? await viewOrder()
+        : {
+            ids: previous,
+            stages: (await client.prepOrder(scopeQuery, batchTrackIds, null)).stages,
+          };
+      gone.clear();
+      // Only a new view or a new sort reorders; a library change keeps every place.
+      const ids = reorder && !newScope && !newSort ? keepPlaces(previous, next.ids) : next.ids;
+      const active = nextActive(previous, ids, previousActive);
+      const loaded = await itemsFor(rowsToFetch(ids, shown.start, shown.end, active));
+      return { ids: ids.filter((id) => !gone.has(id)), loaded, stages: next.stages, active };
     })()
-      .then(({ ids, loaded, nextCounts }) => {
+      .then(({ ids, loaded, stages, active }) => {
         if (request !== fetchGeneration) return;
         order = ids;
-        counts = nextCounts;
+        counts = stages;
         byId = Object.fromEntries(loaded.map((item) => [item.track.id, item]));
-        if (selected.size > 0 && !selectAllPromise && pruneSelection(selected, ids)) {
-          selectionVersion++;
-        }
-        if (activeId == null || !ids.includes(activeId)) {
-          setActive(ids[0] ?? null);
+        if (selected.size > 0 && pruneSelection(selected, ids)) selectionVersion++;
+        if (active !== activeId) {
+          setActive(active);
+          if (hadFocus && active != null) keyboardTarget = active;
         }
         reloading = false;
         loading = false;
@@ -354,15 +325,13 @@
 
   // Rows that scroll into view are fetched in one request after scrolling settles briefly.
   let fetchTimer: ReturnType<typeof setTimeout> | undefined;
-  $effect(() => {
-    const ids = visibleIds;
-    const loaded = byId;
+  function fetchWindow(ids: number[]) {
     if (reloading) return;
-    const missing = ids.filter((id) => !(id in loaded) && !fetching.has(id));
+    const missing = ids.filter((id) => !(id in byId) && !fetching.has(id) && !gone.has(id));
     if (!missing.length) return;
     clearTimeout(fetchTimer);
     fetchTimer = setTimeout(() => void fetchRows(missing), 60);
-  });
+  }
 
   async function fetchRows(ids: number[]) {
     const request = fetchGeneration;
@@ -371,6 +340,7 @@
       const next = await itemsFor(ids);
       if (request !== fetchGeneration) return;
       byId = { ...byId, ...Object.fromEntries(next.map((item) => [item.track.id, item])) };
+      if (ids.some((id) => gone.has(id))) order = order.filter((id) => !gone.has(id));
       void focusKeyboardRow();
     } catch (err) {
       notice = message(err);
@@ -379,30 +349,6 @@
     }
   }
 
-  // The row height comes from the stylesheet; reading it keeps the drawn window lined up.
-  $effect(() => {
-    void byId;
-    const row = listScroll?.querySelector<HTMLElement>('.row');
-    if (row && row.offsetHeight > 0 && row.offsetHeight !== untrack(() => rowHeight)) {
-      rowHeight = row.offsetHeight;
-    }
-  });
-
-  function onListScroll(event: Event) {
-    scrollTop = (event.currentTarget as HTMLElement).scrollTop;
-  }
-
-  /** Scrolls the list just enough to show the track at this position. */
-  function revealRow(position: number) {
-    const list = listScroll;
-    if (!list || position < 0) return;
-    const top = position * rowHeight;
-    if (top < list.scrollTop) list.scrollTop = top;
-    else if (top + rowHeight > list.scrollTop + list.clientHeight) {
-      list.scrollTop = top + rowHeight - list.clientHeight;
-    }
-    scrollTop = list.scrollTop;
-  }
   $effect(() => {
     const job = recentOnlineJob;
     if (job && job.id !== finishedJob) {
@@ -428,11 +374,12 @@
       return;
     }
     try {
-      const [review, noMatch] = await Promise.all([
-        client.trackIds(scopeQuery, searched, 'review'),
-        client.trackIds(scopeQuery, searched, 'no_match'),
-      ]);
-      searchSummary = { searched: searched.length, review: review.length, noMatch: noMatch.length };
+      const { stages } = await client.prepOrder(scopeQuery, searched, null);
+      searchSummary = {
+        searched: searched.length,
+        review: stages.review,
+        noMatch: stages.no_match,
+      };
     } catch (err) {
       notice = message(err);
     }
@@ -445,72 +392,28 @@
   }
 
   function isSelected(id: number) {
-    void selectionVersion;
-    const toggled = pendingSelectToggles.includes(id);
-    return selectAllPromise ? (selectingAll ? !toggled : toggled) : selected.has(id);
+    return selected.has(id);
   }
   function selectOne(id: number) {
-    if (selectAllPromise) {
-      const idx = pendingSelectToggles.indexOf(id);
-      if (idx >= 0) pendingSelectToggles.splice(idx, 1);
-      else pendingSelectToggles.push(id);
-      selectionVersion++;
-      return;
-    }
     if (selected.has(id)) selected.delete(id);
     else selected.add(id);
     selectionVersion++;
   }
   function clearTicks() {
-    scopeGeneration++;
-    selectingAll = false;
-    selectAllPromise = null;
-    pendingSelectToggles = [];
     selected.clear();
     selectionVersion++;
   }
+  /** The whole view's order is always known, so ticking everything needs no request. */
   function selectAll() {
     if (!totalCount) return;
-    if ((selectedCount === totalCount && !selectAllPromise) || (selectAllPromise && selectingAll)) {
+    if (selectedCount === totalCount) {
       clearTicks();
       return;
     }
-    if (order.length === totalCount) {
-      selected.clear();
-      for (const id of order) selected.add(id);
-      pendingSelectToggles = [];
-      selectionVersion++;
-      return;
-    }
-    const gen = scopeGeneration;
-    pendingSelectToggles = [];
-    selectingAll = true;
-    const promise = client
-      .trackIds(scopeQuery, batchTrackIds, null)
-      .then((allIds) => {
-        if (gen !== scopeGeneration) return;
-        selected.clear();
-        for (const id of allIds) selected.add(id);
-        for (const id of pendingSelectToggles) {
-          if (selected.has(id)) selected.delete(id);
-          else selected.add(id);
-        }
-        pendingSelectToggles = [];
-        selectionVersion++;
-      })
-      .catch((err: unknown) => {
-        if (gen === scopeGeneration) notice = message(err);
-      })
-      .finally(() => {
-        if (gen === scopeGeneration) {
-          selectingAll = false;
-          selectAllPromise = null;
-        }
-      });
-    selectAllPromise = promise;
+    for (const id of order) selected.add(id);
+    selectionVersion++;
   }
   async function resolveSelectedIds() {
-    if (selectAllPromise) await selectAllPromise;
     if (!selected.size) return [];
     if (missing !== '' && selected.size > 0) {
       const validIds = await client.trackIds(scopeQuery, batchTrackIds, null);
@@ -822,7 +725,7 @@
         }
         setActive(id);
         keyboardTarget = id;
-        revealRow(nextIdx);
+        list?.reveal(nextIdx);
         void focusKeyboardRow();
       }
       return;
@@ -843,8 +746,9 @@
     } else if (event.key === 'Enter' && current && plainTarget) {
       event.preventDefault();
       if (compact && !detailOpen) focusItem(current);
-      else if (current.stage === 'not_searched') findMatch(current);
-      else review?.acceptAll();
+      else if (reviewableFields(current).length > 0 || current.artwork.proposed)
+        review?.acceptAll();
+      else if (current.stage !== 'done') findMatch(current);
     } else if (
       key === 's' &&
       !event.shiftKey &&
@@ -925,7 +829,12 @@
           <Icon name="close" size="xs" />
         </Button>
       {/if}
-      {#if stageSummary(counts)}<span class="summary">{stageSummary(counts)}</span>{/if}
+      {#if stageSummary(counts).length}<span class="summary"
+          >{#each stageSummary(counts) as part, index (part.words)}{index > 0 ? ' · ' : ''}<span
+              class="numeric">{part.number}</span
+            >
+            {part.words}{/each}</span
+        >{/if}
       <span class="spacer"></span>
       {#if !activeOnlineJob}
         {#if selectedCount > 0}
@@ -933,7 +842,7 @@
           <Button size="sm" onclick={clearTicks}>Clear</Button>
           <Button
             size="sm"
-            disabled={busy || reloading || !!loadError || selectingAll}
+            disabled={busy || reloading || !!loadError}
             title="Save every suggestion for the ticked tracks (Shift+A)"
             onclick={saveTicked}>Save ticked</Button
           >
@@ -998,10 +907,8 @@
         <span class="numeric">{summary.review.toLocaleString('en-GB')}</span> to review ·
         <span class="numeric">{summary.noMatch.toLocaleString('en-GB')}</span> with no match
       </span>
-      {#if summary.review > 0 && listSort?.column !== 'status'}
-        <Button size="sm" onclick={() => (listSort = { column: 'status', direction: 'asc' })}
-          >Show them first</Button
-        >
+      {#if summary.review > 0}
+        <Button size="sm" onclick={showMatchesFirst}>Show them first</Button>
       {/if}
       <Button size="sm" variant="icon" ariaLabel="Dismiss" onclick={() => (searchSummary = null)}
         ><Icon name="close" size="xs" /></Button
@@ -1054,125 +961,24 @@
     </div>
   {:else}
     <div class="workspace" class:detail-open={detailOpen}>
-      <section class="tracks" aria-label="Track list">
-        <div class="list-head">
-          <input
-            type="checkbox"
-            aria-label={selectedCount === totalCount ? 'Deselect all tracks' : 'Select all tracks'}
-            title="Tick every track in the list (Ctrl+A)"
-            checked={selectedCount === totalCount && totalCount > 0}
-            indeterminate={selectedCount > 0 && selectedCount < totalCount}
-            onchange={selectAll}
-          />
-          <div class="columns">
-            {#each LIST_COLUMNS as column (column.id)}
-              {@const sorted = listSort?.column === column.id ? listSort.direction : null}
-              <button
-                type="button"
-                class="column"
-                data-column={column.id}
-                aria-label={'Sort by ' +
-                  column.label.toLowerCase() +
-                  (sorted === 'asc' ? ', A to Z' : sorted === 'desc' ? ', Z to A' : '')}
-                data-sorted={sorted ?? undefined}
-                onclick={() => sortBy(column.id)}
-                >{column.label}{#if column.id === 'title'}<span class="numeric count"
-                    >{totalCount.toLocaleString('en-GB')}</span
-                  >{/if}{#if sorted}<Icon
-                    name={sorted === 'asc' ? 'chevron-up' : 'chevron-down'}
-                    size="xs"
-                  />{/if}</button
-              >
-            {/each}
-          </div>
-        </div>
-        <div
-          class="list-scroll"
-          bind:this={listScroll}
-          bind:clientHeight={viewHeight}
-          onscroll={onListScroll}
-        >
-          <ul
-            class="rows"
-            aria-busy={loading}
-            style:padding-top={windowStart * rowHeight + 'px'}
-            style:padding-bottom={(order.length - windowEnd) * rowHeight + 'px'}
-          >
-            {#each visibleIds as id (id)}
-              {@const item = byId[id]}
-              {#if !item}
-                <li class="row placeholder" aria-hidden="true" style:height={rowHeight + 'px'}></li>
-              {:else}
-                {@const status = rowStatus(item)}
-                {@const gaps = missingNow(item)}
-                {@const searching = !!activeOnlineJob && searchingIds.has(item.track.id)}
-                {@const art = item.artwork.proposed?.artwork ?? item.artwork.artwork}
-                <li
-                  class="row"
-                  class:active={item.track.id === activeId}
-                  data-active={item.track.id === activeId}
-                >
-                  <input
-                    type="checkbox"
-                    aria-label={'Tick ' + item.track.title}
-                    checked={isSelected(item.track.id)}
-                    onchange={() => selectOne(item.track.id)}
-                  />
-                  <button
-                    type="button"
-                    class="track-name"
-                    aria-pressed={item.track.id === activeId}
-                    onclick={() => focusItem(item)}
-                    title={item.track.location}
-                  >
-                    <Thumb
-                      seed={item.track.id}
-                      size="sm"
-                      src={art ? artworkUrl(art) : null}
-                      alt=""
-                    />
-                    <span class="names">
-                      <span class="title">{item.track.title}</span>
-                      <span class="artist"
-                        >{#if item.track.artist}{item.track.artist}{/if}{#if gaps.length}<span
-                            class="gaps"
-                            >{item.track.artist ? ' · ' : ''}Missing {gaps.join(', ')}</span
-                          >{#if gaps.some((gap) => !COLUMN_GAPS.has(gap))}<span class="gaps-wide"
-                              >{item.track.artist ? ' · ' : ''}Missing {gaps
-                                .filter((gap) => !COLUMN_GAPS.has(gap))
-                                .join(', ')}</span
-                            >{/if}{/if}</span
-                      >
-                    </span>
-                    {#each ['genre', 'label', 'year'] as const as column (column)}
-                      {@const value = item.track[column]}
-                      <span
-                        class="cell"
-                        data-column={column}
-                        class:numeric={column === 'year'}
-                        class:empty-cell={!value}
-                        title={value ?? undefined}
-                        >{#if value}{value}{:else}<span aria-label={'No ' + column}>–</span
-                          >{/if}</span
-                      >
-                    {/each}
-                    <span class="status" data-stage={searching ? 'searching' : item.stage}>
-                      {#if searching && item.stage === 'not_searched'}
-                        <span class="status-main">Searching</span>
-                      {:else}
-                        <span class="status-main">{status.primary}</span>
-                        {#if status.secondary}<span class="status-sub">{status.secondary}</span
-                          >{/if}
-                      {/if}
-                    </span>
-                  </button>
-                </li>
-              {/if}
-            {/each}
-          </ul>
-        </div>
-      </section>
-
+      <PrepTrackList
+        bind:this={list}
+        {order}
+        {byId}
+        {activeId}
+        sort={listSort}
+        tickedCount={selectedCount}
+        tickVersion={selectionVersion}
+        isTicked={isSelected}
+        {searchingIds}
+        searching={!!activeOnlineJob}
+        {loading}
+        onsort={sortBy}
+        ontickall={selectAll}
+        ontick={selectOne}
+        onopen={focusItem}
+        onwindow={fetchWindow}
+      />
       {#if current}
         {@const item = current}
         <PrepReview
@@ -1310,13 +1116,6 @@
     transform-origin: left;
     transition: transform var(--duration-fast) var(--ease-out);
   }
-  .gaps,
-  .gaps-wide {
-    color: var(--color-muted);
-  }
-  .status[data-stage='searching'] {
-    color: var(--color-text);
-  }
   .ticked,
   .feedback,
   .summary {
@@ -1336,14 +1135,6 @@
     border: var(--border-width) solid var(--color-border-control);
     border-radius: var(--radius-sm);
     padding-inline: var(--space-2-5);
-  }
-  input[type='checkbox'] {
-    width: var(--checkbox-size);
-    height: var(--checkbox-size);
-    accent-color: var(--color-text);
-    display: block;
-    margin: 0;
-    cursor: pointer;
   }
   .feedback {
     display: flex;
@@ -1367,224 +1158,8 @@
     min-width: 0;
     min-height: 0;
   }
-  .tracks {
-    min-width: 0;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    background: var(--color-surface);
-    border-right: var(--border-width) solid var(--color-border);
-  }
-  .tracks {
-    container: tracks / inline-size;
-    --col-genre: 96px;
-    --col-label: 120px;
-    --col-year: 40px;
-    --col-status: 120px;
-    --row-columns: var(--thumb-sm) minmax(0, 1fr) var(--col-genre) var(--col-label) var(--col-year)
-      var(--col-status);
-  }
-  .list-head {
-    display: grid;
-    grid-template-columns: var(--checkbox-size) minmax(0, 1fr);
-    align-items: center;
-    gap: var(--space-3);
-    height: var(--table-header-height);
-    padding-left: var(--space-4);
-    color: var(--color-text-2);
-    font-size: var(--text-sm);
-    border-bottom: var(--border-width) solid var(--color-border);
-  }
-  .columns {
-    min-width: 0;
-    height: 100%;
-    display: grid;
-    grid-template-columns: var(--row-columns);
-    align-items: center;
-    gap: var(--space-3);
-    padding-right: var(--space-4);
-  }
-  .column {
-    min-width: 0;
-    height: 100%;
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1-5);
-    padding: 0;
-    font: inherit;
-    color: inherit;
-    background: transparent;
-    border: 0;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: color var(--duration-fast) var(--ease-out);
-  }
-  .column:hover,
-  .column[data-sorted] {
-    color: var(--color-text);
-  }
-  .column:focus-visible {
-    outline: var(--focus-ring-width) solid var(--color-text);
-    outline-offset: -2px;
-  }
-  .column[data-column='title'] {
-    grid-column: 1 / 3;
-  }
-  .column[data-column='year'] {
-    justify-content: end;
-  }
-  .column[data-column='status'] {
-    justify-content: end;
-  }
-  .count {
-    color: var(--color-muted);
-  }
-  .cell {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: var(--text-sm);
-    color: var(--color-text-2);
-  }
-  .cell[data-column='year'] {
-    text-align: right;
-  }
-  .empty-cell {
-    color: var(--color-muted);
-  }
-  .gaps {
-    display: none;
-  }
   .find {
     width: 12rem;
-  }
-  @container tracks (max-width: 640px) {
-    .columns,
-    .track-name {
-      --row-columns: var(--thumb-sm) minmax(0, 1fr) var(--col-genre) var(--col-year)
-        var(--col-status);
-    }
-    [data-column='label'] {
-      display: none;
-    }
-  }
-  @container tracks (max-width: 520px) {
-    .columns,
-    .track-name {
-      --row-columns: var(--thumb-sm) minmax(0, 1fr) var(--col-status);
-    }
-    [data-column='genre'],
-    [data-column='year'],
-    .gaps-wide {
-      display: none;
-    }
-    .gaps {
-      display: inline;
-    }
-  }
-  .list-scroll {
-    flex: 1;
-    min-width: 0;
-    min-height: 0;
-    overflow-y: auto;
-    /* Rows are swapped as the list scrolls; anchoring would nudge the position each time. */
-    overflow-anchor: none;
-  }
-  .rows {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-  .row {
-    position: relative;
-    box-sizing: border-box;
-    /* Every row is the same height, so the list can place rows it has not drawn. */
-    height: calc(var(--thumb-sm) + var(--space-5));
-    display: grid;
-    grid-template-columns: var(--checkbox-size) minmax(0, 1fr);
-    align-items: center;
-    gap: var(--space-3);
-    padding-left: var(--space-4);
-    border-bottom: var(--border-width) solid var(--color-border);
-    transition: background-color var(--duration-fast) var(--ease-out);
-  }
-  .row:hover {
-    background: var(--color-surface-2);
-  }
-  .row.active {
-    background: var(--color-raised);
-  }
-  .row.active::before {
-    content: '';
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: 2px;
-    background: var(--color-accent);
-  }
-  .track-name {
-    min-width: 0;
-    display: grid;
-    grid-template-columns: var(--row-columns);
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-2) var(--space-4) var(--space-2) 0;
-    font: inherit;
-    text-align: left;
-    color: inherit;
-    background: transparent;
-    border: 0;
-    cursor: pointer;
-  }
-  .track-name:focus-visible {
-    outline: var(--focus-ring-width) solid var(--color-text);
-    outline-offset: -2px;
-  }
-  .names,
-  .status {
-    min-width: 0;
-    display: grid;
-    gap: var(--space-1);
-  }
-  .title,
-  .artist {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .title {
-    font-size: var(--text-md);
-  }
-  .artist,
-  .status {
-    font-size: var(--text-sm);
-    color: var(--color-text-2);
-  }
-  .status {
-    justify-items: end;
-    text-align: right;
-  }
-  .status-main {
-    display: inline-flex;
-    gap: var(--space-2);
-    max-width: 100%;
-    overflow: hidden;
-    white-space: nowrap;
-  }
-  .status[data-stage='review'] .status-main {
-    color: var(--color-text);
-  }
-  .status[data-stage='not_searched'],
-  .status[data-stage='done'] {
-    color: var(--color-muted);
-  }
-  .status-sub {
-    color: var(--color-muted);
-    white-space: nowrap;
-  }
-  .placeholder {
-    display: block;
-    border-bottom: var(--border-width) solid var(--color-border);
   }
   .empty {
     display: grid;
@@ -1614,15 +1189,14 @@
       grid-template-columns: minmax(0, 1fr);
     }
     .workspace:not(.detail-open) > :global(.review),
-    .workspace.detail-open > .tracks {
+    .workspace.detail-open > :global(.tracks) {
       display: none;
     }
-    .tracks {
+    .workspace :global(.tracks) {
       border-right: 0;
     }
   }
   @media (forced-colors: active) {
-    .row.active::before,
     .search-fill {
       background: Highlight;
     }

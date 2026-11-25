@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use resonance_api::Api;
 use resonance_api::command::{
     ActivityJobStatus, ActivityJobTier, IdentifyStepOutcome, ProviderKeyKind, Request, Response,
-    TagName,
+    SortDirection, TagName,
 };
 use resonance_api::error::ErrorCode;
 use resonance_db::Database;
@@ -1396,8 +1396,8 @@ fn reviewed_prep_actions_reject_stale_tokens_and_succeed_with_current_token() {
 }
 
 #[test]
-fn prep_page_paginates_and_accept_reports_reverted_fields() {
-    let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("api_prep_page_revert");
+fn prep_order_groups_by_stage_and_accept_reports_reverted_fields() {
+    let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("api_prep_order_revert");
     let _ = fs::remove_dir_all(&root);
     let music = root.join("Music");
     fs::create_dir_all(&music).unwrap();
@@ -1463,58 +1463,45 @@ fn prep_page_paginates_and_accept_reports_reverted_fields() {
 
     let api = Api::new_silent(db);
 
-    let Response::PrepPage(page_0) = api
-        .handle(Request::PrepPage {
-            query: None,
-            track_ids: None,
-            stage: None,
-            offset: 0,
-            limit: 2,
-        })
-        .unwrap()
-    else {
-        panic!("expected prep page");
+    let order = |by_stage| {
+        let Response::PrepOrder(order) = api
+            .handle(Request::PrepOrder {
+                query: None,
+                track_ids: None,
+                by_stage,
+            })
+            .unwrap()
+        else {
+            panic!("expected prep order");
+        };
+        order
     };
-    assert_eq!(page_0.total, 3);
-    assert_eq!(page_0.offset, 0);
-    assert_eq!(page_0.items.len(), 2);
-
-    let Response::PrepPage(page_1) = api
-        .handle(Request::PrepPage {
-            query: None,
-            track_ids: None,
-            stage: None,
-            offset: 2,
-            limit: 2,
-        })
-        .unwrap()
-    else {
-        panic!("expected second prep page");
-    };
-    assert_eq!(page_1.total, 3);
-    assert_eq!(page_1.items.len(), 1);
-    assert_eq!(page_0.items[0].track.id, first_id);
-    let counts = page_0.stages;
+    let plain = order(None);
+    assert_eq!(plain.ids.len(), 3);
+    assert_eq!(plain.ids[0], first_id);
+    let counts = plain.stages;
     assert_eq!(
         counts.review + counts.not_searched + counts.no_match + counts.done,
         3
     );
+    // Searched with no stored match: its waiting suggestion does not make it a match to review,
+    // so the two tracks not yet searched come first and it comes last.
+    assert_eq!(counts.no_match, 1);
+    assert_eq!(order(Some(SortDirection::Asc)).ids[2], first_id);
+    assert_eq!(order(Some(SortDirection::Desc)).ids[0], first_id);
 
-    let Response::PrepPage(review) = api
-        .handle(Request::PrepPage {
+    let Response::PrepQueue(rows) = api
+        .handle(Request::PrepQueue {
             query: None,
-            track_ids: None,
-            stage: Some(resonance_api::command::PrepStageName::Review),
-            offset: 0,
-            limit: 50,
+            proposals_only: false,
+            track_ids: Some(plain.ids[1..].to_vec()),
         })
         .unwrap()
     else {
-        panic!("expected review page");
+        panic!("expected prep rows");
     };
-    assert_eq!(review.total, counts.review);
-    // Searched with no stored match: its waiting suggestion does not make it a match to review.
-    assert!(!review.items.iter().any(|item| item.track.id == first_id));
+    let row_ids: Vec<i64> = rows.items.iter().map(|item| item.track.id).collect();
+    assert_eq!(row_ids, plain.ids[1..]);
     let Response::PrepTrackIds(no_match) = api
         .handle(Request::PrepTrackIds {
             query: None,

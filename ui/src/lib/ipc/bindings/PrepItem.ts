@@ -6,12 +6,17 @@ import type { MatchEvidence } from "./MatchEvidence";
 import type { PrepReleaseGroup } from "./PrepReleaseGroup";
 import type { PrepStageName } from "./PrepStageName";
 import type { StagedField } from "./StagedField";
+import type { TagName } from "./TagName";
 import type { TrackArtwork } from "./TrackArtwork";
 
 /**
  * One track in the Prep queue, with its 13-field staging diff and artwork ready to render.
  */
-export type PrepItem = { track: LibraryTrack, review_token: string, fields: Array<StagedField>, artwork: TrackArtwork, pending_fields: number, provider: string | null, confidence: number, audio_matched: boolean, needs_url: boolean, 
+export type PrepItem = { track: LibraryTrack, 
+/**
+ * The tags a DJ notices that the track has no value for yet.
+ */
+missing: Array<TagName>, review_token: string, fields: Array<StagedField>, artwork: TrackArtwork, pending_fields: number, provider: string | null, confidence: number, audio_matched: boolean, needs_url: boolean, 
 /**
  * Confidences of every pending unlocked changing field on this track, for live threshold
  * previews.

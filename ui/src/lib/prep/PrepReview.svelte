@@ -10,7 +10,6 @@
   import type { TagName } from '../ipc/bindings/TagName';
   import MatchEvidenceHeader, { formatProviderName } from './MatchEvidenceHeader.svelte';
   import {
-    fileFields,
     MISSING_LABELS,
     basisSentence,
     candidateTitle,
@@ -119,7 +118,13 @@
         .filter(Boolean)
         .join(' · ');
     }
-    if (source) return 'Suggested from the ' + source.toLowerCase() + '. Not searched online yet';
+    if (source) {
+      return (
+        'Suggested from the ' +
+        source.toLowerCase() +
+        (item.online_checked ? '. Nothing found online' : '. Not searched online yet')
+      );
+    }
     if (item.stage === 'not_searched') return 'Not searched online yet';
     if (item.stage === 'no_match') {
       return needsKey
@@ -320,7 +325,7 @@
               {/if}
             </td>
           </tr>
-          {#each fileFields(item) as field (field.field)}
+          {#each item.fields as field (field.field)}
             {@const offered = isSuggested(field)}
             <tr class:suggested={offered}>
               <th scope="row">{MISSING_LABELS[field.field]}</th>

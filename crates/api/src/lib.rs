@@ -518,15 +518,13 @@ impl Api {
             } => self
                 .prep_track_ids(query, track_ids, stage)
                 .map(Response::PrepTrackIds),
-            Request::PrepPage {
+            Request::PrepOrder {
                 query,
                 track_ids,
-                stage,
-                offset,
-                limit,
+                by_stage,
             } => self
-                .prep_page(query, track_ids, stage, offset, limit)
-                .map(Response::PrepPage),
+                .prep_order(query, track_ids, by_stage)
+                .map(Response::PrepOrder),
             Request::PrepQueue {
                 query,
                 proposals_only,

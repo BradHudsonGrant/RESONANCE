@@ -358,8 +358,9 @@ pub enum Request {
         #[ts(optional = nullable)]
         stage: Option<PrepStageName>,
     },
-    /// Total matching tracks and one page of the Prep queue.
-    PrepPage {
+    /// The order of the whole Prep view and how many of its tracks sit in each stage. With
+    /// y_stage, tracks are grouped by stage instead of the query's own sort.
+    PrepOrder {
         #[serde(default)]
         #[ts(optional = nullable)]
         query: Option<TrackQuery>,
@@ -368,9 +369,7 @@ pub enum Request {
         track_ids: Option<Vec<i64>>,
         #[serde(default)]
         #[ts(optional = nullable)]
-        stage: Option<PrepStageName>,
-        offset: u32,
-        limit: u32,
+        by_stage: Option<SortDirection>,
     },
     /// The Prep queue and staging diffs, either for explicit `track_ids`, a batch matching `query`
     /// sent from Library, pending proposals, or the whole library.
@@ -556,7 +555,7 @@ pub enum Response {
     RecentOperations(Vec<JournalOperation>),
     UndoOperation(UndoReport),
     PrepTrackIds(#[ts(type = "Array<number>")] Vec<i64>),
-    PrepPage(PrepPageSnapshot),
+    PrepOrder(PrepOrderSnapshot),
     PrepQueue(PrepQueueSnapshot),
     AcceptPrepItems(AcceptedProposals),
     SelectPrepCandidate(Box<PrepItem>),
@@ -1705,6 +1704,7 @@ pub struct MatchCandidateSummary {
     pub confidence: f64,
     pub audio_matched: bool,
     pub artist: Option<String>,
+    /// The title with the mix in brackets, as a file carries it.
     pub title: Option<String>,
     pub mix: Option<String>,
     pub album: Option<String>,
@@ -1760,6 +1760,8 @@ pub struct PrepReleaseGroup {
 #[ts(export)]
 pub struct PrepItem {
     pub track: LibraryTrack,
+    /// The tags a DJ notices that the track has no value for yet.
+    pub missing: Vec<TagName>,
     pub review_token: String,
     pub fields: Vec<StagedField>,
     pub artwork: TrackArtwork,
@@ -1784,14 +1786,11 @@ pub struct PrepItem {
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[ts(export)]
-pub struct PrepPageSnapshot {
-    pub total: u32,
-    pub offset: u32,
-    /// How many tracks in the view, before the stage filter, sit in each stage.
+pub struct PrepOrderSnapshot {
+    #[ts(type = "Array<number>")]
+    pub ids: Vec<i64>,
+    /// How many of the view's tracks sit in each stage.
     pub stages: PrepStageCounts,
-    pub items: Vec<PrepItem>,
-    pub unwritten_tracks: u32,
-    pub last_operation: Option<JournalOperation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]

@@ -13,12 +13,12 @@ describe('Prep list columns', () => {
   });
 
   it('adds the sort and the find text to the view query', () => {
-    const query = withListSort(withFindText({ text: 'house' }, 'gerald'), {
+    const query = withListSort(withFindText({ text: 'house' }, 'harbour'), {
       column: 'year',
       direction: 'desc',
     });
     expect(query).toMatchObject({
-      text: 'house gerald',
+      text: 'house harbour',
       sort: 'year',
       direction: 'desc',
       then_sort: 'title',

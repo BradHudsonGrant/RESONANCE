@@ -11,7 +11,7 @@ pub use fuse::{
     MIN_ALTERNATIVE_CONFIDENCE, MIN_HIGH_CONF_ALTERNATIVE, MIN_TAGS_ONLY_CONFIDENCE,
     MIN_VIABLE_CONFIDENCE, ProviderLineage, build_match_evidence, fuse_and_rank, is_other_edit,
     is_same_candidate, is_viable_alternative, is_viable_candidate, needs_preview_check,
-    replaces_best, retain_viable_candidates, should_expand_candidates,
+    replaces_best, retain_viable_candidates, should_expand_candidates, visible_candidates,
 };
 pub use parse::{
     artist_search_terms, clean_release_title, clean_text, extract_isrc, find_catno, fold_latin,
@@ -75,6 +75,11 @@ impl Step {
         Self::UserUrl,
     ];
 
+    /// Steps 3 onwards ask a provider; the first two only read the file.
+    pub fn is_online(self) -> bool {
+        self.number() >= 3
+    }
+
     pub fn number(self) -> u8 {
         match self {
             Self::ExistingTags => 1,
@@ -104,7 +109,7 @@ impl Step {
 
 /// True when at least one online identification step (step 3 or later) has been attempted.
 pub fn has_online_attempt(steps: &[Step]) -> bool {
-    steps.iter().any(|step| step.number() >= 3)
+    steps.iter().any(|step| step.is_online())
 }
 
 /// What a step did for one track, as the user sees it in the report.

@@ -105,14 +105,14 @@
         ...(track_ids === null ? {} : { track_ids }),
         ...(stage === null ? {} : { stage }),
       }),
-    prepPage: (query, track_ids, stage, offset, limit) =>
-      core.call('prep_page', {
+    prepOrder: (query, track_ids, by_stage) =>
+      core.call('prep_order', {
         query,
         ...(track_ids === null ? {} : { track_ids }),
-        ...(stage === null ? {} : { stage }),
-        offset,
-        limit,
+        ...(by_stage === null ? {} : { by_stage }),
       }),
+    prepItems: async (track_ids) =>
+      (await core.call('prep_queue', { query: null, proposals_only: false, track_ids })).items,
     skipItems: (track_ids, fields) => core.call('skip_prep_items', { track_ids, fields }),
     acceptAndWrite: (track_ids, fields, include_artwork, expected_review) =>
       core.call('accept_and_write', {
