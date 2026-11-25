@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{IN_CHUNK, placeholders};
+use resonance_core::identify::MatchedPage;
 use resonance_core::identity::{Chromaprint, ContentHash};
 use resonance_core::library::TagField;
 use resonance_core::staging::{Proposal, ProposalStatus, StoredProposal};
@@ -22,6 +23,8 @@ pub struct IdentificationInput {
     pub fingerprint_duration_s: Option<u32>,
     pub file_isrc: Option<String>,
     pub tags: Vec<(TagField, String)>,
+    /// Bandcamp sellers other tracks by the same artist were matched to.
+    pub bandcamp_sellers: Vec<String>,
 }
 
 /// Lazy audio identity loaded only when a track runs preview verification or AudD.
@@ -164,6 +167,7 @@ fn hydrate_inputs(
             fingerprint_duration_s: row.fingerprint_duration_s,
             file_isrc: row.file_isrc,
             tags: tags_by_asset.remove(&row.asset_id).unwrap_or_default(),
+            bandcamp_sellers: Vec::new(),
         })
         .collect())
 }
@@ -176,6 +180,25 @@ type IdentificationWriteRef<'a> = (
 );
 
 impl Database {
+    /// Every matched Bandcamp page with the names its track was known by: artist, remixer and
+    /// mix, as the file gave them.
+    pub fn bandcamp_pages_with_names(&self) -> Result<Vec<MatchedPage>, DbError> {
+        let mut statement = self.connection.prepare_cached(
+            "SELECT json_extract(known_json, '$.artist'), json_extract(known_json, '$.remixer'),
+                    json_extract(known_json, '$.mix'), json_extract(best_json, '$.url')
+             FROM track_identification
+             WHERE json_extract(best_json, '$.url') LIKE '%.bandcamp.com/%'",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(MatchedPage {
+                artist: row.get(0)?,
+                remixer: row.get(1)?,
+                mix: row.get(2)?,
+                url: row.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
     /// Up to `limit` tracks after `after_track_id` that still need `pass`, in track order.
     pub fn identification_inputs(
         &self,

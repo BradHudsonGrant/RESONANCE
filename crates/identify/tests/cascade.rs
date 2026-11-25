@@ -170,6 +170,7 @@ fn input(track_id: i64, duration_ms: u64, fingerprint: bool) -> IdentificationIn
         fingerprint: fingerprint.then(|| FINGERPRINT.to_owned()),
         fingerprint_duration_s: fingerprint.then_some((duration_ms / 1000) as u32),
         file_isrc: None,
+        bandcamp_sellers: Vec::new(),
         tags: vec![
             (TagField::Artist, "Some Artist".to_owned()),
             (TagField::Title, "Night Drive".to_owned()),
@@ -1920,6 +1921,24 @@ fn use_candidate_artwork_stages_and_accepts_alt_cover_even_when_file_has_embedde
         let staged = guard.proposed_artwork(1).unwrap().unwrap();
         assert!(staged.pending);
         assert_eq!(staged.artwork.hash, staged_hash);
+    }
+    // Keeping the file's cover and then picking the same match again brings it back.
+    db.lock().unwrap().skip_proposed_artwork(1).unwrap();
+    assert!(
+        !db.lock()
+            .unwrap()
+            .proposed_artwork(1)
+            .unwrap()
+            .unwrap()
+            .pending
+    );
+    use_candidate_artwork(&db, &pipeline, 1, 1, false)
+        .unwrap()
+        .expect("picked again");
+    {
+        let guard = db.lock().unwrap();
+        let staged = guard.proposed_artwork(1).unwrap().unwrap();
+        assert!(staged.pending, "a cover the user picks is suggested again");
         let layers = guard.tag_layers(1).unwrap().unwrap();
         assert!(
             layers

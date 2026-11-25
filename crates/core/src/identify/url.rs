@@ -134,6 +134,12 @@ const MIX_ROLE_WORDS: [&str; 12] = [
     "vip", "rmx",
 ];
 
+/// The role words that say someone else made the mix. "Vocal Mix" or "Dub" alone is a version
+/// by the artist, and names no one else to look for.
+const MAKER_ROLE_WORDS: [&str; 9] = [
+    "edit", "re-edit", "remix", "rework", "refix", "bootleg", "flip", "vip", "rmx",
+];
+
 /// Mix names that belong to no one, so they point at no Bandcamp page.
 const GENERIC_MIX_NAMES: [&str; 8] = [
     "original",
@@ -148,7 +154,7 @@ const GENERIC_MIX_NAMES: [&str; 8] = [
 
 /// Most Bandcamp pages a track's names are allowed to point at, so an unmatched track costs a
 /// few page reads at most.
-pub const MAX_GUESSED_BANDCAMP_PAGES: usize = 8;
+pub const MAX_GUESSED_BANDCAMP_PAGES: usize = 10;
 
 /// Bandcamp track pages the file's names point at. Bandcamp builds a seller's address from
 /// their name and a track's address from its title, so a self-released edit sold there can be
@@ -161,30 +167,37 @@ pub fn guessed_bandcamp_pages(known: &super::KnownTags) -> Vec<ReleaseUrl> {
     };
     let full_title = crate::staging::title_with_mix(title, known.mix.as_deref());
     let mix_name = known.mix.as_deref().and_then(mix_maker);
+    let album_seller = known.album.as_deref().and_then(super::release_seller);
     let sellers = [
         known.remixer.as_deref(),
         mix_name.as_deref(),
         Some(artist),
         known.label.as_deref(),
+        album_seller.as_deref(),
     ];
     let slugs = [
-        bandcamp_slug(&full_title),
-        bandcamp_slug(&format!("{artist} - {full_title}")),
+        bandcamp_slug(&super::fold_latin(&full_title)),
+        bandcamp_slug(&super::fold_latin(&format!("{artist} - {full_title}"))),
     ];
-    let mut pages = Vec::new();
-    for seller in sellers.into_iter().flatten() {
-        let host: String = seller
+    // Sellers already matched for this artist come first: an artist who sells under another
+    // name, such as a label account, is found that way once one of their tracks is matched.
+    let named = sellers.into_iter().flatten().map(|seller| {
+        super::fold_latin(seller)
             .chars()
             .filter(char::is_ascii_alphanumeric)
             .flat_map(|c| c.to_lowercase())
-            .collect();
-        if host.len() < 3 {
-            continue;
-        }
+            .collect::<String>()
+    });
+    let hosts = known.bandcamp_sellers.iter().cloned().chain(named);
+    let mut pages = Vec::new();
+    for host in hosts.filter(|host| host.len() >= 3) {
         for slug in slugs.iter().filter(|slug| !slug.is_empty()) {
             let page = ReleaseUrl::Bandcamp(format!("https://{host}.bandcamp.com/track/{slug}"));
-            if !pages.contains(&page) && pages.len() < MAX_GUESSED_BANDCAMP_PAGES {
+            if !pages.contains(&page) {
                 pages.push(page);
+            }
+            if pages.len() == MAX_GUESSED_BANDCAMP_PAGES {
+                return pages;
             }
         }
     }
@@ -192,19 +205,22 @@ pub fn guessed_bandcamp_pages(known: &super::KnownTags) -> Vec<ReleaseUrl> {
 }
 
 /// Who made a mix, from its name: "Will & Batty Edit" gives "Will & Batty".
-fn mix_maker(mix: &str) -> Option<String> {
+pub fn mix_maker(mix: &str) -> Option<String> {
     let mut words: Vec<&str> = mix.split_whitespace().collect();
-    while words
-        .last()
-        .is_some_and(|word| MIX_ROLE_WORDS.contains(&word.to_lowercase().as_str()))
-    {
+    let mut made_by_someone = false;
+    while let Some(word) = words.last() {
+        let word = word.to_lowercase();
+        if !MIX_ROLE_WORDS.contains(&word.as_str()) {
+            break;
+        }
+        made_by_someone |= MAKER_ROLE_WORDS.contains(&word.as_str());
         words.pop();
     }
     let name = words.join(" ");
     let generic = words
         .iter()
         .all(|word| GENERIC_MIX_NAMES.contains(&word.to_lowercase().as_str()));
-    (!name.is_empty() && !generic).then_some(name)
+    (made_by_someone && !name.is_empty() && !generic).then_some(name)
 }
 
 /// A title in the form Bandcamp puts in its addresses: lower case, with every run of other
@@ -224,6 +240,62 @@ fn bandcamp_slug(text: &str) -> String {
         }
     }
     slug
+}
+
+/// A Bandcamp page a track was matched to, with the names the track was known by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchedPage {
+    pub artist: Option<String>,
+    pub remixer: Option<String>,
+    pub mix: Option<String>,
+    pub url: String,
+}
+
+/// The Bandcamp sellers earlier matches point at for this track: any matched track that shares
+/// its artist, remixer or the name in its mix. Remixers and edit makers often sell their work
+/// for many artists from one account.
+pub fn learned_sellers(known: &super::KnownTags, pages: &[MatchedPage]) -> Vec<String> {
+    let names = |artist: Option<&str>, remixer: Option<&str>, mix: Option<&str>| {
+        [
+            artist.map(str::to_owned),
+            remixer.map(str::to_owned),
+            mix.and_then(mix_maker),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|name| name.trim().to_lowercase())
+        .filter(|name| !name.is_empty())
+        .collect::<Vec<_>>()
+    };
+    let own = names(
+        known.artist.as_deref(),
+        known.remixer.as_deref(),
+        known.mix.as_deref(),
+    );
+    let mut sellers: Vec<String> = Vec::new();
+    for page in pages {
+        let theirs = names(
+            page.artist.as_deref(),
+            page.remixer.as_deref(),
+            page.mix.as_deref(),
+        );
+        if theirs.iter().any(|name| own.contains(name))
+            && let Some(seller) = bandcamp_seller(&page.url)
+            && !sellers.iter().any(|held| held == seller)
+        {
+            sellers.push(seller.to_owned());
+        }
+    }
+    sellers
+}
+/// The seller part of a Bandcamp address: `kitsounds` in `https://kitsounds.bandcamp.com/track/x`.
+pub fn bandcamp_seller(url: &str) -> Option<&str> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let host = rest.split('/').next()?;
+    host.strip_suffix(".bandcamp.com")
+        .filter(|seller| !seller.is_empty() && !seller.contains('.'))
 }
 
 fn parse_leading_u64(segment: &str) -> Option<u64> {
@@ -330,6 +402,40 @@ fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sellers_come_from_earlier_bandcamp_matches_sharing_a_name() {
+        let page = |artist: &str, mix: Option<&str>, url: &str| MatchedPage {
+            artist: Some(artist.to_owned()),
+            remixer: None,
+            mix: mix.map(str::to_owned),
+            url: url.to_owned(),
+        };
+        let pages = [
+            page(
+                "Ada Marsh",
+                None,
+                "https://kitsounds.bandcamp.com/track/one",
+            ),
+            page(
+                "Ada Marsh",
+                None,
+                "https://kitsounds.bandcamp.com/track/two",
+            ),
+            page(
+                "Someone",
+                Some("Rowe Edit"),
+                "https://roweshop.bandcamp.com/track/x",
+            ),
+            page("Nobody", None, "https://other.bandcamp.com/track/y"),
+        ];
+        let known = super::super::KnownTags {
+            artist: Some(" Ada Marsh ".to_owned()),
+            mix: Some("Rowe Remix".to_owned()),
+            ..Default::default()
+        };
+        assert_eq!(learned_sellers(&known, &pages), ["kitsounds", "roweshop"]);
+        assert!(learned_sellers(&super::super::KnownTags::default(), &pages).is_empty());
+    }
 
     #[test]
     fn bandcamp_pages_are_guessed_from_the_names_in_the_file() {
@@ -370,6 +476,45 @@ mod tests {
             |page| matches!(page, ReleaseUrl::Bandcamp(url) if url.starts_with("https://adamarsh."))
         ));
         assert!(guessed_bandcamp_pages(&super::super::KnownTags::default()).is_empty());
+
+        let learned = super::super::KnownTags {
+            bandcamp_sellers: vec!["kitsounds".to_owned()],
+            ..known.clone()
+        };
+        assert_eq!(
+            guessed_bandcamp_pages(&learned)[0],
+            ReleaseUrl::Bandcamp(
+                "https://kitsounds.bandcamp.com/track/blue-hour-kit-rowe-edit".to_owned()
+            )
+        );
+        assert_eq!(
+            bandcamp_seller("https://kitsounds.bandcamp.com/album/x"),
+            Some("kitsounds")
+        );
+        assert_eq!(bandcamp_seller("https://www.discogs.com/release/1"), None);
+    }
+
+    #[test]
+    fn only_a_remix_or_edit_names_someone_else_to_look_for() {
+        assert_eq!(mix_maker("Kit Rowe Remix").as_deref(), Some("Kit Rowe"));
+        assert_eq!(mix_maker("Kit Rowe Dub Edit").as_deref(), Some("Kit Rowe"));
+        assert_eq!(mix_maker("Vocal Mix"), None);
+        assert_eq!(mix_maker("Extended Vocal Mix"), None);
+        assert_eq!(mix_maker("Dub"), None);
+        assert_eq!(mix_maker("Original Remix"), None);
+    }
+
+    #[test]
+    fn accented_names_give_the_same_address_bandcamp_does() {
+        let known = super::super::KnownTags {
+            artist: Some("Ròse Ølsen".to_owned()),
+            title: Some("Café Nuit".to_owned()),
+            ..Default::default()
+        };
+        assert_eq!(
+            guessed_bandcamp_pages(&known)[0],
+            ReleaseUrl::Bandcamp("https://roseolsen.bandcamp.com/track/cafe-nuit".to_owned())
+        );
     }
 
     #[test]

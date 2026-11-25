@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
 
-use resonance_core::identify::{RankedCandidate, ReleaseUrl};
+use resonance_core::identify::{RankedCandidate, ReleaseUrl, learned_sellers};
 use resonance_core::prep::local_proposals;
 use resonance_core::staging::proposals_from;
 use resonance_db::{
@@ -275,6 +275,15 @@ fn run_pass_inner(
             continue;
         }
 
+        let mut batch = batch;
+        // Read again for every batch, so a seller learned from an earlier batch helps the next.
+        let sellers = database
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .bandcamp_pages_with_names()?;
+        for input in &mut batch {
+            input.bandcamp_sellers = learned_sellers(&identify_locally(input).known, &sellers);
+        }
         let identified = pipeline.identify(&batch, abort);
         if abort.load(Ordering::Acquire) {
             break;
@@ -446,6 +455,7 @@ pub fn use_reviewed_candidate_artwork(
             db.clear_pending_proposed_artwork(track_id)?;
         } else {
             db.store_proposed_artwork(track_id, &artwork, &fetcher_provider, &url)?;
+            db.reopen_proposed_artwork(track_id)?;
         }
     }
     Ok(Some(artwork.hash))

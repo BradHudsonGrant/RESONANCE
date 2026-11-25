@@ -281,7 +281,14 @@ impl Pipeline {
         let mut states: Vec<TrackState> = inputs
             .iter()
             .map(|input| TrackState {
-                identification: identify_locally(input),
+                identification: {
+                    let mut local = identify_locally(input);
+                    local
+                        .known
+                        .bandcamp_sellers
+                        .clone_from(&input.bandcamp_sellers);
+                    local
+                },
                 duration_ms: input.duration_ms,
                 fingerprint: input
                     .fingerprint
@@ -591,21 +598,36 @@ impl Pipeline {
                 continue;
             }
             let mut found = 0;
+            let mut failure = None;
             for page in &pages {
                 if abort.load(Ordering::Acquire) {
                     return;
                 }
-                if let Ok(candidates) = bandcamp.provider.lookup(&Query::Release(page), &lookup)
-                    && !candidates.is_empty()
-                {
-                    found += candidates.len();
-                    state.collected.extend(candidates);
-                    break;
+                match bandcamp.provider.lookup(&Query::Release(page), &lookup) {
+                    Ok(candidates) if candidates.is_empty() => {}
+                    Ok(candidates) => {
+                        found += candidates.len();
+                        state.collected.extend(candidates);
+                        break;
+                    }
+                    // A guessed page that is not there is a 404 and comes back empty. Anything
+                    // else, such as a dropped connection, leaves the track to be tried again.
+                    Err(error) => {
+                        failure = Some(error.to_string());
+                        break;
+                    }
                 }
             }
             if found > 0 {
                 let best = self.settle(state);
                 report(state, Step::TextSearch, Some("bandcamp"), ran(found, best));
+            } else if let Some(reason) = failure {
+                report(
+                    state,
+                    Step::TextSearch,
+                    Some("bandcamp"),
+                    StepOutcome::Failed(reason),
+                );
             } else {
                 report(state, Step::TextSearch, Some("bandcamp"), ran(0, None));
             }
