@@ -13,10 +13,10 @@ Most DJs will keep playing on their own hardware. Resonance is where they prepar
   <img src="docs/images/library.png" alt="Resonance library view showing 100,000 synthetic tracks, the command bar, the track inspector and the A to B dock" />
 </picture>
 
-| Mix view | Light theme |
-| --- | --- |
-| ![Resonance Mix view with two decks and scrolling WebGL2 waveforms](docs/images/mix.png) | ![Resonance library view in the light theme](docs/images/library-light.png) |
-| Two decks decoding real audio with WebGL2 waveforms locked to the audio clock. | The same shell, tokens and seeded dot-wave artwork in the warm-stone light theme. |
+| Mix view                                                                                 | Light theme                                                                       |
+| ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| ![Resonance Mix view with two decks and scrolling WebGL2 waveforms](docs/images/mix.png) | ![Resonance library view in the light theme](docs/images/library-light.png)       |
+| Two decks decoding real audio with WebGL2 waveforms locked to the audio clock.           | The same shell, tokens and seeded dot-wave artwork in the warm-stone light theme. |
 
 ## What works today
 
@@ -25,18 +25,21 @@ Most DJs will keep playing on their own hardware. Resonance is where they prepar
 - A persistent Activity queue for scans and identity work that survives restarts, with progress, cancel and retry, and chunked scanning that keeps a 3,000-file scan responsive.
 - Instant SQLite `FTS5` text search, filter drawer (`BPM`, key, year, label, format and missing files), quick pills (`All tracks`, `Favourites`, `Recent`), sortable columns and manual `track_id`-keyed collections across a virtualised 100,000-track table (`4.2 ms` median frame at 240 Hz, `<= 25.4 ms` p95 search and filter queries, `0.42 s` warm cold start).
 - Track preview playback in `PlayerBar` (`rubato` sinc resampler feeding a lock-free ring buffer with a 5 ms ramp, interactive `ScrubBar` seeking and automatic Mix handoff), alongside a track inspector showing seeded dot-wave artwork, tags, Camelot key, format specs and file location.
+- Identification in six steps: the file's own tags and name, an AcoustID fingerprint, name searches on MusicBrainz, Discogs, Deezer and iTunes, a check by ear against 30-second store previews, and a pasted release link (Bandcamp, SoundCloud, YouTube, Discogs or MusicBrainz). Bandcamp track pages are also tried from the file's own names, without searching Bandcamp. Keys live in the OS credential store, and the paid AudD recogniser runs only with a token.
+- Prep, a review inbox for tagging: one list sorted by status, genre, label or year, every tag beside its suggestion with an accept button, a choice of covers side by side, keyboard-only batch tagging, and tag writing for MP3, WAV, AIFF, FLAC and M4A through a checked copy with undo. The mix goes into the title in brackets, as DJ software reads it.
+- Filename templates, embedded and online cover art, library columns you choose and order, filters on any field and auto-preview while moving through the table.
 - Two-deck Mix view playing audio through WASAPI with scrolling WebGL2 peak and RMS waveforms, binary playhead and meter telemetry, and 0 audio underruns across three-minute full-window runs. Exclusive mode runs at a 256-frame buffer (5.3 ms at 48 kHz) with 0 dropouts in the `v0.3.0` bench.
 - Full M1 design system in dark, light and Windows high-contrast themes (`tokens.css` and 25 Svelte 5 primitives, shown side by side at `/design.html`), keyboard navigation (`Ctrl+K`, `1`–`5`, `[`, `I`, `D`, `Space`, `C`, arrow and selection keys), and browser hot reload against a local Rust core without rebuilding Rust for UI changes.
 
 ## Status
 
-`M0 Foundations` (`v0.1.0`), `M1 Design` (`v0.2.0`) and `M2 Library` (`v0.3.0`) are complete. M2 added watched source folders with subfolder toggles (`#81`), decoded-audio hash and Chromaprint identity (`#83`), `FTS5` search, filters and column sort (`#91`), manual collections (`#94`), preview playback (`#97`), missing-file relinking (`#98`) and a persistent Activity job queue with chunked scanning (`#101`). Two budgets carry over to `v0.4.0`: the startup UI-thread task (`#55`) and an hour-long clean run at a 256-sample audio buffer (`#47`).
+`M0 Foundations` (`v0.1.0`), `M1 Design` (`v0.2.0`), `M2 Library` (`v0.3.0`) and `M3 Identify and tag` (`v0.4.0`) are complete. M3 added the identification pipeline (`#124`) and its store searches and preview checks (`#148`), staging (`#125`), tag writing (`#129`), filename templates (`#130`), artwork (`#134`), library columns (`#135`), auto-preview (`#137`), filters (`#138`), and the Prep space (`#139`) with its review inbox (`#149`, `#153`). One budget carries over to `v0.5.0`: a 35.5 ms task on the UI thread while the desktop app starts (`#154`).
 
-After `M2`, the roadmap builds identification and tag writing (`M3`), quality checks and journaled file replacement (`M4`), beat/key/energy/phrase analysis (`M5`), similarity and natural-language discovery (`M6`), full deck controls and hardware mappings (`M7`), live mix coaching (`M8`), session replay (`M9`), set building (`M10`), rekordbox and Engine DJ library sync (`M11`), and stems (`M12`). Every checklist item and its evidence live in [docs/roadmap.md](docs/roadmap.md).
+After `M3`, the roadmap builds quality checks and journaled file replacement (`M4`), beat/key/energy/phrase analysis (`M5`), similarity and natural-language discovery (`M6`), full deck controls and hardware mappings (`M7`), live mix coaching (`M8`), session replay (`M9`), set building (`M10`), rekordbox and Engine DJ library sync (`M11`), and stems (`M12`). Every checklist item and its evidence live in [docs/roadmap.md](docs/roadmap.md).
 
 ## Install
 
-Windows x64 installers (`Resonance_0.3.0_x64-setup.exe`, and [`v0.2.0`](https://github.com/BradHudsonGrant/RESONANCE/releases/tag/v0.2.0) and [`v0.1.0`](https://github.com/BradHudsonGrant/RESONANCE/releases/tag/v0.1.0) before it) are attached as pre-releases on the [GitHub releases page](https://github.com/BradHudsonGrant/RESONANCE/releases). Running the setup installs Resonance for the current user at `%LOCALAPPDATA%\Resonance\resonance-app.exe`.
+Windows x64 installers (`Resonance_0.4.0_x64-setup.exe`, and [`v0.3.0`](https://github.com/BradHudsonGrant/RESONANCE/releases/tag/v0.3.0), [`v0.2.0`](https://github.com/BradHudsonGrant/RESONANCE/releases/tag/v0.2.0) and [`v0.1.0`](https://github.com/BradHudsonGrant/RESONANCE/releases/tag/v0.1.0) before it) are attached as pre-releases on the [GitHub releases page](https://github.com/BradHudsonGrant/RESONANCE/releases). Running the setup installs Resonance for the current user at `%LOCALAPPDATA%\Resonance\resonance-app.exe`.
 
 To build the installer from source instead, install the prerequisites under [Build](#build), run `npm ci --prefix ui`, and run:
 
@@ -63,6 +66,7 @@ That writes `target/release/bundle/nsis/Resonance_<version>_x64-setup.exe` with 
 ### From a clone to a running app
 
 1. Clone the repository and install the UI dependencies (`just` keeps `CARGO_HOME` and `NPM_CONFIG_CACHE` inside `target/`):
+
    ```powershell
    git clone https://github.com/BradHudsonGrant/RESONANCE.git
    cd RESONANCE
@@ -70,27 +74,34 @@ That writes `target/release/bundle/nsis/Resonance_<version>_x64-setup.exe` with 
    ```
 
 2. Load tracks into the development library. Scan a music folder read-only into `target/dev/data` (and optionally run a foreground identity pass with `just identify`):
+
    ```powershell
    just scan C:\path\to\music
    just identify
    ```
+
    Or generate a 100,000-track synthetic library in `target/dev/synthetic`:
+
    ```powershell
    just synthetic-library
    ```
 
 3. Run in a browser for day-to-day UI work (hot reload without compiling Rust). Start the local core in one terminal:
+
    ```powershell
    just serve
    # or against the synthetic library:
    just serve target/dev/synthetic
    ```
+
    Start Vite in a second terminal and open `http://localhost:5173` (`http://localhost:5173/design.html` shows every primitive in both themes):
+
    ```powershell
    just ui
    ```
 
 4. Or open the packaged Tauri desktop shell:
+
    ```powershell
    just app
    # or against the synthetic library:
@@ -106,18 +117,18 @@ That writes `target/release/bundle/nsis/Resonance_<version>_x64-setup.exe` with 
 
 ## Docs
 
-| File | What is in it |
-| --- | --- |
-| [docs/product.md](docs/product.md) | What Resonance does and the product rules every feature follows |
-| [docs/roadmap.md](docs/roadmap.md) | Every milestone as a checklist, with linked evidence |
-| [docs/architecture.md](docs/architecture.md) | Stack choices, crate boundaries, data model and performance budgets |
+| File                                                       | What is in it                                                                               |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [docs/product.md](docs/product.md)                         | What Resonance does and the product rules every feature follows                             |
+| [docs/roadmap.md](docs/roadmap.md)                         | Every milestone as a checklist, with linked evidence                                        |
+| [docs/architecture.md](docs/architecture.md)               | Stack choices, crate boundaries, data model and performance budgets                         |
 | [docs/transition-analysis.md](docs/transition-analysis.md) | Bar-synchronous feature storage, tuning maths, phrase compatibility and preference learning |
-| [docs/design/](docs/design/) | Visual language, tokens, component layers, shell, Library, Mix, wave and contrast ratios |
-| [docs/adr/](docs/adr/) | Architecture and design decision records |
-| [docs/benchmarks/](docs/benchmarks/) | Build times and measured performance budgets |
-| [docs/v3-notes.md](docs/v3-notes.md) | Lessons carried forward from the previous app |
-| [CHANGELOG.md](CHANGELOG.md) | Release history generated from commits |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Code, testing, documentation and release rules |
+| [docs/design/](docs/design/)                               | Visual language, tokens, component layers, shell, Library, Mix, wave and contrast ratios    |
+| [docs/adr/](docs/adr/)                                     | Architecture and design decision records                                                    |
+| [docs/benchmarks/](docs/benchmarks/)                       | Build times and measured performance budgets                                                |
+| [docs/v3-notes.md](docs/v3-notes.md)                       | Lessons carried forward from the previous app                                               |
+| [CHANGELOG.md](CHANGELOG.md)                               | Release history generated from commits                                                      |
+| [CONTRIBUTING.md](CONTRIBUTING.md)                         | Code, testing, documentation and release rules                                              |
 
 ## Stack
 
