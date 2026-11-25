@@ -4,6 +4,7 @@ mod collections;
 pub mod command;
 mod copies;
 pub mod data_folder;
+mod delete;
 pub mod error;
 mod filters;
 mod identity;
@@ -103,7 +104,10 @@ impl Api {
         Self::build(library, None, true)
     }
 
-    fn build(library: Database, quiet_window: Option<Duration>, silent: bool) -> Self {
+    fn build(mut library: Database, quiet_window: Option<Duration>, silent: bool) -> Self {
+        // Before the watcher or any job can touch a file. A problem is noted on the operation
+        // itself, and a database that cannot be read shows up on the first request.
+        let _ = resonance_library::journal::recover(&mut library);
         let (watch_revisions, _) = watch::channel(0u64);
         let database = Arc::new(Mutex::new(library));
         let credentials = providers::default_credential_store();
@@ -463,6 +467,12 @@ impl Api {
             Request::TrackCopies { track_id } => {
                 self.track_copies(track_id).map(Response::TrackCopies)
             }
+            Request::DeleteTracks {
+                track_ids,
+                for_good,
+            } => self
+                .delete_tracks(&track_ids, for_good)
+                .map(Response::DeleteTracks),
             Request::KeepCopy { track_id, asset_id } => {
                 self.keep_copy(track_id, asset_id).map(Response::KeepCopy)
             }

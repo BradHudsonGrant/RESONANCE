@@ -5,4 +5,8 @@ import type { OperationStateName } from "./OperationStateName";
 /**
  * One change to files in the journal. Only an `applied` one can be undone.
  */
-export type JournalOperation = { id: number, kind: OperationKindName, state: OperationStateName, summary: string, can_undo: boolean, created_ms: number, applied_ms: number | null, undone_ms: number | null, };
+export type JournalOperation = { id: number, kind: OperationKindName, state: OperationStateName, summary: string, can_undo: boolean, created_ms: number, applied_ms: number | null, undone_ms: number | null, 
+/**
+ * How the operation was brought to rest after the app stopped in the middle of it.
+ */
+recovery: string | null, };

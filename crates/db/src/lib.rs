@@ -40,7 +40,7 @@ pub use identity::{
     IdentityMatch, PendingAsset, StoredAssetIdentity, StoredRelinkCandidate,
     StoredTrackRelinkTarget,
 };
-pub use operations::StoredOperation;
+pub use operations::{AssetFile, StoredOperation, StoredStep};
 pub use prep::{BatchTagOperation, PrepStageFacts};
 pub use prep_writes::{FileDecision, FileRevision};
 pub use quality::StoredQuality;
@@ -68,7 +68,7 @@ pub(crate) fn placeholders(count: usize) -> String {
 
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
-const MIGRATIONS: [&str; 23] = [
+const MIGRATIONS: [&str; 24] = [
     include_str!("../migrations/0001_library.sql"),
     include_str!("../migrations/0002_sources.sql"),
     include_str!("../migrations/0003_identity.sql"),
@@ -92,6 +92,7 @@ const MIGRATIONS: [&str; 23] = [
     include_str!("../migrations/0021_prep_query_indexes.sql"),
     include_str!("../migrations/0022_reread_unreadable_files.sql"),
     include_str!("../migrations/0023_quality.sql"),
+    include_str!("../migrations/0024_operation_steps.sql"),
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -103,13 +104,30 @@ pub const FILE_NAME: &str = "library.db";
 pub enum DbError {
     FileEdit(io::Error),
     DecisionChanged,
-    Folder { path: PathBuf, source: io::Error },
+    Folder {
+        path: PathBuf,
+        source: io::Error,
+    },
     Sqlite(rusqlite::Error),
-    NewerSchema { found: u32, known: u32 },
-    UnknownName { column: &'static str, name: String },
+    NewerSchema {
+        found: u32,
+        known: u32,
+    },
+    /// A migration left rows pointing at rows that are gone, so it was not applied.
+    BrokenMigration {
+        version: u32,
+    },
+    UnknownName {
+        column: &'static str,
+        name: String,
+    },
     InvalidCollectionName(CollectionNameError),
-    DuplicateCollectionName { name: String },
-    DuplicateViewName { name: String },
+    DuplicateCollectionName {
+        name: String,
+    },
+    DuplicateViewName {
+        name: String,
+    },
 }
 
 impl fmt::Display for DbError {
@@ -129,6 +147,10 @@ impl fmt::Display for DbError {
                 f,
                 "The database is at schema version {found} and this build knows up to {known}. \
                  It was last opened by a newer version of Resonance."
+            ),
+            Self::BrokenMigration { version } => write!(
+                f,
+                "Updating the database to schema version {version} would have broken it, so it                  was left as it was."
             ),
             Self::UnknownName { column, name } => {
                 write!(
@@ -206,6 +228,14 @@ pub struct Database {
     artwork: Option<ArtworkStore>,
 }
 
+fn broken_references(connection: &Connection) -> Result<u64, DbError> {
+    Ok(
+        connection.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+            row.get(0)
+        })?,
+    )
+}
+
 fn migrate(connection: &mut Connection) -> Result<(), DbError> {
     let found: u32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if found > SCHEMA_VERSION {
@@ -214,8 +244,13 @@ fn migrate(connection: &mut Connection) -> Result<(), DbError> {
             known: SCHEMA_VERSION,
         });
     }
+    // A table rebuilt to change a CHECK is dropped and made again. With foreign keys on, the
+    // drop would delete the rows that point at it, so they are off while migrations run, and a
+    // migration that leaves more broken references than it found is refused.
+    connection.pragma_update(None, "foreign_keys", false)?;
     for (index, migration) in MIGRATIONS.iter().enumerate().skip(found as usize) {
         let transaction = connection.transaction()?;
+        let broken_before = broken_references(&transaction)?;
         transaction.execute_batch(migration)?;
         if index == 3 {
             search::backfill_v4_metadata(&transaction)?;
@@ -223,9 +258,15 @@ fn migrate(connection: &mut Connection) -> Result<(), DbError> {
         if index == 14 {
             search::backfill_v15_columns(&transaction)?;
         }
+        if broken_references(&transaction)? > broken_before {
+            return Err(DbError::BrokenMigration {
+                version: index as u32 + 1,
+            });
+        }
         transaction.pragma_update(None, "user_version", index as u32 + 1)?;
         transaction.commit()?;
     }
+    connection.pragma_update(None, "foreign_keys", true)?;
     Ok(())
 }
 
@@ -256,7 +297,6 @@ impl Database {
     fn prepared(mut connection: Connection) -> Result<Self, DbError> {
         // WAL lets the UI read while a scan writes. It returns the mode it ended up in.
         connection.query_row("PRAGMA journal_mode = WAL", [], |_| Ok(()))?;
-        connection.pragma_update(None, "foreign_keys", true)?;
         migrate(&mut connection)?;
         Ok(Self {
             connection,
@@ -334,7 +374,8 @@ impl Database {
             let mut update_asset = transaction.prepare(
                 "UPDATE asset SET size_bytes = ?2, modified_ns = ?3, format = ?4, duration_ms = ?5,
                      sample_rate = ?6, channels = ?7, bit_depth = ?8, bitrate_kbps = ?9,
-                     included = ?10, missing_since = NULL, sort_title = ?11, sort_artist = ?12,
+                     included = ?10, missing_since = NULL, trashed_by = NULL,
+                     sort_title = ?11, sort_artist = ?12,
                      tag_album = ?13, tag_genre = ?14, tag_label = ?15, tag_key = ?16,
                      sort_key = ?17, tag_bpm = ?18, tag_year = ?19, tag_catno = ?20,
                      tag_comment = ?21, tag_composer = ?22, tag_remixer = ?23, tag_mix = ?24,
@@ -649,6 +690,43 @@ pub(crate) fn track_row(row: &Row<'_>) -> Result<(i64, TrackRow), DbError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rebuilding_the_operation_table_keeps_the_rows_that_point_at_it() -> Result<(), DbError> {
+        let connection = Connection::open_in_memory()?;
+        connection.pragma_update(None, "foreign_keys", true)?;
+        for migration in &MIGRATIONS[..23] {
+            connection.execute_batch(migration)?;
+        }
+        connection.pragma_update(None, "user_version", 23)?;
+        connection.execute_batch(
+            "INSERT INTO source (id, folder) VALUES (1, 'music');
+             INSERT INTO track (id) VALUES (1);
+             INSERT INTO asset (id, track_id, source_id, path, size_bytes, modified_ns, format)
+                 VALUES (1, 1, 1, 'a.mp3', 1, 1, 'mp3');
+             INSERT INTO operation (id, kind, state, summary, forward_json, inverse_json,
+                     created_ns)
+                 VALUES (1, 'rename_files', 'applied', 'Renamed 1 file', '{}', '{}', 1);
+             INSERT INTO operation_rename (operation_id, asset_id, from_path, to_path)
+                 VALUES (1, 1, 'b.mp3', 'a.mp3');",
+        )?;
+
+        let database = Database::prepared(connection)?;
+        let renames: i64 =
+            database
+                .connection
+                .query_row("SELECT count(*) FROM operation_rename", [], |row| {
+                    row.get(0)
+                })?;
+        assert_eq!(renames, 1);
+        assert_eq!(database.recent_operations(10)?.len(), 1);
+        let foreign_keys: bool =
+            database
+                .connection
+                .pragma_query_value(None, "foreign_keys", |row| row.get(0))?;
+        assert!(foreign_keys);
+        Ok(())
+    }
 
     fn schema(connection: &Connection) -> Vec<(String, String)> {
         let mut statement = connection

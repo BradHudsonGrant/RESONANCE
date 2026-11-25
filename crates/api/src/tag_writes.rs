@@ -24,14 +24,19 @@ pub(crate) fn journal_operation(operation: StoredOperation) -> JournalOperation 
         kind: match operation.kind {
             OperationKind::WriteTags => OperationKindName::WriteTags,
             OperationKind::RenameFiles => OperationKindName::RenameFiles,
+            OperationKind::DeleteFiles => OperationKindName::DeleteFiles,
+            OperationKind::DeleteFilesForGood => OperationKindName::DeleteFilesForGood,
         },
         state: match operation.state {
             OperationState::Pending => OperationStateName::Pending,
+            OperationState::Executing => OperationStateName::Executing,
             OperationState::Applied => OperationStateName::Applied,
             OperationState::Failed => OperationStateName::Failed,
             OperationState::Undone => OperationStateName::Undone,
+            OperationState::RolledBack => OperationStateName::RolledBack,
         },
-        can_undo: operation.state.can_undo(),
+        can_undo: operation.kind.can_undo(operation.state),
+        recovery: operation.recovery,
         summary: operation.summary,
         created_ms: ms(operation.created_ns),
         applied_ms: operation.applied_ns.map(ms),
@@ -147,8 +152,12 @@ impl Api {
             .operation(operation_id)
             .map_err(ApiError::library_unreadable)?
             .map(|operation| operation.kind);
-        if kind == Some(OperationKind::RenameFiles) {
-            return self.undo_rename(operation_id);
+        match kind {
+            Some(OperationKind::RenameFiles) => return self.undo_rename(operation_id),
+            Some(OperationKind::DeleteFiles | OperationKind::DeleteFilesForGood) => {
+                return self.undo_delete(operation_id);
+            }
+            _ => {}
         }
         let write_tags::UndoReport {
             operation,

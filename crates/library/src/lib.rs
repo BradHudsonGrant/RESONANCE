@@ -1,7 +1,9 @@
 pub mod copies;
+pub mod delete;
 pub mod file_tags;
 pub mod folders;
 pub mod identity;
+pub mod journal;
 pub mod quality;
 pub mod relink;
 pub mod rename;
