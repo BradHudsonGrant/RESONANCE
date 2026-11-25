@@ -195,6 +195,7 @@ function makeClient(items: PrepItem[]) {
         created_ms: 0,
         applied_ms: 1,
         undone_ms: 2,
+        recovery: null,
       },
     })),
     trackCopies: vi.fn(async (id: number) => copiesOf(id)),

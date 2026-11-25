@@ -53,6 +53,7 @@ const appliedRename: JournalOperation = {
   created_ms: 0,
   applied_ms: 0,
   undone_ms: null,
+  recovery: null,
 };
 
 function fakeClient(): RenameClient & { operations: JournalOperation[] } {

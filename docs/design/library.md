@@ -131,7 +131,7 @@ The filter results are the hook for "Send these to Prep", which the Prep space w
 
 ## Selection actions
 
-Selection never moves the table. While any track is ticked, the selection actions take the place of the quick filters bar, in the same slot: the count ("3 selected"), Select all, Add to collection, Rename, Remove from the open collection, and Clear. When the selection clears, the bar comes back. Nothing is inserted above the table, so the header and every row stay where they were and the pointer stays on the row it clicked. No bar, chip row or banner may appear above the table and push it down.
+Selection never moves the table. While any track is ticked, the selection actions take the place of the quick filters bar, in the same slot: the count ("3 selected"), Select all, Add to collection, Rename, Move to bin, Remove from the open collection, and Clear. When the selection clears, the bar comes back. Nothing is inserted above the table, so the header and every row stay where they were and the pointer stays on the row it clicked. No bar, chip row or banner may appear above the table and push it down.
 
 - The pills stay in the layout, hidden, so the slot keeps their height.
 - Select all stays in place and turns disabled once every track is ticked. The count uses tabular figures and a fixed minimum width, so going from 9 to 10 does not move the buttons.
@@ -142,6 +142,8 @@ Selection never moves the table. While any track is ticked, the selection action
 ## Renaming files
 
 Rename files, in the header beside Scan folder, opens the Rename sheet for the tracks the table shows: the open collection, the filtered view, or the whole library. Rename in the selection actions opens it for the ticked tracks. The sheet names the scope and the file count first, then the template field, its tokens, and a preview of up to 50 files with problems first: old name, new name and a status (Ready, No change, Name taken, No artist, Folder path too long, File missing). A line under it counts ready, unchanged and blocked files. The primary button says what it will do ("Rename 1,240 files") and is off when nothing is ready. After a rename, or once a large batch has finished in Activity, the sheet offers Undo for the last rename.
+
+Move to bin asks once before anything moves: the sheet names how many tracks, says their files go to the Recycle Bin or the Trash and that History can put them back. When the bin refuses a file nothing moves, and the sheet turns into Delete for good, which says it cannot be undone and uses the danger button. History, in the header beside Rename files, lists every change to files newest first: the summary in 12 px Text, the date in 11 px mono and the state (Done, Undone, Put back, Failed, Running, Waiting) in 11 px, both Muted, and what recovery did after a crash in Text 2. Each change that can be undone has its own Undo button ([ADR 0027](../adr/0027-operation-steps-and-recovery.md)).
 
 Settings has the same template field under File names, previewing the first three tracks. It holds the template the sheet starts from. Nothing is renamed from Settings.
 

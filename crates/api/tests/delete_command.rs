@@ -63,9 +63,8 @@ fn deletes_tracks_to_the_bin_lists_the_operation_and_undoes_it() {
     assert_eq!(track_ids(&api), [ids[1]]);
     assert_eq!(fs::read_dir(&folder).unwrap().count(), 1);
 
-    let Response::RecentOperations(recent) = api
-        .handle(Request::RecentOperations { limit: 5 })
-        .unwrap()
+    let Response::RecentOperations(recent) =
+        api.handle(Request::RecentOperations { limit: 5 }).unwrap()
     else {
         panic!("expected operations");
     };
