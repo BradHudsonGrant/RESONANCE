@@ -22,6 +22,6 @@ A preview check is the only free way to tell an extended mix from a radio edit w
 ## What follows from it
 
 - A track can now take up to two preview downloads, about 1 MB each, on its first run. Later runs read the cached answer. Deezer's answers are cached for 10 minutes rather than 30 days, because their preview links are signed and expire after about 20.
-- A track settled by an ISRC or a link in its own tags skips the AcoustID lookup. An ISRC is the label's own code for the recording, so a wrong one is rare, and the skip saves a request per track. AcoustID still takes up to 10 fingerprints in one request.
+- A track settled by an ISRC or a link in its own tags skips the AcoustID lookup. An ISRC is the label's own code for the recording, so a wrong one is rare, and the skip saves a request per track. AcoustID's lookup takes one fingerprint a request, so each track costs one AcoustID request at 3 a second.
 - The covers of the runner-up matches are fetched into the artwork store so Prep can show them. Removing the ones no track uses is [#147](https://github.com/BradHudsonGrant/RESONANCE/issues/147).
 - Each new provider is one file under `crates/identify/src/providers/` with its own limiter, as ADR 0017 set out.

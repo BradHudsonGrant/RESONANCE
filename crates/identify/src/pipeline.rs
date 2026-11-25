@@ -394,8 +394,12 @@ impl Pipeline {
                 }
                 continue;
             }
-            let mut asked = Vec::new();
-            for (index, state) in states.iter_mut().enumerate() {
+            // AcoustID's lookup takes one fingerprint a request.
+            let lookup = self.lookup(registered, keys);
+            for state in states.iter_mut() {
+                if abort.load(Ordering::Acquire) {
+                    return;
+                }
                 if state.done {
                     report(
                         state,
@@ -403,39 +407,24 @@ impl Pipeline {
                         Some(id),
                         StepOutcome::SkippedConfident,
                     );
-                } else if state.fingerprint.is_none() {
+                    continue;
+                }
+                let Some((fingerprint, duration_s)) = state.fingerprint.clone() else {
                     report(
                         state,
                         Step::Fingerprint,
                         Some(id),
                         StepOutcome::SkippedNoInput,
                     );
-                } else {
-                    asked.push(index);
-                }
-            }
-            if asked.is_empty() || abort.load(Ordering::Acquire) {
-                continue;
-            }
-            // AcoustID takes several fingerprints in one request, so the whole batch goes at once.
-            let answers = {
-                let queries: Vec<Query<'_>> = asked
-                    .iter()
-                    .filter_map(|&index| states[index].fingerprint.as_ref())
-                    .map(|(fingerprint, duration_s)| Query::Fingerprint {
-                        fingerprint,
-                        duration_s: *duration_s,
-                    })
-                    .collect();
-                let lookup = self.lookup(registered, keys);
-                registered.provider.lookup_batch(&queries, &lookup)
-            };
-            for (index, answer) in asked.into_iter().zip(answers) {
-                if abort.load(Ordering::Acquire) {
-                    return;
-                }
-                let state = &mut states[index];
-                match answer {
+                    continue;
+                };
+                match registered.provider.lookup(
+                    &Query::Fingerprint {
+                        fingerprint: &fingerprint,
+                        duration_s,
+                    },
+                    &lookup,
+                ) {
                     Ok(found) => {
                         let count = found.len();
                         state.fingerprinted.extend(found);
