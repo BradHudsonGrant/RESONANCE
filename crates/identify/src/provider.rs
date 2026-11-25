@@ -186,18 +186,6 @@ pub trait MetadataProvider: Send + Sync {
         query: &Query<'_>,
         lookup: &Lookup<'_>,
     ) -> Result<Vec<Candidate>, IdentifyError>;
-
-    /// Several queries at once, where the provider takes them in one request.
-    fn lookup_batch(
-        &self,
-        queries: &[Query<'_>],
-        lookup: &Lookup<'_>,
-    ) -> Vec<Result<Vec<Candidate>, IdentifyError>> {
-        queries
-            .iter()
-            .map(|query| self.lookup(query, lookup))
-            .collect()
-    }
 }
 
 /// What a provider gets for one lookup: a paced, cached way to fetch, and its key if any.
