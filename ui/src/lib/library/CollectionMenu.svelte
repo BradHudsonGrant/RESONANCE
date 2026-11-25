@@ -16,6 +16,8 @@
     showFavourite?: boolean;
     onToggleFavourite?: (track: LibraryTrack) => void;
     onRelink?: (track: LibraryTrack) => void;
+    onOpenInPrep?: (tracks: LibraryTrack[]) => void;
+    onIdentifyOnline?: (tracks: LibraryTrack[]) => void;
     onAdd?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
     onRemove?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
     onCreateAndAdd?: (name: string, trackIds: number[]) => Promise<void> | void;
@@ -32,6 +34,8 @@
     showFavourite = false,
     onToggleFavourite,
     onRelink,
+    onOpenInPrep,
+    onIdentifyOnline,
     onAdd,
     onRemove,
     onCreateAndAdd,
@@ -48,6 +52,7 @@
   let pos = $state({ top: 0, left: 0 });
 
   const targetIds = $derived(selectedTracks.map((track) => track.id));
+  const onlineTargets = $derived(selectedTracks.filter((track) => track.missing_since == null));
   const singleTrack = $derived(selectedTracks.length === 1 ? selectedTracks[0] : undefined);
   const canRemoveActive = $derived(
     activeCollection != null &&
@@ -265,6 +270,50 @@
       </button>
     {/if}
 
+    {#if onOpenInPrep && selectedTracks.length > 0}
+      <button
+        type="button"
+        class="item"
+        role="menuitem"
+        onclick={() => {
+          onOpenInPrep(selectedTracks);
+          onClose();
+        }}
+      >
+        <Icon name="prep" size="xs" />
+        <span class="item-label">
+          {selectedTracks.length > 1
+            ? `Open ${selectedTracks.length.toLocaleString('en-GB')} tracks in Prep`
+            : 'Open in Prep'}
+        </span>
+      </button>
+    {/if}
+
+    {#if onIdentifyOnline && selectedTracks.length > 0}
+      <button
+        type="button"
+        class="item"
+        role="menuitem"
+        disabled={busy || onlineTargets.length === 0}
+        onclick={() => {
+          if (onlineTargets.length === 0) return;
+          onIdentifyOnline(onlineTargets);
+          onClose();
+        }}
+      >
+        <Icon name="search" size="xs" />
+        <span class="item-label">
+          {#if selectedTracks.length > 1 && onlineTargets.length > 0}
+            {onlineTargets.length === 1
+              ? 'Look up 1 track online'
+              : `Look up ${onlineTargets.length.toLocaleString('en-GB')} tracks online`}
+          {:else}
+            Look up online
+          {/if}
+        </span>
+      </button>
+    {/if}
+
     {#if showFavourite && singleTrack && onToggleFavourite}
       <button
         type="button"
@@ -289,7 +338,7 @@
       </button>
     {/if}
 
-    {#if (singleTrack && singleTrack.missing_since != null && onRelink) || (showFavourite && singleTrack && onToggleFavourite) || (canRemoveActive && activeCollection)}
+    {#if (singleTrack && singleTrack.missing_since != null && onRelink) || (onOpenInPrep && selectedTracks.length > 0) || (onIdentifyOnline && selectedTracks.length > 0) || (showFavourite && singleTrack && onToggleFavourite) || (canRemoveActive && activeCollection)}
       <div class="sep" role="separator"></div>
     {/if}
 

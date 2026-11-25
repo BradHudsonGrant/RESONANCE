@@ -1,22 +1,22 @@
 //! Chromaprint fingerprints looked up on AcoustID, which answers with MusicBrainz recordings.
 //! See acoustid.org/webservice.
 
-use resonance_core::identify::Candidate;
+use resonance_core::identify::{AudioMatchSource, Candidate};
 use resonance_core::providers::ProviderKey;
 use serde_json::Value;
 
 use crate::http::{HttpRequest, Secret};
 use crate::provider::{
-    IdentifyError, Lookup, MetadataProvider, Query, QueryKind, parse_json, text,
+    IdentifyError, Lookup, MetadataProvider, Query, QueryKind, ResponseDisposition, parse_json,
+    text,
 };
 use crate::rate::RateLimit;
 
-const ID: &str = "acoustid";
+pub(crate) const ID: &str = "acoustid";
 const LOOKUP_URL: &str = "https://api.acoustid.org/v2/lookup";
-const META: &str = "recordings releasegroups compress";
-
 /// How many fingerprints go in one request.
-pub const BATCH_SIZE: usize = 10;
+const BATCH_SIZE: usize = 10;
+const META: &str = "recordings releasegroups compress";
 
 pub struct AcoustId;
 
@@ -39,6 +39,17 @@ impl MetadataProvider for AcoustId {
 
     fn rate_limit(&self) -> RateLimit {
         RateLimit::per_second(3)
+    }
+
+    fn classify_response(&self, status: u16, body: &str) -> ResponseDisposition {
+        if status == 400 && body.contains("\"error\"") {
+            return ResponseDisposition::PassThrough;
+        }
+        match status {
+            200 | 404 => ResponseDisposition::Cacheable,
+            429 | 503 => ResponseDisposition::Retryable,
+            _ => ResponseDisposition::Error,
+        }
     }
 
     fn lookup(
@@ -167,7 +178,7 @@ fn checked(answer: Value) -> Result<Value, IdentifyError> {
     Err(IdentifyError::Refused {
         provider: ID,
         reason: if code == Some(4) {
-            "the application key was refused. Check it in Settings"
+            "the application key was refused. Check it in Settings (use an Application API key, not a User key)"
         } else {
             "the lookup was refused"
         },
@@ -202,6 +213,9 @@ fn candidates(results: Option<&Value>) -> Vec<Candidate> {
                     .map(|seconds| (seconds * 1000.0).round() as u64),
                 recording_id: Some(id),
                 fingerprint_score: score,
+                audio_source: score
+                    .filter(|s| *s >= resonance_core::identify::FINGERPRINT_MATCH_SCORE)
+                    .map(|_| AudioMatchSource::Fingerprint),
                 ..Candidate::default()
             });
         }
@@ -225,4 +239,82 @@ pub(crate) fn artist_names(artists: Option<&Value>) -> Option<String> {
     }
     let joined = joined.trim().to_owned();
     (!joined.is_empty()).then_some(joined)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use resonance_db::Database;
+    use serde_json::json;
+
+    use super::*;
+    use crate::credentials::{CredentialStore, MemoryCredentialStore};
+    use crate::http::{BytesResponse, HttpClient, HttpResponse, Unreachable};
+    use crate::provider::Fetcher;
+    use crate::rate::RateLimiter;
+
+    struct OneAnswer(String);
+
+    impl HttpClient for OneAnswer {
+        fn send(&self, _request: &HttpRequest) -> Result<HttpResponse, Unreachable> {
+            Ok(HttpResponse {
+                status: 200,
+                body: self.0.clone(),
+                retry_after_s: None,
+            })
+        }
+
+        fn fetch_bytes(
+            &self,
+            _request: &HttpRequest,
+            _limit: u64,
+        ) -> Result<BytesResponse, Unreachable> {
+            Err(Unreachable("no bytes here".to_owned()))
+        }
+    }
+
+    #[test]
+    fn several_fingerprints_go_in_one_request_and_come_back_by_index() {
+        let answer = json!({
+            "status": "ok",
+            "fingerprints": [{
+                "index": "1",
+                "results": [{
+                    "id": "result-1",
+                    "score": 0.97,
+                    "recordings": [{ "id": "recording-1", "title": "Second", "duration": 200 }]
+                }]
+            }]
+        });
+        let database = Arc::new(Mutex::new(Database::open_in_memory().expect("database")));
+        let fetcher = Fetcher::new(Arc::new(OneAnswer(answer.to_string())), database);
+        let store = MemoryCredentialStore::default();
+        store
+            .write(ProviderKey::AcoustId, "key")
+            .expect("store key");
+        let secret = store.read(ProviderKey::AcoustId).expect("read key");
+        let limiter = RateLimiter::new(AcoustId.rate_limit());
+        let lookup = Lookup {
+            provider: &AcoustId,
+            fetcher: &fetcher,
+            limiter: &limiter,
+            key: secret.as_ref(),
+        };
+        let queries = [
+            Query::Fingerprint {
+                fingerprint: "AQAA-first",
+                duration_s: 200,
+            },
+            Query::Fingerprint {
+                fingerprint: "AQAA-second",
+                duration_s: 200,
+            },
+        ];
+        let found = AcoustId.lookup_batch(&queries, &lookup);
+        assert_eq!(fetcher.counts().network, 1);
+        assert_eq!(found.len(), 2);
+        assert!(found[0].as_ref().expect("first answer").is_empty());
+        assert!(!found[1].as_ref().expect("second answer").is_empty());
+    }
 }

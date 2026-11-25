@@ -12,4 +12,8 @@ artwork: string | null,
 /**
  * A release picture waiting for the user's decision.
  */
-proposed: ProposedTrackArtwork | null, };
+proposed: ProposedTrackArtwork | null, 
+/**
+ * True when the user's cover has not yet been written to the file.
+ */
+dirty_on_disk: boolean, };

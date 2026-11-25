@@ -38,6 +38,36 @@ fn proposal(field: TagField, value: &str, confidence: f64) -> Proposal {
     }
 }
 
+#[test]
+fn a_refused_file_replacement_rolls_back_the_decision_and_undo_record() {
+    use resonance_core::journal::OperationKind;
+    use resonance_db::{DbError, FileDecision};
+    let mut db = library(&[scanned("Track.flac", &[])]);
+    let track_id = db.tracks().unwrap()[0].track_id;
+    db.store_proposals(track_id, &[proposal(TagField::Title, "Suggested", 0.95)])
+        .unwrap();
+    let before = db.tag_layers(track_id).unwrap();
+    let op = db
+        .begin_operation(OperationKind::WriteTags, "Save title", "[]", "{}")
+        .unwrap();
+    let fields = [(TagField::Title, "Suggested".to_owned(), None, true)];
+    let result = db.finish_tag_decision(
+        track_id,
+        None,
+        op,
+        "{\"library_tracks\":[1]}",
+        FileDecision::Accept {
+            fields: &fields,
+            cover: None,
+        },
+        || Err(std::io::ErrorKind::PermissionDenied.into()),
+    );
+    assert!(matches!(result, Err(DbError::FileEdit(_))));
+    assert_eq!(db.tag_layers(track_id).unwrap(), before);
+    assert_eq!(db.operation(op).unwrap().unwrap().inverse_json, "{}");
+    db.check_decision_undo(op, track_id).unwrap();
+}
+
 fn searched(db: &Database, text: &str) -> Vec<i64> {
     let query = TrackQuery {
         text: Some(text.to_owned()),
@@ -285,4 +315,34 @@ fn accepting_above_a_threshold_skips_user_held_and_low_confidence_fields() {
             .collect::<Vec<_>>(),
         [(ids[0], 1), (ids[1], 1), (ids[2], 1)]
     );
+}
+
+#[test]
+fn tracks_in_same_release_narrows_to_exact_folder_without_prefix_leak() {
+    let mut db = library(&[
+        scanned("Release/01.flac", &[(TagField::Title, "One")]),
+        scanned("Release/02.flac", &[(TagField::Title, "Two")]),
+        scanned("Release 2/01.flac", &[(TagField::Title, "Other 1")]),
+        scanned("Release_2/01.flac", &[(TagField::Title, "Other 2")]),
+        scanned("Back\\01.flac", &[(TagField::Title, "Back One")]),
+        scanned("Back\\02.flac", &[(TagField::Title, "Back Two")]),
+        scanned("Back 2\\01.flac", &[(TagField::Title, "Back Other")]),
+    ]);
+    let rows = db.tracks().unwrap();
+    let id_of = |suffix: &str| {
+        rows.iter()
+            .find(|r| r.file.path == suffix)
+            .unwrap()
+            .track_id
+    };
+
+    assert_eq!(
+        db.tracks_in_same_release(id_of("Release/01.flac")).unwrap(),
+        vec![id_of("Release/01.flac"), id_of("Release/02.flac")]
+    );
+    assert_eq!(
+        db.tracks_in_same_release(id_of("Back\\01.flac")).unwrap(),
+        vec![id_of("Back\\01.flac"), id_of("Back\\02.flac")]
+    );
+    let _ = &mut db;
 }

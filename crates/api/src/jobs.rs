@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::atomic::Ordering;
 use std::sync::{PoisonError, Weak};
 use std::time::{Duration, Instant};
 
@@ -153,6 +154,9 @@ fn execute_scan_job(
                 reconcile_watchers_for(core, &watcher, &library);
             }
             let found = report.found as u64;
+            if report.added > 0 || report.changed > 0 {
+                core.local_pass_dirty.store(true, Ordering::Release);
+            }
             let library_changed =
                 report.added > 0 || report.changed > 0 || report.missing_changed > 0;
             let command_report = to_command_scan_report(report);
@@ -190,13 +194,14 @@ fn execute_scan_job(
 }
 
 fn execute_identify_job(exec: &JobExecution<'_>, core: &LibraryCore) -> JobOutcome {
-    let mut total = {
+    let mut remaining = {
         let library = core.library.lock().unwrap_or_else(PoisonError::into_inner);
         match library.count_pending_identity_assets(AUDIO_DECODER_VERSION) {
             Ok(count) => count,
             Err(error) => return JobOutcome::Failed(ApiError::library_unreadable(error).message),
         }
     };
+    let mut total = remaining;
     let mut done = 0u64;
     let _ = exec.report_progress(0, Some(total));
     if total == 0 {
@@ -226,7 +231,7 @@ fn execute_identify_job(exec: &JobExecution<'_>, core: &LibraryCore) -> JobOutco
             Err(JobInterrupt::Shutdown) => return JobOutcome::Interrupted,
         }
 
-        let (batch, remaining) = {
+        let (batch, refreshed_remaining) = {
             let library = core.library.lock().unwrap_or_else(PoisonError::into_inner);
             let batch = match library.pending_identity_assets(
                 after_asset_id,
@@ -238,11 +243,16 @@ fn execute_identify_job(exec: &JobExecution<'_>, core: &LibraryCore) -> JobOutco
                     return JobOutcome::Failed(ApiError::library_unreadable(error).message);
                 }
             };
-            let remaining = library
-                .count_pending_identity_assets(AUDIO_DECODER_VERSION)
-                .unwrap_or(0);
-            (batch, remaining)
+            let refreshed = if batch.is_empty() {
+                library
+                    .count_pending_identity_assets(AUDIO_DECODER_VERSION)
+                    .unwrap_or(0)
+            } else {
+                remaining
+            };
+            (batch, refreshed)
         };
+        remaining = refreshed_remaining;
 
         let Some(last) = batch.last() else {
             if !wrapped_once && remaining > 0 {
@@ -258,6 +268,7 @@ fn execute_identify_job(exec: &JobExecution<'_>, core: &LibraryCore) -> JobOutco
         wrapped_once = false;
         after_asset_id = last.asset_id;
         total = total.max(done.saturating_add(remaining));
+        remaining = remaining.saturating_sub(batch.len() as u64);
 
         let computed = compute_batch(&batch, Some(exec.abort_flag()));
         match exec.check_interrupted() {

@@ -18,4 +18,8 @@ locked_by_user: boolean,
 /**
  * A pending proposal that would change what the track shows.
  */
-changes: boolean, };
+changes: boolean, 
+/**
+ * True when writing tags to disk will modify this field in the file.
+ */
+dirty_on_disk: boolean, };

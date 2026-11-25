@@ -36,6 +36,8 @@
     filters?: FilterState;
     /** The hook for sending a filter's tracks to Prep, wired when Prep lands. */
     onsendtoprep?: (query: TrackQuery, label: string) => void;
+    onopeninprep?: (trackIds: number[]) => void;
+    onidentifyonline?: (trackIds: number[]) => void;
     /** Opens the batch tag tools sheet for the selected tracks. */
     onbatchtag?: (trackIds: number[]) => void;
     onopen?: () => void;
@@ -95,6 +97,8 @@
     tableLayout = new TableLayoutState(),
     filters = new FilterState(),
     onsendtoprep,
+    onopeninprep,
+    onidentifyonline,
     onbatchtag,
     onopen,
     onpreview,
@@ -404,6 +408,16 @@
           >
             Add to collection
           </Button>
+          {#if onopeninprep}
+            <Button size="sm" onclick={() => onopeninprep(table?.checkedTrackIds() ?? [])}>
+              Open in Prep
+            </Button>
+          {/if}
+          {#if onidentifyonline}
+            <Button size="sm" onclick={() => onidentifyonline(table?.checkedTrackIds() ?? [])}>
+              Look up online
+            </Button>
+          {/if}
           {#if onbatchtag}
             <Button size="sm" onclick={() => onbatchtag(table?.checkedTrackIds() ?? [])}>
               Batch tags
@@ -493,6 +507,8 @@
         {onplay}
         {onfocustrack}
         {onrelink}
+        {onopeninprep}
+        {onidentifyonline}
         {ontogglefavourite}
         {onaddtocollection}
         {onremovefromcollection}
@@ -743,10 +759,23 @@
 
   .selection {
     display: flex;
+    flex-wrap: nowrap;
     align-items: center;
     align-self: start;
     gap: var(--space-2);
+    min-width: 0;
     height: var(--control-height-sm);
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .selection::-webkit-scrollbar {
+    display: none;
+  }
+
+  .selection > :global(*) {
+    flex: 0 0 auto;
   }
 
   .selection[hidden] {

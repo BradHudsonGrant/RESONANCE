@@ -102,6 +102,46 @@ fn a_command_bar_filter_reads_into_a_term_the_tracks_call_takes() {
 }
 
 #[test]
+fn prep_select_all_covers_every_page_and_respects_missing_tags_and_selection() {
+    let mut db = Database::open_in_memory().unwrap();
+    let source = db.source("crate").unwrap();
+    let files: Vec<_> = (0..503)
+        .map(|n| ScannedFile {
+            path: format!("Track {n:03}.mp3"),
+            size_bytes: 1,
+            modified_ns: 0,
+            format: AudioFormat::Mp3,
+            audio: None,
+            tags: if n == 501 {
+                vec![(TagField::Title, "Tagged".into())]
+            } else {
+                Vec::new()
+            },
+        })
+        .collect();
+    db.record_scan(source, &files).unwrap();
+    let api = Api::new_silent(db);
+    let ids = |query: Value, track_ids: Value| match call(
+        &api,
+        json!({"command":"prep_track_ids","params":{"query":query,"track_ids":track_ids}}),
+    ) {
+        Response::PrepTrackIds(ids) => ids,
+        _ => panic!("expected Prep track IDs"),
+    };
+    let all = ids(Value::Null, Value::Null);
+    assert_eq!(all.len(), 503);
+    let missing_title = json!({"filters":[parse(&api,"/missing title").term]});
+    let missing = ids(missing_title.clone(), Value::Null);
+    assert_eq!(missing.len(), 502);
+    assert_eq!(missing.last(), all.last());
+    assert_eq!(
+        ids(missing_title.clone(), json!([all[501], all[502], all[502]])),
+        vec![all[502]]
+    );
+    assert!(ids(missing_title, json!([])).is_empty());
+}
+
+#[test]
 fn a_filter_that_does_not_suit_its_column_is_refused() {
     let api = library();
     let error = api

@@ -6,6 +6,22 @@ pub const CREDENTIAL_SERVICE: &str = "com.resonance.dj";
 /// Long enough for any provider token seen so far, short enough to reject a pasted file.
 pub const MAX_KEY_LENGTH: usize = 512;
 
+/// User-configurable identification behaviour stored in the library database.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IdentificationSettings {
+    /// Compare 30-second provider audio previews against tracks in RAM when online matching
+    /// is uncertain or lacks a fingerprint confirmation.
+    pub verify_audio_previews: bool,
+}
+
+impl Default for IdentificationSettings {
+    fn default() -> Self {
+        Self {
+            verify_audio_previews: true,
+        }
+    }
+}
+
 /// A key or token a provider needs, entered by the user in Settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProviderKey {

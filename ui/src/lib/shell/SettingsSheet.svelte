@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { tick } from 'svelte';
+
   import Button from '../design/Button.svelte';
   import ModularDivider from '../design/ModularDivider.svelte';
   import MonoLabel from '../design/MonoLabel.svelte';
@@ -27,6 +29,8 @@
     recommendFilters?: boolean;
     onrecommendfilters?: (on: boolean) => void;
     onsourceschanged?: () => void;
+    /** Scrolls a named section into view when the sheet opens. */
+    focusSection?: 'providers' | null;
   }
 
   let {
@@ -41,7 +45,18 @@
     recommendFilters = true,
     onrecommendfilters,
     onsourceschanged,
+    focusSection = null,
   }: Props = $props();
+
+  let providersSection = $state<HTMLElement | undefined>();
+
+  $effect(() => {
+    if (!open || focusSection !== 'providers') return;
+    void tick().then(() => {
+      providersSection?.scrollIntoView({ block: 'start' });
+      providersSection?.focus({ preventScroll: true });
+    });
+  });
 
   const startTabs: SegmentedTabItem[] = [
     { id: 'beginning', label: 'Beginning' },
@@ -190,7 +205,7 @@
 
     <ModularDivider />
 
-    <section class="section">
+    <section bind:this={providersSection} class="section" tabindex="-1">
       <div class="section-head">
         <MonoLabel text="Providers" tone="secondary" />
       </div>
@@ -221,6 +236,10 @@
   .section {
     display: grid;
     gap: var(--space-2);
+  }
+
+  .section:focus {
+    outline: none;
   }
 
   .section-head {

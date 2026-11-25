@@ -13,6 +13,7 @@ pub const USER_AGENT: &str = concat!(
 );
 
 const TIMEOUT: Duration = Duration::from_secs(20);
+const MAX_RETRY_AFTER_SECONDS: u64 = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Method {
@@ -27,8 +28,10 @@ pub struct HttpRequest {
     pub url: String,
     /// Query parameters, or the form body for `PostForm`.
     pub params: Vec<(String, String)>,
-    /// A key sent alongside: as a form field for AcoustID, as a header for Discogs. It is never
-    /// part of the cache key and never formatted.
+    /// Optional stable cache key override when params carry a large binary payload.
+    pub cache_id: Option<String>,
+    /// A key sent alongside: as a form field for AcoustID/AudD, as a header for Discogs. It is
+    /// never part of the cache key and never formatted.
     pub secret: Option<Secret>,
 }
 
@@ -42,10 +45,9 @@ impl fmt::Debug for HttpRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("HttpRequest")
             .field("method", &self.method)
-            .field("url", &self.url)
-            .field("params", &self.params)
-            .field("secret", &self.secret.as_ref().map(|_| ".."))
-            .finish()
+            .field("parameter_count", &self.params.len())
+            .field("authenticated", &self.secret.is_some())
+            .finish_non_exhaustive()
     }
 }
 
@@ -55,6 +57,7 @@ impl HttpRequest {
             method: Method::Get,
             url: url.into(),
             params: Vec::new(),
+            cache_id: None,
             secret: None,
         }
     }
@@ -71,6 +74,11 @@ impl HttpRequest {
         self
     }
 
+    pub fn with_cache_id(mut self, cache_id: impl Into<String>) -> Self {
+        self.cache_id = Some(cache_id.into());
+        self
+    }
+
     pub fn with_secret(mut self, secret: Secret) -> Self {
         self.secret = Some(secret);
         self
@@ -84,11 +92,16 @@ impl HttpRequest {
             Method::PostForm => b"POST\n",
         });
         hasher.update(self.url.as_bytes());
-        for (name, value) in &self.params {
-            hasher.update(b"\n");
-            hasher.update(name.as_bytes());
-            hasher.update(b"=");
-            hasher.update(value.as_bytes());
+        if let Some(cache_id) = &self.cache_id {
+            hasher.update(b"\n#id=");
+            hasher.update(cache_id.as_bytes());
+        } else {
+            for (name, value) in &self.params {
+                hasher.update(b"\n");
+                hasher.update(name.as_bytes());
+                hasher.update(b"=");
+                hasher.update(value.as_bytes());
+            }
         }
         *hasher.finalize().as_bytes()
     }
@@ -98,9 +111,10 @@ impl HttpRequest {
 pub struct HttpResponse {
     pub status: u16,
     pub body: String,
+    pub retry_after_s: Option<u64>,
 }
 
-/// An answer read as bytes, for pictures.
+/// An answer read as bytes, for pictures and in-memory audio previews.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BytesResponse {
     pub status: u16,
@@ -186,11 +200,21 @@ impl HttpClient for NetworkClient {
         // message is kept to the kind of failure anyway.
         let mut response = sent.map_err(|error| Unreachable(failure_kind(&error)))?;
         let status = response.status().as_u16();
+        let retry_after_s = response
+            .headers()
+            .get("retry-after")
+            .and_then(|val| val.to_str().ok())
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .map(|s| s.clamp(1, MAX_RETRY_AFTER_SECONDS));
         let body = response
             .body_mut()
             .read_to_string()
             .map_err(|error| Unreachable(failure_kind(&error)))?;
-        Ok(HttpResponse { status, body })
+        Ok(HttpResponse {
+            status,
+            body,
+            retry_after_s,
+        })
     }
 
     fn fetch_bytes(&self, request: &HttpRequest, limit: u64) -> Result<BytesResponse, Unreachable> {
@@ -231,6 +255,23 @@ fn failure_kind(error: &ureq::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn request_diagnostics_omit_excerpts_and_lookup_values() {
+        let request = HttpRequest::post_form("https://example.test/private-address")
+            .param("audio", "encoded-excerpt")
+            .param("title", "private-title")
+            .with_cache_id("private-hash".to_owned());
+        let debug = format!("{request:?}");
+        for value in [
+            "private-address",
+            "encoded-excerpt",
+            "private-title",
+            "private-hash",
+        ] {
+            assert!(!debug.contains(value));
+        }
+    }
 
     #[test]
     fn the_secret_is_neither_hashed_nor_shown() {

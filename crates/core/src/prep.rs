@@ -413,11 +413,18 @@ pub fn local_proposals(file_tags: &[(TagField, String)], path: &str) -> Vec<Prop
             continue;
         };
         if !value.is_empty() {
+            let confidence = if from_tags.artist_inferred_from_title
+                && matches!(field, TagField::Artist | TagField::Title)
+            {
+                0.85
+            } else {
+                0.95
+            };
             proposals.push(Proposal {
                 field,
                 value,
                 provider: "tags".to_owned(),
-                confidence: 0.95,
+                confidence,
                 audio_matched: false,
             });
         }
@@ -682,5 +689,16 @@ mod tests {
             "Some Artist - Night Drive.flac",
         );
         assert!(already_clean.is_empty());
+
+        let inferred = local_proposals(
+            &[(TagField::Title, "Ada Marsh - Blue Hour".to_owned())],
+            "track.mp3",
+        );
+        let artist_prop = inferred
+            .iter()
+            .find(|p| p.field == TagField::Artist)
+            .expect("artist inferred from title");
+        assert_eq!(artist_prop.value, "Ada Marsh");
+        assert!(artist_prop.confidence < 0.90);
     }
 }

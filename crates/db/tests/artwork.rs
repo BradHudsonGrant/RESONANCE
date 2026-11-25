@@ -6,9 +6,11 @@
 use std::fs;
 use std::path::PathBuf;
 
+use std::time::Duration;
+
 use resonance_core::artwork::{ArtworkRefusal, ImageKind};
 use resonance_core::library::{AudioFormat, ScannedFile};
-use resonance_db::{ArtworkError, ArtworkStore, Database, StoredArtwork};
+use resonance_db::{ArtworkError, ArtworkStore, CachedArtworkSource, Database, StoredArtwork};
 
 fn test_folder(name: &str) -> PathBuf {
     let folder = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("artwork-{name}"));
@@ -199,7 +201,10 @@ fn a_proposal_is_fetched_once_and_waits_for_a_decision() {
     let release = store.put(&jpeg(3)).unwrap();
     let (mut database, ids) = library_of(&["A.mp3", "B.mp3"]);
     let url = "https://coverartarchive.org/release/x/front-500";
-    assert_eq!(database.artwork_fetched_from(url).unwrap(), None);
+    assert_eq!(
+        database.cached_artwork_source(url, Duration::ZERO).unwrap(),
+        None
+    );
 
     for track_id in &ids {
         database
@@ -208,8 +213,8 @@ fn a_proposal_is_fetched_once_and_waits_for_a_decision() {
     }
 
     assert_eq!(
-        database.artwork_fetched_from(url).unwrap(),
-        Some(release.clone())
+        database.cached_artwork_source(url, Duration::ZERO).unwrap(),
+        Some(CachedArtworkSource::Stored(release.clone()))
     );
     let proposed = database.proposed_artwork(ids[0]).unwrap().unwrap();
     assert!(proposed.pending);
@@ -237,4 +242,43 @@ fn a_proposal_is_fetched_once_and_waits_for_a_decision() {
         .store_proposed_artwork(ids[1], &other, "discogs", "https://i.discogs.com/x.jpg")
         .unwrap();
     assert!(database.proposed_artwork(ids[1]).unwrap().unwrap().pending);
+    assert_eq!(
+        database
+            .cached_artwork_source("https://i.discogs.com/x.jpg", Duration::from_secs(60))
+            .unwrap(),
+        Some(CachedArtworkSource::Stored(other))
+    );
+}
+
+#[test]
+fn fetched_artwork_cache_stores_hits_and_negative_entries_without_proposals() {
+    let store = ArtworkStore::new(test_folder("source-cache"));
+    let cover = store.put(&jpeg(8)).unwrap();
+    let (mut database, _) = library_of(&["A.mp3"]);
+    let hit_url = "https://i.discogs.com/cached-hit.jpg";
+    let miss_url = "https://coverartarchive.org/release/missing/front-500";
+
+    database
+        .record_fetched_artwork(hit_url, Some(&cover))
+        .unwrap();
+    assert_eq!(
+        database
+            .cached_artwork_source(hit_url, Duration::from_secs(60))
+            .unwrap(),
+        Some(CachedArtworkSource::Stored(cover))
+    );
+
+    database.record_fetched_artwork(miss_url, None).unwrap();
+    assert_eq!(
+        database
+            .cached_artwork_source(miss_url, Duration::from_secs(60))
+            .unwrap(),
+        Some(CachedArtworkSource::Unavailable)
+    );
+    assert_eq!(
+        database
+            .cached_artwork_source(miss_url, Duration::ZERO)
+            .unwrap(),
+        None
+    );
 }

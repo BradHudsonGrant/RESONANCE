@@ -44,6 +44,8 @@
     /** The user moved to a row with a plain click or a key, for auto-preview. */
     onfocustrack?: (track: LibraryTrack) => void;
     onrelink?: (track: LibraryTrack) => void;
+    onopeninprep?: (trackIds: number[]) => void;
+    onidentifyonline?: (trackIds: number[]) => void;
     ontogglefavourite?: (track: LibraryTrack) => void;
     /** The columns, widths, wrap and sort, kept by the core. */
     layout?: TableLayoutState;
@@ -75,6 +77,8 @@
     onplay,
     onfocustrack,
     onrelink,
+    onopeninprep,
+    onidentifyonline,
     ontogglefavourite,
     layout = new TableLayoutState(),
     onaddtocollection,
@@ -111,6 +115,7 @@
   let menuAnchor = $state<HTMLElement | null>(null);
   let menuTracks = $state<LibraryTrack[]>([]);
   let menuShowFavourite = $state(false);
+  let menuShowTrackActions = $state(false);
   let menuLabel = $state('Track actions');
 
   const allLoadedChecked = $derived(pages.allLoadedChecked(checkedIds));
@@ -814,12 +819,13 @@
   function openMenuForTracks(
     tracks: LibraryTrack[],
     anchor: HTMLElement | null,
-    options: { showFavourite: boolean; label: string },
+    options: { showFavourite: boolean; showTrackActions?: boolean; label: string },
   ) {
     if (tracks.length === 0) return;
     menuTracks = tracks;
     menuAnchor = anchor;
     menuShowFavourite = options.showFavourite;
+    menuShowTrackActions = Boolean(options.showTrackActions);
     menuLabel = options.label;
     menuOpen = true;
   }
@@ -1277,7 +1283,11 @@
                       const targets = targetTracksForAction(track);
                       openMenuForTracks(targets, event.currentTarget, {
                         showFavourite: targets.length === 1,
-                        label: `Actions for ${track.title}`,
+                        showTrackActions: true,
+                        label:
+                          targets.length > 1
+                            ? `Actions for ${targets.length.toLocaleString('en-GB')} tracks`
+                            : `Actions for ${track.title}`,
                       });
                     }
                   }}
@@ -1335,6 +1345,12 @@
     showFavourite={menuShowFavourite}
     onToggleFavourite={ontogglefavourite}
     onRelink={onrelink}
+    onOpenInPrep={menuShowTrackActions && onopeninprep
+      ? (tracks) => onopeninprep(tracks.map((t) => t.id))
+      : undefined}
+    onIdentifyOnline={menuShowTrackActions && onidentifyonline
+      ? (tracks) => onidentifyonline(tracks.map((t) => t.id))
+      : undefined}
     onAdd={onaddtocollection}
     onRemove={removeTracksFromCollection}
     onCreateAndAdd={oncreatecollectionandadd}

@@ -7,6 +7,7 @@ use resonance_core::prep::{
 use resonance_core::staging::{effective_tags, fields_to_accept_above, staging_diff};
 use rusqlite::{OptionalExtension, params};
 
+use crate::artwork::{accept_proposed_artwork_in_tx, skip_proposed_artwork_in_tx};
 use crate::search::now_unix_ns;
 use crate::tags::{
     AcceptReport, accept_in_tx, refresh_track, tag_layers_of, track_exists, write_user_tag,
@@ -47,9 +48,9 @@ impl Database {
     pub fn pending_prep_track_ids(&self, limit: u32) -> Result<Vec<i64>, DbError> {
         let mut stmt = self.connection.prepare_cached(
             "SELECT track_id FROM (
-                 SELECT DISTINCT track_id FROM proposed_tag WHERE status = 'pending'
+                 SELECT track_id FROM proposed_tag WHERE status = 'pending'
                  UNION
-                 SELECT DISTINCT track_id FROM proposed_artwork WHERE status = 'pending'
+                 SELECT track_id FROM proposed_artwork WHERE status = 'pending'
              )
              ORDER BY track_id LIMIT ?1",
         )?;
@@ -57,6 +58,20 @@ impl Database {
             .query_map([limit], |row| row.get(0))?
             .collect::<Result<Vec<i64>, _>>()?;
         Ok(ids)
+    }
+
+    /// Number of tracks with pending field or artwork proposals.
+    pub fn count_pending_prep_tracks(&self) -> Result<u32, DbError> {
+        Ok(self
+            .connection
+            .prepare_cached(
+                "SELECT count(*) FROM (
+                     SELECT track_id FROM proposed_tag WHERE status = 'pending'
+                     UNION
+                     SELECT track_id FROM proposed_artwork WHERE status = 'pending'
+                 )",
+            )?
+            .query_row([], |row| row.get(0))?)
     }
 
     /// Accepts proposals for `track_ids` in one transaction. When `fields` is empty, takes all
@@ -67,24 +82,58 @@ impl Database {
         track_ids: &[i64],
         fields: &[TagField],
     ) -> Result<AcceptReport, DbError> {
+        self.accept_prep_proposals(track_ids, fields, false, None)
+    }
+
+    /// Atomically accepts `fields` (or all pending unlocked changing proposals when `fields` is
+    /// empty), optionally skips remaining untouched pending proposals, and applies or skips
+    /// pending artwork in one transaction.
+    pub fn accept_prep_proposals(
+        &mut self,
+        track_ids: &[i64],
+        fields: &[TagField],
+        skip_remaining: bool,
+        include_artwork: Option<bool>,
+    ) -> Result<AcceptReport, DbError> {
         let tx = self.connection.transaction()?;
         let now = now_unix_ns();
         let mut report = AcceptReport::default();
+        let accept_art = include_artwork.unwrap_or(fields.is_empty() && !skip_remaining);
 
         for &track_id in track_ids {
             let Some(layers) = tag_layers_of(&tx, track_id)? else {
                 continue;
             };
             let target_fields: Vec<TagField> = if fields.is_empty() {
-                let diff = staging_diff(&layers.file, &layers.user, &layers.proposals);
-                fields_to_accept_above(&diff, 0.0)
+                if skip_remaining {
+                    Vec::new()
+                } else {
+                    let diff = staging_diff(&layers.file, &layers.user, &layers.proposals);
+                    fields_to_accept_above(&diff, 0.0)
+                }
             } else {
                 fields.to_vec()
             };
             let accepted = accept_in_tx(&tx, track_id, &target_fields, now)?;
-            if accepted > 0 {
+            if skip_remaining {
+                tx.prepare_cached(
+                    "UPDATE proposed_tag SET status = 'skipped', updated_ns = ?2
+                     WHERE track_id = ?1 AND status = 'pending'",
+                )?
+                .execute(params![track_id, now])?;
+            }
+            let art_accepted = if accept_art {
+                accept_proposed_artwork_in_tx(&tx, track_id)?
+            } else {
+                if skip_remaining {
+                    let _ = skip_proposed_artwork_in_tx(&tx, track_id)?;
+                }
+                false
+            };
+            let delta = accepted + u32::from(art_accepted);
+            if delta > 0 {
                 report.tracks += 1;
-                report.fields += accepted;
+                report.fields += delta;
             }
         }
 
@@ -144,22 +193,27 @@ impl Database {
 
         let folder = parent_folder(&path);
         if !folder.is_empty() {
+            let sep = if path.contains('/') { '/' } else { '\\' };
+            let prefix = format!("{folder}{sep}");
+            let upper_sep = char::from_u32(sep as u32 + 1).unwrap_or(sep);
+            let upper = format!("{folder}{upper_sep}");
             let mut stmt = self.connection.prepare_cached(
                 "SELECT track_id, path FROM asset
                  WHERE source_id = ?1 AND is_primary = 1 AND included = 1
+                   AND path >= ?2 AND path < ?3
                  ORDER BY track_id",
             )?;
-            let rows = stmt.query_map([source_id], |row| {
+            let rows = stmt.query_map(params![source_id, prefix, upper], |row| {
                 Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
             })?;
-            let mut siblings = Vec::new();
+            let mut tracks = Vec::new();
             for row in rows {
-                let (candidate_id, candidate_path) = row?;
+                let (candidate_track_id, candidate_path) = row?;
                 if parent_folder(&candidate_path).eq_ignore_ascii_case(folder) {
-                    siblings.push(candidate_id);
+                    tracks.push(candidate_track_id);
                 }
             }
-            return Ok(siblings);
+            return Ok(tracks);
         }
 
         if let Some(album) = tag_album.filter(|a| !a.is_empty()) {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { flushSync } from 'svelte';
+  import { flushSync, tick } from 'svelte';
   import { invoke, isTauri } from '@tauri-apps/api/core';
 
   import Sheet from './lib/design/Sheet.svelte';
@@ -69,6 +69,9 @@
     status: () => core.call('provider_keys'),
     save: (provider, value) => core.call('set_provider_key', { provider, value }),
     clear: (provider) => core.call('clear_provider_key', { provider }),
+    identificationSettings: () => core.call('identification_settings'),
+    saveIdentificationSettings: (settings) =>
+      core.call('set_identification_settings', { settings }),
   };
   const desktop = isTauri();
   const relinkClient: RelinkClient = {
@@ -96,27 +99,47 @@
     clearFinished: () => core.call('clear_finished_jobs'),
   };
   const prepClient: PrepClient = {
-    queue: (query, proposals_only) => core.call('prep_queue', { query, proposals_only }),
-    diff: (track_id) => core.call('staging_diff', { track_id }),
-    artwork: (track_id) => core.call('track_artwork', { track_id }),
-    acceptItems: (track_ids, fields = []) => core.call('accept_prep_items', { track_ids, fields }),
-    skipItems: (track_ids, fields = []) => core.call('skip_prep_items', { track_ids, fields }),
-    acceptAboveThreshold: (min_confidence) =>
-      core.call('accept_all_above_threshold', { min_confidence }),
-    setUserTag: (track_ids, edits) => core.call('set_user_tag', { track_ids, edits }),
-    acceptArtwork: (track_id) => core.call('accept_proposed_artwork', { track_id }),
-    skipArtwork: (track_id) => core.call('skip_proposed_artwork', { track_id }),
-    identifyOnline: (track_ids) => core.call('identify_online', { track_ids }),
+    trackIds: (query, track_ids) =>
+      core.call('prep_track_ids', { query, ...(track_ids === null ? {} : { track_ids }) }),
+    prepPage: (query, track_ids, offset, limit) =>
+      core.call('prep_page', {
+        query,
+        ...(track_ids === null ? {} : { track_ids }),
+        offset,
+        limit,
+      }),
+    acceptAndWrite: (track_ids, fields, include_artwork, expected_review) =>
+      core.call('accept_and_write', {
+        track_ids,
+        fields,
+        include_artwork,
+        ...(expected_review == null ? {} : { expected_review }),
+      }),
+    selectCandidate: (track_id, candidate_index, expected_review) =>
+      core.call('select_prep_candidate', { track_id, candidate_index, expected_review }),
+    useCandidateArtwork: (track_id, candidate_index, accept, expected_review) =>
+      core.call('use_prep_candidate_artwork', {
+        track_id,
+        candidate_index,
+        accept,
+        expected_review,
+      }),
+    identifyOnline: (track_ids, only_selected) =>
+      core.call('identify_online', { track_ids, only_selected }),
     identifyWithUrl: (track_id, url) => core.call('identify_with_url', { track_id, url }),
-    previewTagWrites: (track_ids) => core.call('preview_tag_writes', { track_ids }),
-    applyTagWrites: (track_ids) => core.call('apply_tag_writes', { track_ids }),
     previewBatchTag: (track_ids, tool) => core.call('preview_batch_tag', { track_ids, tool }),
     applyBatchTag: (track_ids, tool) => core.call('apply_batch_tag', { track_ids, tool }),
+    previewTagWrites: (track_ids) => core.call('preview_tag_writes', { track_ids }),
+    applyTagWrites: (track_ids) => core.call('apply_tag_writes', { track_ids }),
     undoOperation: (operation_id) => core.call('undo_operation', { operation_id }),
   };
 
   let shell: HTMLDivElement;
   let space = $state<SpaceName>('Library');
+  let prepPaletteOpen = $state(false);
+  $effect(() => {
+    if (space !== 'Prep') prepPaletteOpen = false;
+  });
   // The window size sets the layout in CSS. These hold only what the user chose over it.
   let sidebarChoice = $state<Fold>();
   let dockChoice = $state<Fold>();
@@ -144,6 +167,9 @@
   let batchTagTrackIds = $state<number[]>([]);
   let prepBatchQuery = $state<TrackQuery | null>(null);
   let prepBatchLabel = $state<string | null>(null);
+  let prepTrackIds = $state<number[] | null>(null);
+  let prepCount = $state<number | null>(null);
+  let settingsFocusSection = $state<'providers' | null>(null);
   let relinkTarget = $state<LibraryTrack | null>(null);
   let sourcesRevision = $state(0);
   let mixPlaying = $state(false);
@@ -155,6 +181,13 @@
   const activeCollection = $derived(
     collections.find((collection) => collection.id === activeCollectionId) ?? null,
   );
+  const activeOnlineJob = $derived(
+    activitySnapshot.active.find((job) => job.kind === 'identify_online') ?? null,
+  );
+  const recentOnlineJob = $derived(
+    activitySnapshot.recent.find((job) => job.kind === 'identify_online') ?? null,
+  );
+  const identifyingOnline = $derived(activeOnlineJob != null);
 
   function setSearch(text: string) {
     searchText = text;
@@ -319,8 +352,31 @@
   }
 
   function openSettings() {
+    settingsFocusSection = null;
     settingsMounted = true;
     settingsOpen = true;
+  }
+
+  let prepCountInFlight = false;
+  let prepCountQueued = false;
+
+  async function refreshPrepCount() {
+    if (prepCountInFlight) {
+      prepCountQueued = true;
+      return;
+    }
+    prepCountInFlight = true;
+    try {
+      do {
+        prepCountQueued = false;
+        const page = await core.call('staging_queue', { offset: 0, limit: 0 });
+        prepCount = page.total;
+      } while (prepCountQueued);
+    } catch {
+      // Initial load handles core error states; ignore transient count refresh failure.
+    } finally {
+      prepCountInFlight = false;
+    }
   }
 
   function openScan() {
@@ -349,9 +405,32 @@
   }
 
   function sendToPrep(query: TrackQuery, label: string) {
+    prepTrackIds = null;
     prepBatchQuery = { ...query };
     prepBatchLabel = label;
     space = 'Prep';
+  }
+
+  function openTracksInPrep(trackIds: number[]) {
+    if (trackIds.length === 0) return;
+    prepBatchQuery = null;
+    prepBatchLabel = null;
+    prepTrackIds = [...trackIds];
+    space = 'Prep';
+  }
+
+  async function identifyTracksOnline(trackIds: number[]) {
+    if (trackIds.length === 0) return;
+    try {
+      const next = await core.call('identify_online', {
+        track_ids: trackIds,
+        only_selected: true,
+      });
+      if (next) activitySnapshot = next;
+      openTracksInPrep(trackIds);
+    } catch {
+      openActivity();
+    }
   }
 
   function previewTrack(item: LibraryTrack) {
@@ -472,6 +551,7 @@
       if (next === 4) {
         void loadCollections();
         void refreshActivity();
+        void refreshPrepCount();
       } else if (next === 5) {
         void preview.refresh();
         void preview.loadSettings();
@@ -485,10 +565,16 @@
   });
 
   let previousSpace: SpaceName = 'Library';
+  let libraryDirty = false;
   $effect(() => {
     const next = space;
     if (next === 'Mix' && previousSpace !== 'Mix' && preview.playing) {
       void preview.pause();
+    }
+    if (next === 'Library' && previousSpace !== 'Library' && libraryDirty) {
+      libraryDirty = false;
+      void pages.refresh();
+      if (track) void loadArtwork(track.id);
     }
     previousSpace = next;
   });
@@ -496,9 +582,14 @@
   $effect(() =>
     core.onLibraryChange(() => {
       sourcesRevision += 1;
-      void pages.refresh();
       void loadCollections();
-      if (track) void loadArtwork(track.id);
+      void refreshPrepCount();
+      if (space === 'Library') {
+        void pages.refresh();
+        if (track) void loadArtwork(track.id);
+      } else {
+        libraryDirty = true;
+      }
     }),
   );
 
@@ -540,12 +631,14 @@
   function reload() {
     void pages.load();
     void loadCollections();
+    void refreshPrepCount();
   }
 
   function onScanned() {
     sourcesRevision += 1;
     void pages.refresh();
     void loadCollections();
+    void refreshPrepCount();
   }
 
   function typing(target: EventTarget | null): boolean {
@@ -568,7 +661,10 @@
   }
 
   const keys: Record<string, () => void> = {
-    '/': () => document.getElementById(commandInput)?.focus(),
+    '/': () => {
+      if (space === 'Prep') prepPaletteOpen = true;
+      void tick().then(() => document.getElementById(commandInput)?.focus());
+    },
     i: toggleInspector,
     p: toggleAutoPreview,
     '[': toggleSidebar,
@@ -586,7 +682,8 @@
 
     if (command && key === 'k') {
       event.preventDefault();
-      document.getElementById(commandInput)?.focus();
+      if (space === 'Prep') prepPaletteOpen = true;
+      void tick().then(() => document.getElementById(commandInput)?.focus());
     } else if (command && (key === '1' || key === '2' || key === '4')) {
       event.preventDefault();
       keys[key]?.();
@@ -637,6 +734,7 @@
       <Sidebar
         activeSpace={space}
         trackCount={pages.state.kind === 'ready' ? pages.libraryTotal : null}
+        {prepCount}
         wavePaused={space === 'Mix' && mixPlaying}
         {collections}
         {activeCollectionId}
@@ -660,21 +758,26 @@
     {/if}
   </div>
 
-  <div class="workspace">
-    {#if shellStage >= 2}
+  <div class="workspace" class:tagging={space === 'Prep' && !prepPaletteOpen}>
+    {#if shellStage >= 2 && (space !== 'Prep' || prepPaletteOpen)}
       <CommandBar
         {commands}
         inputId={commandInput}
-        search={searchText}
+        search={space === 'Prep' ? '' : searchText}
+        showExamples={space !== 'Prep'}
+        onblur={() => (prepPaletteOpen = false)}
         parseFilter={(text) => filters.parse(text)}
-        onsearch={setSearch}
+        onsearch={(text) => {
+          if (space === 'Prep' && text.trim()) space = 'Library';
+          setSearch(text);
+        }}
         onfilter={(filter) => {
           space = 'Library';
           filters.remember(filter);
           filters.add(pages, filter.term);
         }}
       />
-    {:else}
+    {:else if shellStage < 2}
       <div></div>
     {/if}
     <main class="workspace-content">
@@ -689,12 +792,20 @@
               client={prepClient}
               batchQuery={prepBatchQuery}
               batchLabel={prepBatchLabel}
+              batchTrackIds={prepTrackIds}
               revision={sourcesRevision}
-              previewTrackId={preview.trackId}
-              previewPlaying={preview.playing}
+              {activeOnlineJob}
+              {recentOnlineJob}
+              onopenactivity={openActivity}
+              onopenproviders={() => {
+                settingsFocusSection = 'providers';
+                settingsMounted = true;
+                settingsOpen = true;
+              }}
               onclearbatch={() => {
                 prepBatchQuery = null;
                 prepBatchLabel = null;
+                prepTrackIds = null;
               }}
               onopenlibrary={() => (space = 'Library')}
               onrename={openRename}
@@ -714,6 +825,8 @@
             loadFacets={() => core.call('library_facets')}
             {tableLayout}
             onsendtoprep={sendToPrep}
+            onopeninprep={openTracksInPrep}
+            onidentifyonline={(ids) => void identifyTracksOnline(ids)}
             onbatchtag={openBatchTag}
             onopen={showInspector}
             onpreview={previewTrack}
@@ -745,6 +858,9 @@
         onclose={() => (inspectorHidden = true)}
         onpreview={previewTrack}
         onrelink={openRelink}
+        identifying={identifyingOnline}
+        onopeninprep={(item) => openTracksInPrep([item.id])}
+        onidentifyonline={(item) => void identifyTracksOnline([item.id])}
         ontogglefavourite={toggleFavourite}
         onaddtocollection={addTracksToCollection}
         onremovefromcollection={removeTracksFromCollection}
@@ -759,7 +875,7 @@
   {/if}
 
   <!-- The Mix spike has its own decks and transport until the real decks arrive in M7. -->
-  {#if space !== 'Mix' && shellStage >= 5}
+  {#if space !== 'Mix' && space !== 'Prep' && shellStage >= 5}
     <div class="dock">
       <TransitionDock
         onCollapse={(collapsed) => (dockChoice = collapsed ? 'collapsed' : 'expanded')}
@@ -807,6 +923,15 @@
       onclose={() => (sheetOpen = false)}
       onpreview={previewTrack}
       onrelink={openRelink}
+      identifying={identifyingOnline}
+      onopeninprep={(item) => {
+        sheetOpen = false;
+        openTracksInPrep([item.id]);
+      }}
+      onidentifyonline={(item) => {
+        sheetOpen = false;
+        void identifyTracksOnline([item.id]);
+      }}
       ontogglefavourite={toggleFavourite}
       onaddtocollection={addTracksToCollection}
       onremovefromcollection={removeTracksFromCollection}
@@ -877,6 +1002,7 @@
     {providerKeysClient}
     {renameClient}
     {sourcesRevision}
+    focusSection={settingsFocusSection}
     previewStart={preview.settings.start}
     maxStartSeconds={preview.settings.max_start_seconds}
     onpreviewstart={(start) => void preview.changeSettings({ start })}
@@ -988,6 +1114,10 @@
     min-width: 0;
     min-height: 0;
     overflow: hidden;
+  }
+
+  .workspace.tagging {
+    grid-template-rows: minmax(0, 1fr);
   }
 
   .workspace-content {

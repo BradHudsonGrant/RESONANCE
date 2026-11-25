@@ -534,3 +534,37 @@ fn the_local_set_of_real_tracks_scans_cleanly_where_this_machine_has_one() {
     assert!(tracks.iter().all(|track| track.file.audio.is_some()));
     assert_eq!(files_under(&local_set), before);
 }
+
+#[test]
+fn scan_stores_embedded_isrc_and_marks_isrc_read() {
+    let library = library("isrc-scan");
+    write_tags(
+        &library.music.join("House/first.mp3"),
+        &[
+            (ItemKey::TrackTitle, "First Light"),
+            (ItemKey::TrackArtist, "Ada Marsh"),
+            (ItemKey::Isrc, "USRC19900001"),
+        ],
+    );
+    let mut database = database();
+    let report = scanned(&mut database, &library);
+    assert_eq!(report.added, 6);
+
+    let source_id = database
+        .source(&library.music.to_string_lossy())
+        .expect("source resolves");
+    assert!(
+        database
+            .paths_without_isrc_read(source_id)
+            .expect("unread query succeeds")
+            .is_empty()
+    );
+    let inputs = database
+        .identification_inputs(resonance_db::IdentificationPass::Local, 0, 20)
+        .expect("inputs read");
+    let first = inputs
+        .iter()
+        .find(|input| input.path == "House/first.mp3")
+        .expect("mp3 input present");
+    assert_eq!(first.file_isrc.as_deref(), Some("USRC19900001"));
+}

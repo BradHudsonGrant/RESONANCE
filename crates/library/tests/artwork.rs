@@ -98,6 +98,38 @@ fn stored_files(folder: &Path) -> Vec<String> {
 }
 
 #[test]
+fn accepting_only_a_cover_can_be_undone_in_the_file_and_library() {
+    let folders = folders("accepted-cover");
+    let path = folders.music.join("Track.mp3");
+    write_silent_mp3(&path, 1.0).expect("mp3");
+    let mut db = Database::open(&folders.data.join("library.db")).expect("database");
+    scan(&mut db, &folders.music, &[]).expect("scan");
+    let id = db.tracks().expect("tracks")[0].track_id;
+    let art = db
+        .artwork_store()
+        .expect("store")
+        .put(&NEW_COVER)
+        .expect("cover");
+    db.store_proposed_artwork(id, &art, "discogs", "https://example.test/cover")
+        .expect("proposal");
+    let database = Mutex::new(db);
+    let saved = resonance_library::write_tags::accept_and_write(&database, &[id], Some(&[]), true)
+        .expect("accept");
+    assert_eq!(saved.written, 1, "{:?}", saved.failed);
+    assert_eq!(front_cover(&path).as_deref(), Some(NEW_COVER.as_slice()));
+    undo_operation(&database, saved.operation_id.expect("id")).expect("undo");
+    let db = database.lock().expect("lock");
+    assert_eq!(front_cover(&path), None);
+    assert_eq!(db.user_cover_hash(id).expect("user cover"), None);
+    assert!(
+        db.proposed_artwork(id)
+            .expect("proposed cover")
+            .expect("proposal")
+            .pending
+    );
+}
+
+#[test]
 fn an_album_scanned_keeps_one_picture() {
     let folders = folders("album");
     fs::create_dir_all(folders.music.join("Album")).expect("album folder");

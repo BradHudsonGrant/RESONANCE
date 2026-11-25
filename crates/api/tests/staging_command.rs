@@ -345,4 +345,210 @@ fn prep_queue_and_batch_tools_fix_case_replace_text_and_apply_release_fields() {
     );
     assert_eq!(value_of(&after_second, TagName::CatNo), Some("VEC001"));
     assert_eq!(value_of(&after_second, TagName::Year), Some("2024"));
+
+    let bad = api
+        .handle(Request::AcceptPrepItems {
+            track_ids: vec![ids[0], ids[1]],
+            fields: vec![],
+            candidate_index: Some(0),
+            skip_remaining: false,
+            include_artwork: None,
+        })
+        .unwrap_err();
+    assert_eq!(bad.code, ErrorCode::BadRequest);
+}
+
+#[test]
+fn accept_prep_items_empty_fields_with_skip_remaining_does_not_accept_pending_tags() {
+    let mut database = Database::open_in_memory().unwrap();
+    let source = database.source("D:\\Club").unwrap();
+    let track_file = |path: &str, title: &str| ScannedFile {
+        path: path.to_owned(),
+        size_bytes: 1,
+        modified_ns: 0,
+        format: AudioFormat::Mp3,
+        audio: None,
+        tags: vec![(TagField::Title, title.to_owned())],
+    };
+    database
+        .record_scan(
+            source,
+            &[
+                track_file("a.mp3", "Track One"),
+                track_file("b.mp3", "Track Two"),
+            ],
+        )
+        .unwrap();
+    let ids: Vec<i64> = database
+        .tracks()
+        .unwrap()
+        .iter()
+        .map(|row| row.track_id)
+        .collect();
+    database
+        .store_proposals(
+            ids[0],
+            &[Proposal {
+                field: TagField::Label,
+                value: "Recordings A".to_owned(),
+                provider: "discogs".to_owned(),
+                confidence: 0.94,
+                audio_matched: false,
+            }],
+        )
+        .unwrap();
+    database
+        .store_proposals(
+            ids[1],
+            &[Proposal {
+                field: TagField::Label,
+                value: "Recordings B".to_owned(),
+                provider: "discogs".to_owned(),
+                confidence: 0.94,
+                audio_matched: false,
+            }],
+        )
+        .unwrap();
+    let art = resonance_db::StoredArtwork {
+        hash: "a".repeat(64),
+        kind: resonance_core::artwork::ImageKind::Jpeg,
+        byte_len: 1234,
+    };
+    database
+        .store_proposed_artwork(ids[0], &art, "discogs", "https://i.discogs.com/one.jpg")
+        .unwrap();
+    database
+        .store_proposed_artwork(ids[1], &art, "discogs", "https://i.discogs.com/two.jpg")
+        .unwrap();
+
+    let api = Api::new_silent(database);
+    let revisions = api.watch_revisions();
+    let rev0 = *revisions.borrow();
+
+    // Case 1: cover-only Apply & skip rest (`fields: []`, `skip_remaining: true`, `include_artwork: Some(true)`).
+    let Response::AcceptPrepItems(art_only) = api
+        .handle(Request::AcceptPrepItems {
+            track_ids: vec![ids[0]],
+            fields: vec![],
+            candidate_index: None,
+            skip_remaining: true,
+            include_artwork: Some(true),
+        })
+        .unwrap()
+    else {
+        panic!("expected AcceptPrepItems");
+    };
+    assert_eq!(art_only.tracks, 1);
+    assert_eq!(art_only.fields, 1);
+    assert!(*revisions.borrow() > rev0);
+    let diff0 = diff(&api, ids[0]);
+    let label0 = diff0
+        .fields
+        .iter()
+        .find(|f| f.field == TagName::Label)
+        .unwrap();
+    assert_eq!(label0.current_value, None);
+    assert_eq!(label0.status, Some(ProposalState::Skipped));
+    let Response::TrackArtwork(art0) = api
+        .handle(Request::TrackArtwork { track_id: ids[0] })
+        .unwrap()
+    else {
+        panic!("expected TrackArtwork");
+    };
+    assert_eq!(art0.artwork.as_deref(), Some("a".repeat(64).as_str()));
+    assert!(art0.proposed.is_none());
+
+    // Case 2: skip all untouched proposals when skipping remaining with artwork unchecked.
+    let rev1 = *revisions.borrow();
+    let Response::AcceptPrepItems(none_accepted) = api
+        .handle(Request::AcceptPrepItems {
+            track_ids: vec![ids[1]],
+            fields: vec![],
+            candidate_index: None,
+            skip_remaining: true,
+            include_artwork: Some(false),
+        })
+        .unwrap()
+    else {
+        panic!("expected AcceptPrepItems");
+    };
+    assert_eq!(none_accepted.tracks, 0);
+    assert_eq!(none_accepted.fields, 0);
+    assert!(*revisions.borrow() > rev1);
+    let diff1 = diff(&api, ids[1]);
+    let label1 = diff1
+        .fields
+        .iter()
+        .find(|f| f.field == TagName::Label)
+        .unwrap();
+    assert_eq!(label1.current_value, None);
+    assert_eq!(label1.status, Some(ProposalState::Skipped));
+    let Response::TrackArtwork(art1) = api
+        .handle(Request::TrackArtwork { track_id: ids[1] })
+        .unwrap()
+    else {
+        panic!("expected TrackArtwork");
+    };
+    assert_eq!(art1.artwork, None);
+    assert!(art1.proposed.is_none());
+}
+
+#[test]
+fn staging_queue_zero_limit_counts_pending_artwork_only_tracks() {
+    let mut database = Database::open_in_memory().unwrap();
+    let source = database.source("D:\\Club").unwrap();
+    database
+        .record_scan(
+            source,
+            &[ScannedFile {
+                path: "cover-only.mp3".to_owned(),
+                size_bytes: 1,
+                modified_ns: 0,
+                format: AudioFormat::Mp3,
+                audio: None,
+                tags: vec![(TagField::Title, "Cover Only".to_owned())],
+            }],
+        )
+        .unwrap();
+    let id = database.tracks().unwrap()[0].track_id;
+    let art = resonance_db::StoredArtwork {
+        hash: "b".repeat(64),
+        kind: resonance_core::artwork::ImageKind::Jpeg,
+        byte_len: 512,
+    };
+    database
+        .store_proposed_artwork(id, &art, "discogs", "https://i.discogs.com/cover.jpg")
+        .unwrap();
+
+    let api = Api::new_silent(database);
+    let Response::StagingQueue(page) = api
+        .handle(Request::StagingQueue {
+            offset: 0,
+            limit: 0,
+        })
+        .unwrap()
+    else {
+        panic!("expected StagingQueue");
+    };
+    assert_eq!(page.total, 1);
+    assert!(page.items.is_empty());
+}
+
+#[test]
+fn skip_prep_items_bumps_watch_revision() {
+    let (api, ids) = library();
+    let revisions = api.watch_revisions();
+    let before = *revisions.borrow();
+
+    let Response::SkipPrepItems(skipped) = api
+        .handle(Request::SkipPrepItems {
+            track_ids: vec![ids[0]],
+            fields: vec![],
+        })
+        .unwrap()
+    else {
+        panic!("expected SkipPrepItems");
+    };
+    assert_eq!(skipped.fields, 1);
+    assert!(*revisions.borrow() > before);
 }

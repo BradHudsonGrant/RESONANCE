@@ -26,13 +26,24 @@
     /** The id of the field, so Ctrl+K anywhere can put the cursor in it. */
     inputId: string;
     search?: string;
+    showExamples?: boolean;
+    onblur?: () => void;
     /** Reads a `/` filter in the core. */
     parseFilter?: (text: string) => Promise<DescribedFilter>;
     onsearch?: (text: string) => void;
     onfilter?: (filter: DescribedFilter) => void;
   }
 
-  let { commands, inputId, search = '', parseFilter, onsearch, onfilter }: Props = $props();
+  let {
+    commands,
+    inputId,
+    search = '',
+    showExamples = true,
+    onblur,
+    parseFilter,
+    onsearch,
+    onfilter,
+  }: Props = $props();
 
   const examples = [
     { text: 'missing genre', description: 'Tracks with no genre' },
@@ -224,7 +235,10 @@
       aria-activedescendant={open && active >= 0 ? `${listId}-${active}` : undefined}
       bind:value={query}
       onfocus={reset}
-      onblur={() => (focused = false)}
+      onblur={() => {
+        focused = false;
+        onblur?.();
+      }}
       {oninput}
       {onkeydown}
     />
@@ -259,32 +273,39 @@
     {/if}
   </div>
 
-  <div class="strip">
-    <div class="chips">
-      <!-- Only the first chip takes focus, so Tab does not stop on every placeholder. -->
-      <SlashChip
-        command="/ missing genre"
-        description="Filter on any column"
-        onclick={() => startExample('missing genre')}
-      />
-      {#each futureChips as chip (chip.command)}
-        <Tooltip text="{chip.description} arrives in {chip.arrives}" side="below">
-          <SlashChip command={chip.command} description={chip.description} disabled tabindex={-1} />
-        </Tooltip>
-      {/each}
+  {#if showExamples}
+    <div class="strip">
+      <div class="chips">
+        <!-- Only the first chip takes focus, so Tab does not stop on every placeholder. -->
+        <SlashChip
+          command="/ missing genre"
+          description="Filter on any column"
+          onclick={() => startExample('missing genre')}
+        />
+        {#each futureChips as chip (chip.command)}
+          <Tooltip text="{chip.description} arrives in {chip.arrives}" side="below">
+            <SlashChip
+              command={chip.command}
+              description={chip.description}
+              disabled
+              tabindex={-1}
+            />
+          </Tooltip>
+        {/each}
+      </div>
+      <Tooltip text="More slash commands arrive in M5" side="left">
+        <Button
+          variant="icon"
+          size="sm"
+          aria-label="More slash commands"
+          aria-disabled="true"
+          tabindex={-1}
+        >
+          <Icon name="more" size="xs" />
+        </Button>
+      </Tooltip>
     </div>
-    <Tooltip text="More slash commands arrive in M5" side="left">
-      <Button
-        variant="icon"
-        size="sm"
-        aria-label="More slash commands"
-        aria-disabled="true"
-        tabindex={-1}
-      >
-        <Icon name="more" size="xs" />
-      </Button>
-    </Tooltip>
-  </div>
+  {/if}
 </header>
 
 <style>

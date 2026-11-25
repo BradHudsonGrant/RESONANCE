@@ -224,5 +224,44 @@ test('a provider key saved in Settings shows as configured, then clears', async 
 
   await acoustid.getByRole('button', { name: 'Clear AcoustID key' }).click();
   await expect(acoustid.getByText('Not set')).toBeVisible();
+
+  const verifyToggle = settings.getByRole('checkbox', {
+    name: 'Verify uncertain matches against 30 s audio previews',
+  });
+  await expect(verifyToggle).toBeChecked();
+  await verifyToggle.uncheck();
+  await expect(verifyToggle).not.toBeChecked();
   await settings.getByRole('button', { name: 'Done' }).click();
+
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(
+    settings.getByRole('checkbox', {
+      name: 'Verify uncertain matches against 30 s audio previews',
+    }),
+  ).not.toBeChecked();
+  await settings.getByRole('button', { name: 'Done' }).click();
+});
+
+test('Prep has no horizontal page overflow at compact desktop viewports in both themes', async ({
+  page,
+}) => {
+  for (const scheme of ['dark', 'light'] as const) {
+    await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
+    for (const [width, height] of [[1100, 700] as const, [760, 480] as const]) {
+      await open(page, width, height);
+      await page.getByRole('button', { name: 'Prep', exact: true }).click();
+      await expect(page.getByRole('toolbar', { name: 'Prep controls' })).toBeVisible();
+      await expect(page.getByRole('combobox', { name: 'Filter tracks' })).toHaveValue('');
+      await expect(page.getByRole('combobox', { name: 'Commands' })).toBeHidden();
+      await page.keyboard.press('Control+k');
+      await expect(page.getByRole('combobox', { name: 'Commands' })).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('combobox', { name: 'Commands' })).toBeHidden();
+      await expect(page.getByRole('slider', { name: 'Confidence threshold' })).toHaveCount(0);
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      );
+      expect(overflow).toBe(false);
+    }
+  }
 });

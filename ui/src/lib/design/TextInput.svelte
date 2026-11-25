@@ -12,6 +12,7 @@
     size?: 'md' | 'lg';
     leadingIcon?: IconName;
     shortcutBadge?: string;
+    inputEl?: HTMLInputElement;
   }
 
   let {
@@ -21,6 +22,7 @@
     size = 'md',
     leadingIcon,
     shortcutBadge,
+    inputEl = $bindable<HTMLInputElement | undefined>(undefined),
     placeholder,
     disabled = false,
     ...rest
@@ -40,7 +42,15 @@
         <Icon name={leadingIcon} size="sm" />
       </span>
     {/if}
-    <input class="input" aria-labelledby={labelId} bind:value {placeholder} {disabled} {...rest} />
+    <input
+      bind:this={inputEl}
+      class="input"
+      aria-labelledby={labelId}
+      bind:value
+      {placeholder}
+      {disabled}
+      {...rest}
+    />
     {#if shortcutBadge}
       <span class="badge" aria-hidden="true">
         <DataTag label={shortcutBadge} variant="keybadge" />
@@ -51,6 +61,7 @@
 
 <style>
   .field {
+    position: relative;
     display: grid;
     min-width: 0;
     gap: var(--space-1);

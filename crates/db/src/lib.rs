@@ -2,10 +2,12 @@ mod artwork;
 mod collections;
 mod filters;
 mod identification;
+mod identification_settings;
 mod identity;
 mod jobs;
 mod operations;
 mod prep;
+mod prep_writes;
 mod preview_settings;
 mod renames;
 mod search;
@@ -13,17 +15,21 @@ mod sources;
 mod table_layout;
 mod tags;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-pub use artwork::{ARTWORK_FOLDER, ArtworkError, ArtworkStore, ProposedArtwork, StoredArtwork};
+pub use artwork::{
+    ARTWORK_FOLDER, ArtworkError, ArtworkStore, CachedArtworkSource, ProposedArtwork,
+    StoredArtwork, TrackArtworkState,
+};
 pub use collections::{CollectionSummary, TrackCollection};
 pub use filters::SmartView;
 pub use identification::{
-    CachedResponse, IdentificationInput, IdentificationPass, StoredIdentification,
+    AssetAudioIdentity, CachedResponse, IdentificationBatchItem, IdentificationInput,
+    IdentificationPass, LocalIdentificationItem, StoredIdentification,
 };
 pub use identity::{
     IdentityMatch, PendingAsset, StoredAssetIdentity, StoredRelinkCandidate,
@@ -31,6 +37,7 @@ pub use identity::{
 };
 pub use operations::StoredOperation;
 pub use prep::BatchTagOperation;
+pub use prep_writes::{FileDecision, FileRevision};
 pub use renames::{RenameTarget, StoredRename};
 use resonance_core::collections::CollectionNameError;
 use resonance_core::library::{
@@ -42,9 +49,20 @@ pub use search::{LibraryFacets, now_unix_ms};
 pub use sources::{SourceAssetPresence, SourceConfig};
 pub use tags::{AcceptReport, StagingQueueEntry, TagLayers, TagWriteTarget};
 
+/// How many keys go in one `IN (...)` list, well under SQLite's limit on bound values.
+pub(crate) const IN_CHUNK: usize = 500;
+
+/// `?1, ?2, ...` for an `IN` list of this many values.
+pub(crate) fn placeholders(count: usize) -> String {
+    (1..=count)
+        .map(|index| format!("?{index}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
-const MIGRATIONS: [&str; 16] = [
+const MIGRATIONS: [&str; 21] = [
     include_str!("../migrations/0001_library.sql"),
     include_str!("../migrations/0002_sources.sql"),
     include_str!("../migrations/0003_identity.sql"),
@@ -61,6 +79,11 @@ const MIGRATIONS: [&str; 16] = [
     include_str!("../migrations/0014_artwork.sql"),
     include_str!("../migrations/0015_table_columns.sql"),
     include_str!("../migrations/0016_filters.sql"),
+    include_str!("../migrations/0017_identification_candidates.sql"),
+    include_str!("../migrations/0018_artwork_source_cache.sql"),
+    include_str!("../migrations/0019_prep_indexes.sql"),
+    include_str!("../migrations/0020_operation_tag_decisions.sql"),
+    include_str!("../migrations/0021_prep_query_indexes.sql"),
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -70,6 +93,8 @@ pub const FILE_NAME: &str = "library.db";
 
 #[derive(Debug)]
 pub enum DbError {
+    FileEdit(io::Error),
+    DecisionChanged,
     Folder { path: PathBuf, source: io::Error },
     Sqlite(rusqlite::Error),
     NewerSchema { found: u32, known: u32 },
@@ -82,6 +107,10 @@ pub enum DbError {
 impl fmt::Display for DbError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::FileEdit(error) => write!(f, "Could not replace the file: {error}"),
+            Self::DecisionChanged => {
+                f.write_str("The tags changed during this operation. Review them again.")
+            }
             Self::Folder { path, source } => write!(
                 f,
                 "The folder for the database, {}, could not be made: {source}",
@@ -406,8 +435,8 @@ impl Database {
                 for (field, value) in &file.tags {
                     add_tag.execute(params![asset, field.name(), value])?;
                 }
-                search::write_tag_values(&transaction, asset, shown_tags)?;
-                search::write_missing_tags(&transaction, asset, shown_tags)?;
+                search::write_tag_values(&transaction, asset, shown_tags, included != 0)?;
+                search::write_missing_tags(&transaction, asset, shown_tags, included != 0)?;
                 add_fts.execute(params![
                     asset,
                     meta.title,
@@ -421,6 +450,34 @@ impl Database {
             }
         }
         transaction.commit()?;
+        Ok(())
+    }
+
+    /// Paths in a source whose embedded ISRC metadata has not been scanned yet.
+    pub fn paths_without_isrc_read(&self, source: SourceId) -> Result<HashSet<String>, DbError> {
+        Ok(self
+            .connection
+            .prepare_cached("SELECT path FROM asset WHERE source_id = ?1 AND isrc_read = 0")?
+            .query_map([source.0], |row| row.get(0))?
+            .collect::<Result<_, _>>()?)
+    }
+
+    /// Stores scanned ISRC codes per asset path without widening `ScannedFile`.
+    pub fn set_assets_isrc(
+        &mut self,
+        source: SourceId,
+        entries: &[(String, Option<String>)],
+    ) -> Result<(), DbError> {
+        let tx = self.connection.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached(
+                "UPDATE asset SET file_isrc = ?3, isrc_read = 1 WHERE source_id = ?1 AND path = ?2",
+            )?;
+            for (path, isrc) in entries {
+                stmt.execute(params![source.0, path, isrc])?;
+            }
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -1049,5 +1106,117 @@ mod tests {
             .query_row("SELECT count(*) FROM asset_tag_value", [], |row| row.get(0))
             .expect("count reads");
         assert_eq!(left, 0);
+    }
+
+    #[test]
+    fn migrating_from_v16_leaves_isrc_read_zero_for_rescan_backfill() {
+        let mut conn = Connection::open_in_memory().expect("a database opens");
+        conn.pragma_update(None, "foreign_keys", true)
+            .expect("foreign keys enable");
+        for migration in &MIGRATIONS[..16] {
+            conn.execute_batch(migration).expect("prior migration runs");
+        }
+        conn.pragma_update(None, "user_version", 16u32)
+            .expect("version 16 stamps");
+        conn.execute_batch(
+            "INSERT INTO source (folder) VALUES ('club');
+             INSERT INTO track DEFAULT VALUES;
+             INSERT INTO asset (track_id, source_id, path, size_bytes, modified_ns, format, sort_title)
+                 VALUES (1, 1, 'a.mp3', 100, 1000, 'mp3', 'a');",
+        )
+        .expect("rows insert");
+
+        migrate(&mut conn).expect("v16 migrates to v17");
+        let db = Database {
+            connection: conn,
+            artwork: None,
+        };
+        let pending = db
+            .paths_without_isrc_read(SourceId(1))
+            .expect("unread paths list");
+        assert_eq!(pending, HashSet::from(["a.mp3".to_owned()]));
+
+        let mut db = db;
+        db.set_assets_isrc(
+            SourceId(1),
+            &[("a.mp3".to_owned(), Some("USRC19900001".to_owned()))],
+        )
+        .expect("isrc updates");
+        assert!(
+            db.paths_without_isrc_read(SourceId(1))
+                .expect("unread paths list")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn prep_track_page_deduplicates_non_primary_included_assets() {
+        let mut db = Database::open_in_memory().expect("a database opens");
+        let source = db.source("D:/Club").expect("source");
+        db.record_scan(
+            source,
+            &[
+                ScannedFile {
+                    path: "a_primary.flac".to_owned(),
+                    size_bytes: 1000,
+                    modified_ns: 100,
+                    format: AudioFormat::Flac,
+                    audio: None,
+                    tags: vec![
+                        (TagField::Title, "Alpha".to_owned()),
+                        (TagField::Genre, "House".to_owned()),
+                    ],
+                },
+                ScannedFile {
+                    path: "b_secondary.mp3".to_owned(),
+                    size_bytes: 500,
+                    modified_ns: 100,
+                    format: AudioFormat::Mp3,
+                    audio: None,
+                    tags: vec![
+                        (TagField::Title, "Alpha".to_owned()),
+                        (TagField::Genre, "Techno".to_owned()),
+                    ],
+                },
+                ScannedFile {
+                    path: "c_other.flac".to_owned(),
+                    size_bytes: 1000,
+                    modified_ns: 100,
+                    format: AudioFormat::Flac,
+                    audio: None,
+                    tags: vec![
+                        (TagField::Title, "Beta".to_owned()),
+                        (TagField::Genre, "Ambient".to_owned()),
+                    ],
+                },
+            ],
+        )
+        .expect("scan recorded");
+
+        // Attach asset 2 (`b_secondary.mp3`) as a duplicate non-primary included asset of track 1.
+        db.connection
+            .execute(
+                "UPDATE asset SET track_id = 1, is_primary = 0 WHERE path = 'b_secondary.mp3'",
+                [],
+            )
+            .expect("non-primary duplicate updated");
+
+        let (total, page) = db
+            .prep_track_page(&resonance_core::search::TrackQuery::default(), 0, 50)
+            .expect("prep_track_page");
+        assert_eq!(total, 2);
+        assert_eq!(page.len(), 2);
+
+        let tag_sorted = resonance_core::search::TrackQuery {
+            sort: resonance_core::search::TrackSortField::Tag(TagField::Genre),
+            direction: resonance_core::search::SortDirection::Asc,
+            ..resonance_core::search::TrackQuery::default()
+        };
+        let (sorted_total, sorted_page) = db.prep_track_page(&tag_sorted, 0, 50).expect("tag page");
+        assert_eq!(sorted_total, 2);
+        assert_eq!(
+            sorted_page,
+            db.prep_track_ids(&tag_sorted).expect("tag ids")
+        );
     }
 }

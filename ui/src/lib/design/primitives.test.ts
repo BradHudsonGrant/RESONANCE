@@ -133,6 +133,8 @@ describe('Micro elements and DataTag', () => {
     expect(separators.some((sep) => sep.getAttribute('aria-orientation') === 'vertical')).toBe(
       true,
     );
+    expect(document.querySelectorAll('.brackets')).toHaveLength(1);
+    expect(document.querySelectorAll('.brackets .corner')).toHaveLength(0);
   });
 });
 

@@ -23,6 +23,7 @@ mod tag_writes;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 use std::time::Duration;
 
@@ -48,6 +49,8 @@ use resonance_library::watch::SourceWatcher;
 use sources::reconcile_watchers_for;
 use tokio::sync::watch;
 
+pub use online::LibraryAudioFingerprinter;
+
 pub(crate) const REPORTED_UNREADABLE_FILES: usize = 100;
 
 #[derive(Clone)]
@@ -64,6 +67,7 @@ struct PreviewTrackMeta {
 pub(crate) struct LibraryCore {
     pub(crate) library: Arc<Mutex<Database>>,
     pub(crate) identify_pass: Mutex<()>,
+    pub(crate) local_pass_dirty: AtomicBool,
     pub(crate) own_files: Mutex<Vec<PathBuf>>,
     pub(crate) watch_revisions: watch::Sender<u64>,
     pub(crate) scan_outcomes: Mutex<HashMap<i64, Result<ScanReport, ApiError>>>,
@@ -105,6 +109,7 @@ impl Api {
         let core = Arc::new(LibraryCore {
             library: Arc::clone(&database),
             identify_pass: Mutex::new(()),
+            local_pass_dirty: AtomicBool::new(true),
             own_files: Mutex::new(std::env::current_exe().into_iter().collect()),
             watch_revisions,
             scan_outcomes: Mutex::new(HashMap::new()),
@@ -325,8 +330,11 @@ impl Api {
                 .map(Response::ChangeTableLayout),
             Request::Scan { folder } => self.scan(Path::new(&folder)).map(Response::Scan),
             Request::Identify => self.identify().map(Response::Identify),
-            Request::IdentifyOnline { track_ids } => self
-                .identify_online(&track_ids)
+            Request::IdentifyOnline {
+                track_ids,
+                only_selected,
+            } => self
+                .identify_online(&track_ids, only_selected)
                 .map(Response::IdentifyOnline),
             Request::IdentifyWithUrl { track_id, url } => self
                 .identify_with_url(track_id, &url)
@@ -474,6 +482,19 @@ impl Api {
             Request::ApplyTagWrites { track_ids } => self
                 .apply_tag_writes(&track_ids)
                 .map(Response::ApplyTagWrites),
+            Request::AcceptAndWrite {
+                track_ids,
+                fields,
+                include_artwork,
+                expected_review,
+            } => self
+                .accept_and_write(
+                    &track_ids,
+                    fields.as_deref(),
+                    include_artwork,
+                    expected_review.as_deref(),
+                )
+                .map(Response::AcceptAndWrite),
             Request::RecentOperations { limit } => self
                 .recent_operations(limit)
                 .map(Response::RecentOperations),
@@ -490,15 +511,67 @@ impl Api {
             Request::ApplyRename { scope, template } => self
                 .apply_rename(scope, &template)
                 .map(Response::ApplyRename),
+            Request::PrepTrackIds { query, track_ids } => self
+                .prep_track_ids(query, track_ids)
+                .map(Response::PrepTrackIds),
+            Request::PrepPage {
+                query,
+                track_ids,
+                offset,
+                limit,
+            } => self
+                .prep_page(query, track_ids, offset, limit)
+                .map(Response::PrepPage),
             Request::PrepQueue {
                 query,
                 proposals_only,
+                track_ids,
             } => self
-                .prep_queue(query, proposals_only)
+                .prep_queue(query, proposals_only, track_ids)
                 .map(Response::PrepQueue),
-            Request::AcceptPrepItems { track_ids, fields } => self
-                .accept_prep_items(&track_ids, &fields)
+            Request::AcceptPrepItems {
+                track_ids,
+                fields,
+                candidate_index,
+                skip_remaining,
+                include_artwork,
+            } => self
+                .accept_prep_items(
+                    &track_ids,
+                    &fields,
+                    candidate_index,
+                    skip_remaining,
+                    include_artwork,
+                )
                 .map(Response::AcceptPrepItems),
+            Request::SelectPrepCandidate {
+                track_id,
+                candidate_index,
+                expected_review,
+            } => self
+                .select_prep_candidate(track_id, candidate_index, expected_review.as_deref())
+                .map(Box::new)
+                .map(Response::SelectPrepCandidate),
+            Request::UsePrepCandidateArtwork {
+                track_id,
+                candidate_index,
+                accept,
+                expected_review,
+            } => self
+                .use_prep_candidate_artwork(
+                    track_id,
+                    candidate_index,
+                    accept,
+                    expected_review.as_deref(),
+                )
+                .map(Box::new)
+                .map(Response::UsePrepCandidateArtwork),
+            Request::FetchPrepCandidateArtwork {
+                track_id,
+                candidate_index,
+            } => self
+                .fetch_prep_candidate_artwork(track_id, candidate_index)
+                .map(Response::FetchPrepCandidateArtwork),
             Request::SkipPrepItems { track_ids, fields } => self
                 .skip_prep_items(&track_ids, &fields)
                 .map(Response::SkipPrepItems),
@@ -508,6 +581,12 @@ impl Api {
             Request::ApplyBatchTag { track_ids, tool } => self
                 .apply_batch_tag(&track_ids, tool)
                 .map(Response::ApplyBatchTag),
+            Request::IdentificationSettings => self
+                .identification_settings()
+                .map(Response::IdentificationSettings),
+            Request::SetIdentificationSettings { settings } => self
+                .set_identification_settings(settings)
+                .map(Response::SetIdentificationSettings),
         }
     }
 

@@ -1,5 +1,6 @@
 <script lang="ts" module>
   export type IconName =
+    | 'undo'
     | 'search'
     | 'library'
     | 'prep'
@@ -32,7 +33,10 @@
     | 'volume-mute'
     | 'missing'
     | 'relink'
-    | 'auto-preview';
+    | 'auto-preview'
+    | 'external-link'
+    | 'image'
+    | 'no-cover';
 </script>
 
 <script lang="ts">
@@ -51,8 +55,11 @@
   import Columns3 from '@lucide/svelte/icons/columns-3';
   import Disc3 from '@lucide/svelte/icons/disc-3';
   import Ellipsis from '@lucide/svelte/icons/ellipsis';
+  import ExternalLink from '@lucide/svelte/icons/external-link';
   import FolderOpen from '@lucide/svelte/icons/folder-open';
   import Headphones from '@lucide/svelte/icons/headphones';
+  import Image from '@lucide/svelte/icons/image';
+  import ImageOff from '@lucide/svelte/icons/image-off';
   import Inbox from '@lucide/svelte/icons/inbox';
   import Info from '@lucide/svelte/icons/info';
   import Library from '@lucide/svelte/icons/library';
@@ -67,6 +74,7 @@
   import Settings from '@lucide/svelte/icons/settings';
   import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
   import Star from '@lucide/svelte/icons/star';
+  import Undo2 from '@lucide/svelte/icons/undo-2';
   import Volume2 from '@lucide/svelte/icons/volume-2';
   import VolumeX from '@lucide/svelte/icons/volume-x';
   import X from '@lucide/svelte/icons/x';
@@ -81,6 +89,7 @@
   let { name, icon, size = 'sm', filled = false }: Props = $props();
 
   const ICONS: Record<IconName, LucideIcon> = {
+    undo: Undo2,
     search: Search,
     library: Library,
     prep: Inbox,
@@ -114,6 +123,9 @@
     missing: CircleAlert,
     relink: Link2,
     'auto-preview': ListVideo,
+    'external-link': ExternalLink,
+    image: Image,
+    'no-cover': ImageOff,
   };
 
   const pixelSize = $derived.by(() => {

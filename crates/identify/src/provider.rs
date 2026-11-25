@@ -14,6 +14,9 @@ use crate::rate::{RateLimit, RateLimiter};
 /// Answers are kept this long, so a second run over the same files asks no one again.
 pub const CACHE_TTL: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 
+/// Maximum size for an in-memory 30-second audio preview stream (2 MiB).
+pub const MAX_PREVIEW_BYTES: u64 = 2 * 1024 * 1024;
+
 #[derive(Debug)]
 pub enum IdentifyError {
     Unreachable {
@@ -74,13 +77,18 @@ impl From<DbError> for IdentifyError {
     }
 }
 
-/// How a provider id reads in a message.
+/// How a provider id reads in a message or UI label.
 pub fn display_name(provider: &str) -> &str {
     match provider {
         "acoustid" => "AcoustID",
         "musicbrainz" => "MusicBrainz",
         "discogs" => "Discogs",
         "bandcamp" => "Bandcamp",
+        "deezer" => "Deezer",
+        "itunes" => "Apple Music",
+        "soundcloud" => "SoundCloud",
+        "youtube" => "YouTube",
+        "audd" => "AudD",
         other => other,
     }
 }
@@ -99,6 +107,15 @@ pub enum Query<'a> {
     },
     Text(&'a KnownTags),
     Release(&'a ReleaseUrl),
+    /// An ISO 3901 ISRC (12 uppercase alphanumeric chars, no hyphens).
+    Isrc(&'a str),
+    /// A web page or stream URL checked against MusicBrainz URL relationships.
+    Url(&'a str),
+    /// A compact WAV excerpt kept in RAM for opt-in recognisers.
+    AudioExcerpt {
+        wav_bytes: &'a [u8],
+        audio_hash_hex: &'a str,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,6 +124,9 @@ pub enum QueryKind {
     Recording,
     Text,
     Release,
+    Isrc,
+    Url,
+    AudioExcerpt,
 }
 
 impl Query<'_> {
@@ -116,8 +136,24 @@ impl Query<'_> {
             Self::Recording { .. } => QueryKind::Recording,
             Self::Text(_) => QueryKind::Text,
             Self::Release(_) => QueryKind::Release,
+            Self::Isrc(_) => QueryKind::Isrc,
+            Self::Url(_) => QueryKind::Url,
+            Self::AudioExcerpt { .. } => QueryKind::AudioExcerpt,
         }
     }
+}
+
+/// How the shared fetcher should treat one HTTP answer without hardcoding provider quirks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResponseDisposition {
+    /// Store status + body in `provider_cache`. `200` returns `Some(body)`, `404` returns `None`.
+    Cacheable,
+    /// Return `Some(body)` to the provider without caching (so it can report typed refusals).
+    PassThrough,
+    /// Transient quota/server pressure: wait `Retry-After` (or 1 s) and try once more. Never cached.
+    Retryable,
+    /// Hard HTTP or API error; fails the lookup cleanly without caching.
+    Error,
 }
 
 /// One metadata service. Each declares what it answers, the key it needs and its rate limit,
@@ -130,6 +166,21 @@ pub trait MetadataProvider: Send + Sync {
     /// The key it uses when the user has entered one.
     fn key(&self) -> Option<ProviderKey>;
     fn rate_limit(&self) -> RateLimit;
+
+    /// How long a cached answer stays good. An answer that carries signed links has to be
+    /// asked for again before they expire.
+    fn cache_ttl(&self) -> Duration {
+        CACHE_TTL
+    }
+
+    fn classify_response(&self, status: u16, _body: &str) -> ResponseDisposition {
+        match status {
+            OK | NOT_FOUND => ResponseDisposition::Cacheable,
+            429 | 503 => ResponseDisposition::Retryable,
+            _ => ResponseDisposition::Error,
+        }
+    }
+
     fn lookup(
         &self,
         query: &Query<'_>,
@@ -151,7 +202,7 @@ pub trait MetadataProvider: Send + Sync {
 
 /// What a provider gets for one lookup: a paced, cached way to fetch, and its key if any.
 pub struct Lookup<'a> {
-    pub(crate) provider: &'static str,
+    pub(crate) provider: &'a dyn MetadataProvider,
     pub(crate) fetcher: &'a Fetcher,
     pub(crate) limiter: &'a RateLimiter,
     pub(crate) key: Option<&'a ProviderSecret>,
@@ -200,12 +251,13 @@ impl Fetcher {
 
     fn fetch(
         &self,
-        provider: &'static str,
+        source: &dyn MetadataProvider,
         limiter: &RateLimiter,
         request: &HttpRequest,
     ) -> Result<Option<String>, IdentifyError> {
+        let provider = source.id();
         let key = request.cache_key();
-        let fresh_since = now_ns().saturating_sub(CACHE_TTL.as_nanos() as i64);
+        let fresh_since = now_ns().saturating_sub(source.cache_ttl().as_nanos() as i64);
         let cached = self
             .database
             .lock()
@@ -220,9 +272,10 @@ impl Fetcher {
         }
 
         let mut response = None;
+        let mut disposition = ResponseDisposition::Error;
         // One retry after a "slow down": MusicBrainz answers 503 and Discogs 429 when a burst
         // from another program on the same address used the allowance.
-        for _ in 0..2 {
+        for attempt in 0..2 {
             limiter.acquire();
             self.counts
                 .lock()
@@ -235,30 +288,37 @@ impl Fetcher {
                     provider,
                     reason: failure.0,
                 })?;
-            let busy = matches!(answer.status, 429 | 503);
+            disposition = source.classify_response(answer.status, &answer.body);
+            // The HTTP client has already clamped Retry-After to a few seconds.
+            let wait_s = answer.retry_after_s.unwrap_or(1);
             response = Some(answer);
-            if !busy {
+            if disposition != ResponseDisposition::Retryable || attempt == 1 {
                 break;
             }
-            std::thread::sleep(Duration::from_secs(1));
+            std::thread::sleep(Duration::from_secs(wait_s));
         }
         let Some(response) = response else {
             return Err(IdentifyError::Unexpected { provider });
         };
-        match response.status {
-            OK | NOT_FOUND => {
+
+        match disposition {
+            ResponseDisposition::Cacheable => {
                 {
                     let mut database = self.database.lock().unwrap_or_else(PoisonError::into_inner);
                     database.store_response(provider, &key, response.status, &response.body)?;
                 }
                 Ok((response.status == OK).then_some(response.body))
             }
-            status => Err(IdentifyError::Status { provider, status }),
+            ResponseDisposition::PassThrough => Ok(Some(response.body)),
+            ResponseDisposition::Retryable | ResponseDisposition::Error => {
+                Err(IdentifyError::Status {
+                    provider,
+                    status: response.status,
+                })
+            }
         }
     }
-}
 
-impl Fetcher {
     /// A picture, fetched straight from the network after waiting on the limiter. Pictures are
     /// kept in the picture store, not the response cache. `None` when the address has none.
     pub(crate) fn fetch_picture(
@@ -275,6 +335,35 @@ impl Fetcher {
         let answer = self
             .http
             .fetch_bytes(&HttpRequest::get(url), MAX_ARTWORK_BYTES as u64)
+            .map_err(|failure| IdentifyError::Unreachable {
+                provider,
+                reason: failure.0,
+            })?;
+        match answer.status {
+            OK => Ok(Some(answer.body)),
+            NOT_FOUND => Ok(None),
+            status => Err(IdentifyError::Status { provider, status }),
+        }
+    }
+
+    /// Fetches a 30-second audio preview strictly into RAM (never cached, never written to disk).
+    pub(crate) fn fetch_preview(
+        &self,
+        provider: &'static str,
+        limiter: &RateLimiter,
+        url: &str,
+    ) -> Result<Option<Vec<u8>>, IdentifyError> {
+        if !url.starts_with("https://") {
+            return Ok(None);
+        }
+        limiter.acquire();
+        self.counts
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .network += 1;
+        let answer = self
+            .http
+            .fetch_bytes(&HttpRequest::get(url), MAX_PREVIEW_BYTES)
             .map_err(|failure| IdentifyError::Unreachable {
                 provider,
                 reason: failure.0,

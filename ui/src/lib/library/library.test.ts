@@ -555,6 +555,7 @@ describe('Inspector and track formatting', () => {
         track_id: track.id,
         artwork: track.artwork,
         proposed: { artwork: 'b'.repeat(64), provider: 'MusicBrainz' },
+        dirty_on_disk: false,
       },
       onpickartwork,
       onacceptartwork,
@@ -621,5 +622,57 @@ describe('Inspector and track formatting', () => {
       }),
     ).toBe('MP3 · 48 kHz · 320 kbps');
     expect(audioSummary('wav', null)).toBe('WAV');
+  });
+
+  it('offers Open in Prep and Look up online from selection bar, row menu, and Inspector', async () => {
+    const { pages } = fakeLibrary(3);
+    await pages.load();
+    const onopeninprep = vi.fn();
+    const onidentifyonline = vi.fn();
+
+    render(Library, {
+      pages,
+      onscan: vi.fn(),
+      onopeninprep,
+      onidentifyonline,
+    });
+
+    const rows = screen.getAllByRole('row');
+    await fireEvent.click(within(rows[1]!).getByRole('checkbox', { name: 'Tick Track 0' }));
+    const selection = screen.getByRole('region', { name: 'Selected tracks' });
+    await fireEvent.click(within(selection).getByRole('button', { name: 'Open in Prep' }));
+    expect(onopeninprep).toHaveBeenCalledWith([1]);
+
+    await fireEvent.click(within(selection).getByRole('button', { name: 'Look up online' }));
+    expect(onidentifyonline).toHaveBeenCalledWith([1]);
+
+    // Multi-track row actions menu exposes multi-track counts cleanly.
+    await fireEvent.click(within(rows[2]!).getByRole('checkbox', { name: 'Tick Track 1' }));
+    await fireEvent.click(within(rows[1]!).getByRole('button', { name: 'Actions for Track 0' }));
+    const rowMenu = screen.getByRole('menu', { name: 'Actions for 2 tracks' });
+    await fireEvent.click(within(rowMenu).getByRole('menuitem', { name: 'Open 2 tracks in Prep' }));
+    expect(onopeninprep).toHaveBeenCalledWith([1, 2]);
+    await fireEvent.click(within(rows[1]!).getByRole('button', { name: 'Actions for Track 0' }));
+    const rowMenuAgain = screen.getByRole('menu', { name: 'Actions for 2 tracks' });
+    await fireEvent.click(
+      within(rowMenuAgain).getByRole('menuitem', { name: 'Look up 2 tracks online' }),
+    );
+    expect(onidentifyonline).toHaveBeenCalledWith([1, 2]);
+
+    const inspectorPrep = vi.fn();
+    const inspectorLookup = vi.fn();
+    const track = fakeTrack(1);
+    render(Inspector, {
+      track,
+      onclose: vi.fn(),
+      onopeninprep: inspectorPrep,
+      onidentifyonline: inspectorLookup,
+    });
+
+    const aside = screen.getByRole('complementary', { name: 'Inspector' });
+    await fireEvent.click(within(aside).getByRole('button', { name: 'Open in Prep' }));
+    expect(inspectorPrep).toHaveBeenCalledWith(track);
+    await fireEvent.click(within(aside).getByRole('button', { name: 'Look up online' }));
+    expect(inspectorLookup).toHaveBeenCalledWith(track);
   });
 });

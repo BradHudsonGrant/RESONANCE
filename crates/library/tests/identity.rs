@@ -10,13 +10,16 @@ use lofty::config::WriteOptions;
 use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::prelude::{Accessor, AudioFile, TaggedFileExt};
 use lofty::tag::{Tag, TagType};
-use resonance_core::identity::{encode_base64_url_unpadded, fingerprint_similarity};
+use resonance_core::identity::{
+    encode_base64_url_unpadded, fingerprint_similarity, match_preview_fingerprint,
+};
 use resonance_core::library::AudioFormat;
 use resonance_db::Database;
 use resonance_fixtures::audio_file::pcm16;
 use resonance_fixtures::signal::Signal;
 use resonance_library::identity::{
-    AUDIO_DECODER_VERSION, compute_byte_hash, compute_identity, identify_pending,
+    AUDIO_DECODER_VERSION, compute_byte_hash, compute_identity, extract_pcm_wav_excerpt,
+    fingerprint_audio_bytes, fingerprint_file_full, identify_pending,
 };
 use resonance_library::scan::scan;
 use rusty_chromaprint::{Configuration, FingerprintCompressor};
@@ -426,8 +429,7 @@ fn decoded_stream_matches_reported_hz_channels_duration_and_catches_truncated_fi
         trunc_facts.duration_ms()
     );
 
-    // Check one real track of each format in fixtures-local (plus any leading-ID3v2 M4A) when
-    // present on this machine; measure_local_fixtures exercises all 50 in release mode.
+    // Cover every M4A because some carry an ID3 block ahead of the MP4 container.
     let local_fixtures = std::env::var_os("RESONANCE_FIXTURES_LOCAL")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures-local"));
@@ -439,8 +441,7 @@ fn decoded_stream_matches_reported_hz_channels_duration_and_catches_truncated_fi
         assert_eq!(report.found, 50);
         let mut seen_formats = std::collections::HashSet::new();
         for track in local_db.tracks().expect("local tracks") {
-            let is_milk_house = track.file.path.contains("Milk House");
-            if !seen_formats.insert(track.file.format) && !is_milk_house {
+            if !seen_formats.insert(track.file.format) && track.file.format != AudioFormat::M4a {
                 continue;
             }
             let Some(header) = track.file.audio else {
@@ -455,29 +456,29 @@ fn decoded_stream_matches_reported_hz_channels_duration_and_catches_truncated_fi
             if let Some(rate) = header.sample_rate {
                 assert_eq!(
                     decoded.sample_rate, rate,
-                    "sample rate mismatch on {}",
-                    track.file.path
+                    "sample rate mismatch on fixture {}",
+                    track.track_id
                 );
             }
             if let Some(ch) = header.channels {
                 assert_eq!(
                     decoded.channels,
                     u16::from(ch),
-                    "channel mismatch on {}",
-                    track.file.path
+                    "channel mismatch on fixture {}",
+                    track.track_id
                 );
             }
             assert_ne!(
                 decoded.checksum_ok,
                 Some(false),
-                "checksum failed on {}",
-                track.file.path
+                "checksum failed on fixture {}",
+                track.track_id
             );
             let tolerance_ms = (header.duration_ms / 50).max(1_000);
             assert!(
                 decoded.duration_ms().abs_diff(header.duration_ms) <= tolerance_ms,
-                "duration drift on {}: decoded {} ms vs header {} ms",
-                track.file.path,
+                "duration drift on fixture {}: decoded {} ms vs header {} ms",
+                track.track_id,
                 decoded.duration_ms(),
                 header.duration_ms
             );
@@ -759,4 +760,54 @@ fn measure_local_fixtures() {
     report_series("byte_hash (1 thread)", byte_runs);
     report_series("full identity (1 thread)", single_runs);
     report_series(&format!("full identity ({workers} threads)"), parallel_runs);
+}
+
+#[test]
+fn preview_bytes_match_full_track_at_non_aligned_offset_and_reject_same_tempo_other_track() {
+    let root = test_folder("identity_preview_verification");
+    let track_a = musical_phrase(220.0, 124.0, 80.0, 44_100);
+    // Deliberately different chord progression at the exact same 124 BPM and root key.
+    let track_b = musical_phrase(261.63, 124.0, 80.0, 44_100);
+
+    let full_a_path = root.join("track_a.flac");
+    track_a.write_flac(&full_a_path).expect("track_a");
+    let full_fp = fingerprint_file_full(&full_a_path).expect("full fingerprint");
+
+    // Non-hop-aligned +45.062 s slice of 30 s from track A, written as FLAC bytes in memory.
+    let start_sample = (45.062_f64 * 44_100.0).round() as usize * 2;
+    let slice_len = 30 * 44_100 * 2;
+    let slice_signal = Signal {
+        sample_rate: 44_100,
+        channels: 2,
+        samples: track_a.samples[start_sample..start_sample + slice_len].to_vec(),
+    };
+    let slice_path = root.join("preview_a.flac");
+    slice_signal.write_flac(&slice_path).expect("preview_a");
+    let preview_bytes = fs::read(&slice_path).expect("read preview_a");
+    let preview_fp = fingerprint_audio_bytes(&preview_bytes, Some("flac")).expect("preview fp");
+
+    let hit = match_preview_fingerprint(&full_fp, &preview_fp).expect("scored match");
+    assert!(hit.confirmed, "expected preview match, got {hit:?}");
+
+    let slice_b = Signal {
+        sample_rate: 44_100,
+        channels: 2,
+        samples: track_b.samples[start_sample..start_sample + slice_len].to_vec(),
+    };
+    let slice_b_path = root.join("preview_b.flac");
+    slice_b.write_flac(&slice_b_path).expect("preview_b");
+    let preview_b_bytes = fs::read(&slice_b_path).expect("read preview_b");
+    let preview_b_fp =
+        fingerprint_audio_bytes(&preview_b_bytes, Some("flac")).expect("preview_b fp");
+
+    let miss = match_preview_fingerprint(&full_fp, &preview_b_fp).expect("scored miss");
+    assert!(
+        !miss.confirmed,
+        "same-BPM other track must be rejected: {miss:?}"
+    );
+
+    let wav_excerpt = extract_pcm_wav_excerpt(&full_a_path, 0.4, 12).expect("wav excerpt");
+    assert!(wav_excerpt.starts_with(b"RIFF"));
+    assert_eq!(&wav_excerpt[8..16], b"WAVEfmt ");
+    assert!(wav_excerpt.len() > 44 + 10 * 11_025 * 2);
 }
