@@ -108,10 +108,14 @@
   const playlistImportClient: PlaylistImportClient = {
     find: () => core.call('find_playlists'),
     importPlaylist: (path) => core.call('import_playlist', { path }),
+    pickPlaylistFile: desktop ? () => invoke<string | null>('pick_playlist_file') : undefined,
   };
   const playlistExportClient: PlaylistExportClient = {
     exportCollection: (collection_id, path) =>
       core.call('export_collection', { collection_id, path }),
+    pickPlaylistSavePath: desktop
+      ? (folder, name) => invoke<string | null>('pick_playlist_save_path', { folder, name })
+      : undefined,
   };
   const playlistChangesClient: PlaylistChangesClient = {
     changes: () => core.call('external_changes'),

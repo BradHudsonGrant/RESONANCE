@@ -7,6 +7,8 @@
 
   export interface PlaylistExportClient {
     exportCollection: (collectionId: number, path: string) => Promise<ExportedPlaylist>;
+    /** Only the desktop app has a native dialog; the browser UI keeps the typed path. */
+    pickPlaylistSavePath?: (folder: string | null, name: string) => Promise<string | null>;
   }
 
   interface Props {
@@ -24,14 +26,31 @@
   let outcome = $state<string | null>(null);
   let failure = $state<string | null>(null);
 
+  const suggestedName = $derived(
+    collection ? `${collection.name.replace(/[\\/:*?"<>|]/g, ' ')}.m3u8` : '',
+  );
+
   $effect(() => {
     if (!open || !collection) return;
     outcome = null;
     failure = null;
     const separator = folder?.includes('\\') ? '\\' : '/';
-    const name = `${collection.name.replace(/[\\/:*?"<>|]/g, ' ')}.m3u8`;
-    path = folder ? `${folder.replace(/[\\/]+$/, '')}${separator}${name}` : name;
+    path = folder ? `${folder.replace(/[\\/]+$/, '')}${separator}${suggestedName}` : suggestedName;
   });
+
+  async function browse() {
+    if (busy || !collection || !client.pickPlaylistSavePath) return;
+    failure = null;
+    try {
+      const picked = await client.pickPlaylistSavePath(folder, suggestedName);
+      if (picked) {
+        path = picked;
+        outcome = null;
+      }
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error);
+    }
+  }
 
   async function save() {
     if (busy || !collection || path.trim() === '') return;
@@ -64,13 +83,18 @@
       {collection?.name ?? 'The collection'} is saved as an extended M3U8 playlist naming each file by
       its full path. An existing file is never overwritten.
     </p>
-    <TextInput
-      label="Save as"
-      bind:value={path}
-      disabled={busy}
-      spellcheck="false"
-      autocomplete="off"
-    />
+    <div class="path-row">
+      <TextInput
+        label="Save as"
+        bind:value={path}
+        disabled={busy}
+        spellcheck="false"
+        autocomplete="off"
+      />
+      {#if client.pickPlaylistSavePath}
+        <Button disabled={busy} onclick={() => void browse()}>Browse…</Button>
+      {/if}
+    </div>
     {#if outcome}
       <p class="outcome" role="status">{outcome}</p>
     {/if}
@@ -100,6 +124,14 @@
     gap: var(--space-3-5);
     min-width: 0;
     margin: 0;
+  }
+
+  .path-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: var(--space-2);
+    min-width: 0;
   }
 
   .note,

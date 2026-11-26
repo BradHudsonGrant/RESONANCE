@@ -10,6 +10,8 @@
   export interface PlaylistImportClient {
     find: () => Promise<FoundPlaylist[]>;
     importPlaylist: (path: string) => Promise<PlaylistMirror>;
+    /** Only the desktop app has a native dialog; the browser UI keeps the typed path. */
+    pickPlaylistFile?: () => Promise<string | null>;
   }
 
   interface Props {
@@ -49,6 +51,17 @@
       busy = false;
     }
   }
+
+  async function browse() {
+    if (busy || !client.pickPlaylistFile) return;
+    failure = null;
+    try {
+      const picked = await client.pickPlaylistFile();
+      if (picked) path = picked;
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error);
+    }
+  }
 </script>
 
 <Sheet bind:open title="Import playlist">
@@ -64,14 +77,19 @@
       An M3U or M3U8 playlist shows as a collection that follows the file. Resonance never changes
       the file unless you update it after a rename or replace.
     </p>
-    <TextInput
-      label="Playlist file"
-      placeholder="Full path to an .m3u or .m3u8 file"
-      bind:value={path}
-      disabled={busy}
-      spellcheck="false"
-      autocomplete="off"
-    />
+    <div class="path-row">
+      <TextInput
+        label="Playlist file"
+        placeholder="Full path to an .m3u or .m3u8 file"
+        bind:value={path}
+        disabled={busy}
+        spellcheck="false"
+        autocomplete="off"
+      />
+      {#if client.pickPlaylistFile}
+        <Button disabled={busy} onclick={() => void browse()}>Browse…</Button>
+      {/if}
+    </div>
     {#if found.length > 0}
       <ModularDivider />
       <div class="found">
@@ -131,6 +149,14 @@
     color: var(--color-text-2);
     font-size: var(--text-sm);
     line-height: var(--leading-normal);
+  }
+
+  .path-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: var(--space-2);
+    min-width: 0;
   }
 
   .found {

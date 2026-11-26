@@ -84,6 +84,40 @@ async fn pick_folder() -> Result<Option<String>, ApiError> {
     .map_err(ApiError::internal)?
 }
 
+#[tauri::command]
+async fn pick_playlist_file() -> Result<Option<String>, ApiError> {
+    tauri::async_runtime::spawn_blocking(|| {
+        Ok(rfd::FileDialog::new()
+            .set_title("Import playlist")
+            .add_filter("M3U playlists", &["m3u", "m3u8"])
+            .pick_file()
+            .map(|path| path.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(ApiError::internal)?
+}
+
+#[tauri::command]
+async fn pick_playlist_save_path(
+    folder: Option<String>,
+    name: String,
+) -> Result<Option<String>, ApiError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("Export to M3U8")
+            .add_filter("M3U8 playlist", &["m3u8"])
+            .set_file_name(name);
+        if let Some(folder) = folder {
+            dialog = dialog.set_directory(folder);
+        }
+        Ok(dialog
+            .save_file()
+            .map(|path| path.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(ApiError::internal)?
+}
+
 fn validate_external_url(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty()
@@ -213,6 +247,8 @@ fn run(options: Options) -> Result<(), AppError> {
             dispatch,
             pick_audio_file,
             pick_folder,
+            pick_playlist_file,
+            pick_playlist_save_path,
             open_external_url
         ])
         .setup(move |app| {
