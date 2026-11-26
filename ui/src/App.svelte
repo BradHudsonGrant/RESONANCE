@@ -968,6 +968,7 @@
             onplay={playTrack}
             onfocustrack={(item) => void preview.focus(item.id)}
             onrelink={openRelink}
+            onreplace={(item) => openReplace(item)}
             onrename={openRename}
             ondelete={openDelete}
             onscan={openScan}

@@ -45,6 +45,7 @@
     onplay?: (track: LibraryTrack) => void;
     onfocustrack?: (track: LibraryTrack) => void;
     onrelink?: (track: LibraryTrack) => void;
+    onreplace?: (track: LibraryTrack) => void;
     /** Opens the Rename sheet for `scope`, named `label`. */
     onrename?: (scope: RenameScope, label: string) => void;
     /** Asks before moving the selected tracks' files to the bin. */
@@ -107,6 +108,7 @@
     onplay,
     onfocustrack,
     onrelink,
+    onreplace,
     onrename,
     ondelete,
     onscan,
@@ -515,6 +517,7 @@
         {onplay}
         {onfocustrack}
         {onrelink}
+        {onreplace}
         {onopeninprep}
         {onidentifyonline}
         {ontogglefavourite}

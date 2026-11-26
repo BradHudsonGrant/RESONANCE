@@ -7,7 +7,10 @@ import type { ReplaceComparison } from '../ipc/bindings/ReplaceComparison';
 import type { ReplaceFileFacts } from '../ipc/bindings/ReplaceFileFacts';
 import type { ReplaceResult } from '../ipc/bindings/ReplaceResult';
 import { fakeTrack } from './fake-library';
+import Inspector from './Inspector.svelte';
+import Library from './Library.svelte';
 import ReplaceSheet, { type ReplaceClient } from './ReplaceSheet.svelte';
+import { TrackPages } from './track-pages.svelte';
 
 HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) {
   this.open = true;
@@ -15,6 +18,8 @@ HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) {
 HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) {
   this.open = false;
 };
+HTMLElement.prototype.showPopover ??= () => {};
+HTMLElement.prototype.hidePopover ??= () => {};
 
 const mp3: ReplaceFileFacts = {
   path: 'C:/music/night drive 128.mp3',
@@ -188,5 +193,42 @@ describe('ReplaceSheet', () => {
 
     expect(await screen.findByText(/Convert and Repair need FFmpeg/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Convert' })).toBeNull();
+  });
+});
+
+describe('Replace file entry points', () => {
+  it('opens from the row menu and the Inspector, but not for a missing file', async () => {
+    const present = fakeTrack(1);
+    const missing = { ...fakeTrack(2), missing_since: 1_760_000_000_000 };
+    const pages = new TrackPages(() =>
+      Promise.resolve({ total: 2, library_total: 2, offset: 0, tracks: [present, missing] }),
+    );
+    await pages.load();
+    const onreplace = vi.fn();
+    const library = render(Library, {
+      pages,
+      onscan: vi.fn(),
+      onreplace,
+      loadFacets: vi.fn().mockResolvedValue({
+        bpm_min: null,
+        bpm_max: null,
+        year_min: null,
+        year_max: null,
+        labels: [],
+        missing_count: 1,
+      }),
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: `Actions for ${present.title}` }));
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Replace file…' }));
+    expect(onreplace).toHaveBeenCalledWith(expect.objectContaining({ id: present.id }));
+
+    await fireEvent.click(screen.getByRole('button', { name: `Actions for ${missing.title}` }));
+    expect(screen.queryByRole('menuitem', { name: 'Replace file…' })).toBeNull();
+    library.unmount();
+
+    render(Inspector, { track: present, onclose: vi.fn(), onreplace });
+    await fireEvent.click(screen.getByRole('button', { name: 'Replace file…' }));
+    expect(onreplace).toHaveBeenCalledTimes(2);
   });
 });

@@ -16,6 +16,7 @@
     showFavourite?: boolean;
     onToggleFavourite?: (track: LibraryTrack) => void;
     onRelink?: (track: LibraryTrack) => void;
+    onReplace?: (track: LibraryTrack) => void;
     onOpenInPrep?: (tracks: LibraryTrack[]) => void;
     onIdentifyOnline?: (tracks: LibraryTrack[]) => void;
     onAdd?: (collectionId: number, trackIds: number[]) => Promise<void> | void;
@@ -34,6 +35,7 @@
     showFavourite = false,
     onToggleFavourite,
     onRelink,
+    onReplace,
     onOpenInPrep,
     onIdentifyOnline,
     onAdd,
@@ -270,6 +272,21 @@
       </button>
     {/if}
 
+    {#if singleTrack && singleTrack.missing_since == null && onReplace}
+      <button
+        type="button"
+        class="item"
+        role="menuitem"
+        onclick={() => {
+          onReplace(singleTrack);
+          onClose();
+        }}
+      >
+        <Icon name="relink" size="xs" />
+        <span class="item-label">Replace file…</span>
+      </button>
+    {/if}
+
     {#if onOpenInPrep && selectedTracks.length > 0}
       <button
         type="button"
@@ -338,7 +355,7 @@
       </button>
     {/if}
 
-    {#if (singleTrack && singleTrack.missing_since != null && onRelink) || (onOpenInPrep && selectedTracks.length > 0) || (onIdentifyOnline && selectedTracks.length > 0) || (showFavourite && singleTrack && onToggleFavourite) || (canRemoveActive && activeCollection)}
+    {#if (singleTrack && singleTrack.missing_since != null && onRelink) || (singleTrack && singleTrack.missing_since == null && onReplace) || (onOpenInPrep && selectedTracks.length > 0) || (onIdentifyOnline && selectedTracks.length > 0) || (showFavourite && singleTrack && onToggleFavourite) || (canRemoveActive && activeCollection)}
       <div class="sep" role="separator"></div>
     {/if}
 
