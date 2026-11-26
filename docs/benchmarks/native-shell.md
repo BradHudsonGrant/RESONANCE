@@ -133,3 +133,10 @@ All five startup `toplevel` runs are under the 16 ms UI-thread budget (**11.2–
 ## 26 November 2026, startup task at v0.5.0
 
 The v0.4.0 bench traced a 35.5 ms task while the desktop app started. The v0.5.0 bench, with the same trace of the first 5 s, records 11.4 ms, in line with the 11.2 to 12.5 ms above ([budgets-v0.5.0.md](budgets-v0.5.0.md)). No startup code was changed for it, and one trace does not show what made the v0.4.0 task long. The budget is met, which closes [#154](https://github.com/BradHudsonGrant/RESONANCE/issues/154). If a later bench reports a long startup task again, trace it then.
+
+## 26 November 2026, v0.5.0 release installer
+
+`Resonance_0.5.0_x64-setup.exe` (6.86 MiB, `sha256:18033ac4d44ac8e04024596ba10851bdcd9db8f679e9a583f6a8df22ae8fd772`) was downloaded from the [`v0.5.0`](https://github.com/BradHudsonGrant/RESONANCE/releases/tag/v0.5.0) release draft and installed silently (`/S`) in current-user mode over `0.3.0`, at `%LOCALAPPDATA%\Resonance\resonance-app.exe` (26.22 MiB, product version `0.5.0`). The release was published as a pre-release after these checks.
+
+- Launched against a data folder holding the 50 scanned and identified `fixtures-local` tracks, the window filled the track grid with all 50 (`aria-rowcount=51`).
+- Closing and reopening the installed app showed the same 50 tracks (`aria-rowcount=51`).
