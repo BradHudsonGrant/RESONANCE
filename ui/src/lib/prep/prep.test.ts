@@ -385,6 +385,27 @@ describe('Prep', () => {
     expect(await screen.findByText('Saved to 1 file')).toBeTruthy();
   });
 
+  it('keeps the save notice when a search finishes afterwards', async () => {
+    const items = [makeItem(0), makeItem(1, 'not_searched')];
+    const client = makeClient(items);
+    client.identifyOnline.mockResolvedValueOnce({
+      active: [{ id: 12, kind: 'identify_online', status: 'running' }],
+      recent: [],
+      mix_backoff_active: false,
+    } as never);
+    const view = render(Prep, { client });
+    await fireEvent.click(await screen.findByRole('button', { name: 'Find a match' }));
+    await waitFor(() => expect(client.identifyOnline).toHaveBeenCalled());
+    await fireEvent.click(await screen.findByRole('button', { name: 'Accept Label' }));
+    expect(await screen.findByText('Saved to 1 file')).toBeTruthy();
+    await view.rerender({
+      client,
+      recentOnlineJob: { id: 12, kind: 'identify_online', status: 'completed' } as never,
+    });
+    expect(await screen.findByText(/Search finished for/)).toBeTruthy();
+    expect(screen.getByText('Saved to 1 file')).toBeTruthy();
+  });
+
   it('shows the covers of the matches and keeps the file cover when chosen', async () => {
     const item = makeItem(0);
     item.artwork = { ...item.artwork, artwork: 'a'.repeat(64) };
