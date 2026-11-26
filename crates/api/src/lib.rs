@@ -16,6 +16,7 @@ mod providers;
 mod quality;
 mod relink;
 mod renames;
+mod replace;
 pub mod serve;
 mod sources;
 mod staging;
@@ -473,6 +474,28 @@ impl Api {
             } => self
                 .delete_tracks(&track_ids, for_good)
                 .map(Response::DeleteTracks),
+            Request::CompareReplacement {
+                track_id,
+                path,
+                template,
+            } => self
+                .compare_replacement(track_id, &path, template.as_deref())
+                .map(|comparison| Response::CompareReplacement(Box::new(comparison))),
+            Request::ApplyReplacement {
+                track_id,
+                path,
+                template,
+                choice,
+            } => self
+                .apply_replacement(track_id, &path, template.as_deref(), choice)
+                .map(Response::ApplyReplacement),
+            Request::FfmpegStatus => Ok(Response::FfmpegStatus(self.ffmpeg_status())),
+            Request::ConvertTrack { track_id, preset } => self
+                .convert_track(track_id, preset)
+                .map(Response::ConvertTrack),
+            Request::RepairTrack { track_id } => {
+                self.repair_track(track_id).map(Response::RepairTrack)
+            }
             Request::KeepCopy { track_id, asset_id } => {
                 self.keep_copy(track_id, asset_id).map(Response::KeepCopy)
             }

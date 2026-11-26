@@ -12,6 +12,7 @@ mod prep_writes;
 mod preview_settings;
 mod quality;
 mod renames;
+mod replace;
 mod search;
 mod sources;
 mod table_layout;
@@ -45,6 +46,7 @@ pub use prep::{BatchTagOperation, PrepStageFacts};
 pub use prep_writes::{FileDecision, FileRevision};
 pub use quality::StoredQuality;
 pub use renames::{RenameTarget, StoredRename};
+pub use replace::{Detachment, Replacement, StoredCue};
 use resonance_core::collections::CollectionNameError;
 use resonance_core::library::{
     AudioFacts, AudioFormat, ScannedFile, TagField, is_asset_path_included,
@@ -68,7 +70,7 @@ pub(crate) fn placeholders(count: usize) -> String {
 
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
-const MIGRATIONS: [&str; 24] = [
+const MIGRATIONS: [&str; 25] = [
     include_str!("../migrations/0001_library.sql"),
     include_str!("../migrations/0002_sources.sql"),
     include_str!("../migrations/0003_identity.sql"),
@@ -93,6 +95,7 @@ const MIGRATIONS: [&str; 24] = [
     include_str!("../migrations/0022_reread_unreadable_files.sql"),
     include_str!("../migrations/0023_quality.sql"),
     include_str!("../migrations/0024_operation_steps.sql"),
+    include_str!("../migrations/0025_cues.sql"),
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -290,6 +293,12 @@ impl Database {
         Ok(database)
     }
 
+    /// The folder the library file sits in, where the app keeps its other data. `None` for a
+    /// library held in memory.
+    pub fn data_folder(&self) -> Option<&Path> {
+        self.artwork.as_ref()?.folder().parent()
+    }
+
     pub fn open_in_memory() -> Result<Self, DbError> {
         Self::prepared(Connection::open_in_memory()?)
     }
@@ -349,9 +358,19 @@ impl Database {
     /// asset. A path seen before keeps its track and has its facts and file tags replaced.
     pub fn record_scan(&mut self, source: SourceId, files: &[ScannedFile]) -> Result<(), DbError> {
         let transaction = self.connection.transaction()?;
+        Self::record_scan_in(&transaction, source, files)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub(crate) fn record_scan_in(
+        transaction: &rusqlite::Transaction<'_>,
+        source: SourceId,
+        files: &[ScannedFile],
+    ) -> Result<(), DbError> {
         {
             let (include_subfolders, excluded_subfolders, ignored_folders) =
-                sources::source_inclusion_in_tx(&transaction, source)?;
+                sources::source_inclusion_in_tx(transaction, source)?;
             let max_added: i64 = transaction.query_row(
                 "SELECT COALESCE(MAX(added_ns), 0) FROM track",
                 [],
@@ -408,7 +427,7 @@ impl Database {
                     .query_row(params![source.0, file.path], |row| row.get(0))
                     .optional()?;
                 let user = match known {
-                    Some(asset) => tags::user_tags_of_asset(&transaction, asset)?,
+                    Some(asset) => tags::user_tags_of_asset(transaction, asset)?,
                     None => Vec::new(),
                 };
                 let shown = (!user.is_empty()).then(|| effective_tags(&file.tags, &user));
@@ -486,8 +505,8 @@ impl Database {
                 for (field, value) in &file.tags {
                     add_tag.execute(params![asset, field.name(), value])?;
                 }
-                search::write_tag_values(&transaction, asset, shown_tags, included != 0)?;
-                search::write_missing_tags(&transaction, asset, shown_tags, included != 0)?;
+                search::write_tag_values(transaction, asset, shown_tags, included != 0)?;
+                search::write_missing_tags(transaction, asset, shown_tags, included != 0)?;
                 add_fts.execute(params![
                     asset,
                     meta.title,
@@ -500,7 +519,6 @@ impl Database {
                 ])?;
             }
         }
-        transaction.commit()?;
         Ok(())
     }
 

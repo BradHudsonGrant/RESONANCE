@@ -26,6 +26,8 @@ pub(crate) fn journal_operation(operation: StoredOperation) -> JournalOperation 
             OperationKind::RenameFiles => OperationKindName::RenameFiles,
             OperationKind::DeleteFiles => OperationKindName::DeleteFiles,
             OperationKind::DeleteFilesForGood => OperationKindName::DeleteFilesForGood,
+            OperationKind::ReplaceFile => OperationKindName::ReplaceFile,
+            OperationKind::AddFile => OperationKindName::AddFile,
         },
         state: match operation.state {
             OperationState::Pending => OperationStateName::Pending,
@@ -156,6 +158,9 @@ impl Api {
             Some(OperationKind::RenameFiles) => return self.undo_rename(operation_id),
             Some(OperationKind::DeleteFiles | OperationKind::DeleteFilesForGood) => {
                 return self.undo_delete(operation_id);
+            }
+            Some(OperationKind::ReplaceFile | OperationKind::AddFile) => {
+                return self.undo_replacement(operation_id);
             }
             _ => {}
         }

@@ -44,6 +44,7 @@
     /** The user moved to a row with a plain click or a key, for auto-preview. */
     onfocustrack?: (track: LibraryTrack) => void;
     onrelink?: (track: LibraryTrack) => void;
+    onreplace?: (track: LibraryTrack) => void;
     onopeninprep?: (trackIds: number[]) => void;
     onidentifyonline?: (trackIds: number[]) => void;
     ontogglefavourite?: (track: LibraryTrack) => void;
@@ -77,6 +78,7 @@
     onplay,
     onfocustrack,
     onrelink,
+    onreplace,
     onopeninprep,
     onidentifyonline,
     ontogglefavourite,
@@ -1142,6 +1144,7 @@
           <TableRow
             id="{id}-row-{index}"
             aria-rowindex={index + 2}
+            data-track-id={track?.id}
             selected={isSelected}
             checked={isChecked && !isSelected}
             style="grid-template-columns: var(--active-columns)"
@@ -1345,6 +1348,7 @@
     showFavourite={menuShowFavourite}
     onToggleFavourite={ontogglefavourite}
     onRelink={onrelink}
+    onReplace={onreplace}
     onOpenInPrep={menuShowTrackActions && onopeninprep
       ? (tracks) => onopeninprep(tracks.map((t) => t.id))
       : undefined}

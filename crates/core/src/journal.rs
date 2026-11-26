@@ -10,6 +10,10 @@ pub enum OperationKind {
     DeleteFiles,
     /// Deleted files where there was no bin, after the user confirmed.
     DeleteFilesForGood,
+    /// Put a better file in a track's place and moved the old one to the bin.
+    ReplaceFile,
+    /// Placed a new file beside a track as a track of its own.
+    AddFile,
 }
 
 impl OperationKind {
@@ -19,6 +23,8 @@ impl OperationKind {
             Self::RenameFiles => "rename_files",
             Self::DeleteFiles => "delete_files",
             Self::DeleteFilesForGood => "delete_files_for_good",
+            Self::ReplaceFile => "replace_file",
+            Self::AddFile => "add_file",
         }
     }
 
@@ -28,6 +34,8 @@ impl OperationKind {
             "rename_files" => Some(Self::RenameFiles),
             "delete_files" => Some(Self::DeleteFiles),
             "delete_files_for_good" => Some(Self::DeleteFilesForGood),
+            "replace_file" => Some(Self::ReplaceFile),
+            "add_file" => Some(Self::AddFile),
             _ => None,
         }
     }
@@ -163,6 +171,8 @@ mod tests {
             OperationKind::RenameFiles,
             OperationKind::DeleteFiles,
             OperationKind::DeleteFilesForGood,
+            OperationKind::ReplaceFile,
+            OperationKind::AddFile,
         ] {
             assert_eq!(OperationKind::from_name(kind.name()), Some(kind));
         }

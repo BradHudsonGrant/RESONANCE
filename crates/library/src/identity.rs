@@ -109,6 +109,56 @@ fn open_audio_decoder(
     })
 }
 
+/// Decodes a whole file gaplessly, handing each packet to `visit` with the sample rate as mono
+/// samples between -1 and 1, and returns the sample rate.
+pub(crate) fn decode_mono(
+    path: &Path,
+    mut visit: impl FnMut(u32, &[f32]),
+) -> Result<u32, LibraryAudioError> {
+    let reader = open_audio_reader(path).map_err(LibraryAudioError::Open)?;
+    let ext = path.extension().and_then(|ext| ext.to_str());
+    let OpenedAudio {
+        mut format,
+        mut decoder,
+        track_id,
+        sample_rate,
+        channels,
+        ..
+    } = open_audio_decoder(Box::new(reader), ext, false)?;
+    let mut interleaved: Vec<i32> = Vec::new();
+    let mut mono: Vec<f32> = Vec::new();
+    let mut frames = 0usize;
+    let scale = I32_FULL_SCALE * channels as f32;
+    loop {
+        let packet = match format.next_packet() {
+            Ok(Some(packet)) => packet,
+            Ok(None) => break,
+            Err(_) => return Err(LibraryAudioError::Decode),
+        };
+        if packet.track_id != track_id {
+            continue;
+        }
+        let decoded = match decoder.decode(&packet) {
+            Ok(audio) => audio,
+            Err(DecodeError::DecodeError(_)) => continue,
+            Err(_) => return Err(LibraryAudioError::Decode),
+        };
+        decoded.copy_to_vec_interleaved(&mut interleaved);
+        mono.clear();
+        mono.extend(
+            interleaved
+                .chunks_exact(channels)
+                .map(|frame| frame.iter().map(|&sample| sample as f32).sum::<f32>() / scale),
+        );
+        frames += mono.len();
+        visit(sample_rate, &mono);
+    }
+    if frames == 0 {
+        return Err(LibraryAudioError::EmptyAudio);
+    }
+    Ok(sample_rate)
+}
+
 /// Errors returned when decoding audio bytes or excerpts for identification.
 #[derive(Debug)]
 pub enum LibraryAudioError {
@@ -252,8 +302,18 @@ pub fn compute_byte_hash(path: &Path) -> io::Result<ContentHash> {
 /// If `path` opens as a file but cannot be decoded as audio, `byte_hash` is returned with `audio`
 /// and `chromaprint` set to `None`.
 pub fn compute_identity(path: &Path) -> io::Result<AssetIdentity> {
+    identity_of(path, false)
+}
+
+/// The identity of a file offered to replace another, which also measures the high end of a
+/// lossy file's spectrum so the compare sheet can show where its encoder cut it off.
+pub fn compute_identity_for_compare(path: &Path) -> io::Result<AssetIdentity> {
+    identity_of(path, true)
+}
+
+fn identity_of(path: &Path, always_measure_spectrum: bool) -> io::Result<AssetIdentity> {
     let byte_hash = compute_byte_hash(path)?;
-    let decoded = decode_audio_identity(path);
+    let decoded = decode_audio_identity(path, always_measure_spectrum);
     let quality = AudioFormat::of(path).map(|format| {
         let measurements = decoded.measurements.unwrap_or_default();
         let flags = quality::assess(&QualityInput {
@@ -284,7 +344,7 @@ struct DecodedIdentity {
 }
 
 /// Decodes every packet once, feeding the audio hash, the fingerprint and the quality meter.
-fn decode_audio_identity(path: &Path) -> DecodedIdentity {
+fn decode_audio_identity(path: &Path, always_measure_spectrum: bool) -> DecodedIdentity {
     let Ok(reader) = open_audio_reader(path) else {
         return DecodedIdentity::default();
     };
@@ -301,8 +361,9 @@ fn decode_audio_identity(path: &Path) -> DecodedIdentity {
     else {
         return DecodedIdentity::default();
     };
-    let spectrum = AudioFormat::of(path)
-        .is_some_and(|format| quality::checks_for_transcode(format, lossless, sample_rate));
+    let spectrum = always_measure_spectrum
+        || AudioFormat::of(path)
+            .is_some_and(|format| quality::checks_for_transcode(format, lossless, sample_rate));
     let mut meter = QualityMeter::new(sample_rate, channels, spectrum);
 
     let mut audio_hasher = blake3::Hasher::new();

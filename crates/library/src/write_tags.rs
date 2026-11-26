@@ -654,6 +654,54 @@ fn rewrite(
     })
 }
 
+/// Writes `tags` into a fresh copy that nothing else uses yet, such as a file staged to replace
+/// another, and checks its audio is unchanged. Fields the format has no frame for are left out.
+pub(crate) fn write_into_copy(
+    path: &Path,
+    format: AudioFormat,
+    tags: &[(TagField, String)],
+) -> Result<(), FileProblem> {
+    if format == AudioFormat::M4a && has_leading_id3v2(path).map_err(FileProblem::Io)? {
+        return Err(FileProblem::LeadingId3v2);
+    }
+    let writes: Vec<FieldWrite> = tags
+        .iter()
+        .filter(|(field, value)| writable_in_format(format, *field, Some(value)))
+        .map(|(field, value)| FieldWrite {
+            field: *field,
+            from: None,
+            to: Some(value.clone()),
+        })
+        .collect();
+    if writes.is_empty() {
+        return Ok(());
+    }
+    let before = compute_identity(path)
+        .map_err(FileProblem::Io)?
+        .audio
+        .ok_or(FileProblem::AudioUnreadable)?;
+    {
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .map_err(FileProblem::Io)?;
+        edit_file(
+            &mut file,
+            format,
+            &TagEdit::Write(&writes),
+            CoverEdit::Keep,
+            true,
+        )?;
+        file.sync_all().map_err(FileProblem::Io)?;
+    }
+    let after = compute_identity(path).map_err(FileProblem::Io)?.audio;
+    if after.as_ref() != Some(&before) {
+        return Err(FileProblem::AudioChanged);
+    }
+    Ok(())
+}
+
 /// The front cover a rewritten file holds, as the library records it.
 fn stored_cover(store: Option<&ArtworkStore>, cover: Option<&[u8]>) -> Option<StoredArtwork> {
     store?.put(cover?).ok()

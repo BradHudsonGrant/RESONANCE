@@ -7,6 +7,7 @@
   import SegmentedTabs, { type SegmentedTabItem } from '../design/SegmentedTabs.svelte';
   import Sheet from '../design/Sheet.svelte';
   import TextInput from '../design/TextInput.svelte';
+  import type { FfmpegStatus } from '../ipc/bindings/FfmpegStatus';
   import type { PreviewStartPoint } from '../ipc/bindings/PreviewStartPoint';
   import { getTheme, setTheme, type Theme } from '../design/theme';
   import FilenameSettings from '../library/FilenameSettings.svelte';
@@ -29,6 +30,8 @@
     recommendFilters?: boolean;
     onrecommendfilters?: (on: boolean) => void;
     onsourceschanged?: () => void;
+    /** Whether FFmpeg is installed for Convert and Repair. */
+    ffmpegStatus?: () => Promise<FfmpegStatus>;
     /** Scrolls a named section into view when the sheet opens. */
     focusSection?: 'providers' | null;
   }
@@ -46,7 +49,17 @@
     onrecommendfilters,
     onsourceschanged,
     focusSection = null,
+    ffmpegStatus,
   }: Props = $props();
+
+  let ffmpeg = $state<FfmpegStatus | null>(null);
+
+  $effect(() => {
+    if (!open || !ffmpegStatus) return;
+    void ffmpegStatus()
+      .then((status) => (ffmpeg = status))
+      .catch(() => (ffmpeg = { program: null, version: null, presets: [] }));
+  });
 
   let providersSection = $state<HTMLElement | undefined>();
 
@@ -214,6 +227,27 @@
 
     <ModularDivider />
 
+    {#if ffmpegStatus}
+      <section class="section">
+        <div class="section-head">
+          <MonoLabel text="Convert and repair" tone="secondary" />
+        </div>
+        {#if ffmpeg?.version}
+          <p class="note">
+            {ffmpeg.version.replace(/^ffmpeg version/, 'FFmpeg')} at
+            <span class="path">{ffmpeg.program}</span>
+          </p>
+        {:else if ffmpeg}
+          <p class="note">
+            FFmpeg was not found. Install it from ffmpeg.org or your package manager, check that the
+            ffmpeg command works in a terminal, then open Settings again.
+          </p>
+        {/if}
+      </section>
+
+      <ModularDivider />
+    {/if}
+
     <section class="section">
       <div class="section-head">
         <MonoLabel text="Audio & MIDI" tone="secondary" />
@@ -251,6 +285,11 @@
     margin: 0;
     color: var(--color-muted);
     font-size: var(--text-sm);
+  }
+
+  .path {
+    color: var(--color-text-2);
+    overflow-wrap: anywhere;
   }
 
   .check {

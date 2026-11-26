@@ -88,7 +88,7 @@ fn step_from(row: &Row<'_>) -> Result<StoredStep, DbError> {
     })
 }
 
-fn set_step_state(
+pub(crate) fn set_step_state(
     connection: &rusqlite::Connection,
     operation_id: i64,
     position: u32,

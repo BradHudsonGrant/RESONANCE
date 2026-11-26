@@ -3885,6 +3885,7 @@ dependencies = [
  "resonance-core",
  "resonance-db",
  "resonance-fixtures",
+ "rubato",
  "rustfft",
  "rusty-chromaprint",
  "serde",

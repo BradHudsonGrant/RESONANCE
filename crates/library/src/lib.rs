@@ -1,5 +1,7 @@
+pub mod align;
 pub mod copies;
 pub mod delete;
+pub mod ffmpeg;
 pub mod file_tags;
 pub mod folders;
 pub mod identity;
@@ -7,6 +9,7 @@ pub mod journal;
 pub mod quality;
 pub mod relink;
 pub mod rename;
+pub mod replace;
 pub mod scan;
 pub mod watch;
 pub mod write_tags;

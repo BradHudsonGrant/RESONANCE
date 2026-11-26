@@ -9,14 +9,15 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use resonance_core::identity::AssetAlignment;
 use resonance_core::journal::{OperationKind, OperationState, Recovery, StepState, recovery};
 use resonance_db::{Database, DbError, StoredOperation, StoredStep};
 use serde::{Deserialize, Serialize};
 
-use crate::{rename, write_tags};
+use crate::{rename, replace, write_tags};
 
 /// One change to the disk or the library.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "step", rename_all = "snake_case")]
 pub enum Step {
     /// Copies a file to a name nothing has yet and checks the copy's bytes against `byte_hash`,
@@ -34,10 +35,29 @@ pub enum Step {
     TrashFile { path: PathBuf, size_bytes: u64 },
     /// Deletes a file for good, where there is no bin to move it to.
     RemoveFile { path: PathBuf, size_bytes: u64 },
+    /// Writes tags, as field names and values, into a staged copy nothing else uses yet.
+    TagFile {
+        path: PathBuf,
+        tags: Vec<(String, String)>,
+    },
+    /// Puts the file at `path`, relative to the old file's source, in the track's place, with
+    /// its alignment to the track. `cue_ids` are marked carried over for checking, and the
+    /// user's `written_fields` no longer wait to be written.
+    AttachReplacement {
+        track_id: i64,
+        old_asset_id: i64,
+        path: String,
+        offset_samples: i64,
+        tempo_ratio: f64,
+        cue_ids: Vec<i64>,
+        written_fields: Vec<String>,
+    },
+    /// Adds the file at `path`, relative to `beside_asset_id`'s source, as a track of its own.
+    AddTrack { beside_asset_id: i64, path: String },
 }
 
 /// What puts one step back.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "inverse", rename_all = "snake_case")]
 pub enum Inverse {
     RemoveCopy {
@@ -57,8 +77,19 @@ pub enum Inverse {
         size_bytes: u64,
         deleted_from_s: i64,
     },
-    /// A file deleted for good cannot come back.
+    /// A file deleted for good cannot come back. A staged copy's tags go with the copy.
     Nothing,
+    DetachReplacement {
+        track_id: i64,
+        old_asset_id: i64,
+        path: String,
+        cue_ids: Vec<i64>,
+        written_fields: Vec<String>,
+    },
+    RemoveTrack {
+        beside_asset_id: i64,
+        path: String,
+    },
 }
 
 impl Step {
@@ -79,7 +110,28 @@ impl Step {
                 size_bytes: *size_bytes,
                 deleted_from_s: planned_s,
             },
-            Self::RemoveFile { .. } => Inverse::Nothing,
+            Self::RemoveFile { .. } | Self::TagFile { .. } => Inverse::Nothing,
+            Self::AttachReplacement {
+                track_id,
+                old_asset_id,
+                path,
+                cue_ids,
+                written_fields,
+                ..
+            } => Inverse::DetachReplacement {
+                track_id: *track_id,
+                old_asset_id: *old_asset_id,
+                path: path.clone(),
+                cue_ids: cue_ids.clone(),
+                written_fields: written_fields.clone(),
+            },
+            Self::AddTrack {
+                beside_asset_id,
+                path,
+            } => Inverse::RemoveTrack {
+                beside_asset_id: *beside_asset_id,
+                path: path.clone(),
+            },
         }
     }
 
@@ -90,7 +142,11 @@ impl Step {
         match self {
             Self::CopyFile { to, .. } => exists(to),
             Self::MoveFile { from, to } => exists(to) && !exists(from),
-            Self::HideAsset { .. } => false,
+            // A tag write leaves nothing on disk to tell it happened, so it is done again.
+            Self::HideAsset { .. }
+            | Self::TagFile { .. }
+            | Self::AttachReplacement { .. }
+            | Self::AddTrack { .. } => false,
             Self::TrashFile { path, .. } | Self::RemoveFile { path, .. } => !exists(path),
         }
     }
@@ -356,6 +412,36 @@ pub fn run_step(
             check_size(path, *size_bytes)?;
             fs::remove_file(path).map_err(file_error(path))?;
         }
+        Step::TagFile { path, tags } => replace::tag_staged_copy(path, tags)?,
+        Step::AttachReplacement {
+            track_id,
+            old_asset_id,
+            path,
+            offset_samples,
+            tempo_ratio,
+            cue_ids,
+            written_fields,
+        } => {
+            let alignment = AssetAlignment::new(*offset_samples, *tempo_ratio)
+                .unwrap_or(AssetAlignment::IDENTITY);
+            return replace::attach(
+                database,
+                operation_id,
+                position,
+                *track_id,
+                *old_asset_id,
+                path,
+                alignment,
+                cue_ids,
+                written_fields,
+            );
+        }
+        Step::AddTrack {
+            beside_asset_id,
+            path,
+        } => {
+            return replace::add_beside(database, operation_id, position, *beside_asset_id, path);
+        }
     }
     Ok(database.set_step(operation_id, position, StepState::Done)?)
 }
@@ -470,6 +556,36 @@ fn put_back(
             }
         }
         Inverse::Nothing => {}
+        Inverse::DetachReplacement {
+            track_id,
+            old_asset_id,
+            path,
+            cue_ids,
+            written_fields,
+        } => {
+            return Ok(database.detach_replacement(
+                operation_id,
+                position,
+                &resonance_db::Detachment {
+                    track_id: *track_id,
+                    old_asset_id: *old_asset_id,
+                    path,
+                    cue_ids,
+                    written_fields,
+                },
+            )?);
+        }
+        Inverse::RemoveTrack {
+            beside_asset_id,
+            path,
+        } => {
+            return Ok(database.remove_track_beside(
+                operation_id,
+                position,
+                *beside_asset_id,
+                path,
+            )?);
+        }
     }
     Ok(database.set_step(operation_id, position, StepState::Undone)?)
 }
@@ -624,9 +740,10 @@ pub fn recover(database: &mut Database) -> Result<Vec<Recovered>, JournalError> 
         let outcome = match operation.kind {
             OperationKind::WriteTags => write_tags::recover(database, &operation),
             OperationKind::RenameFiles => rename::recover(database, &operation),
-            OperationKind::DeleteFiles | OperationKind::DeleteFilesForGood => {
-                recover_steps(database, &operation)
-            }
+            OperationKind::DeleteFiles
+            | OperationKind::DeleteFilesForGood
+            | OperationKind::ReplaceFile
+            | OperationKind::AddFile => recover_steps(database, &operation),
         };
         match outcome {
             Ok((state, note)) => {

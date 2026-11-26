@@ -15,6 +15,7 @@ dunce.workspace = true
 ebur128.workspace = true
 lofty.workspace = true
 notify.workspace = true
+rubato.workspace = true
 rustfft.workspace = true
 rusty-chromaprint.workspace = true
 serde.workspace = true

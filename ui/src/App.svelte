@@ -17,12 +17,14 @@
   import type { PrepClient } from './lib/prep/Prep.svelte';
   import { CoreError } from './lib/ipc/client';
   import { core } from './lib/ipc/core';
+  import { audioPaths, onFileDrop } from './lib/ipc/file-drop';
   import { FilterState } from './lib/library/filters.svelte';
   import Inspector from './lib/library/Inspector.svelte';
   import Library from './lib/library/Library.svelte';
   import DeleteSheet, { type DeleteClient } from './lib/library/DeleteSheet.svelte';
   import RelinkSheet, { type RelinkClient } from './lib/library/RelinkSheet.svelte';
   import RenameSheet, { type RenameClient } from './lib/library/RenameSheet.svelte';
+  import ReplaceSheet, { type ReplaceClient } from './lib/library/ReplaceSheet.svelte';
   import ScanFolder from './lib/library/ScanFolder.svelte';
   import type { SourcesClient } from './lib/library/SourcesSettings.svelte';
   import { TableLayoutState } from './lib/library/table-layout.svelte';
@@ -96,6 +98,16 @@
   };
   const deleteClient: DeleteClient = {
     deleteTracks: (track_ids, for_good) => core.call('delete_tracks', { track_ids, for_good }),
+  };
+  const replaceClient: ReplaceClient = {
+    compare: (track_id, path, template) =>
+      core.call('compare_replacement', { track_id, path, template }),
+    apply: (track_id, path, template, choice) =>
+      core.call('apply_replacement', { track_id, path, template, choice }),
+    ffmpegStatus: () => core.call('ffmpeg_status'),
+    convert: (track_id, preset) => core.call('convert_track', { track_id, preset }),
+    repair: (track_id) => core.call('repair_track', { track_id }),
+    pickAudioFile: desktop ? () => invoke<string | null>('pick_audio_file') : undefined,
   };
   const historyClient: HistoryClient = {
     recentOperations: () => core.call('recent_operations', { limit: 50 }),
@@ -187,6 +199,10 @@
   let deleteOpen = $state(false);
   let deleteMounted = $state(false);
   let deleteTrackIds = $state<number[]>([]);
+  let replaceOpen = $state(false);
+  let replaceMounted = $state(false);
+  let replaceTarget = $state<LibraryTrack | null>(null);
+  let replacePath = $state<string | null>(null);
   let undoRequest = $state(0);
   let batchTagOpen = $state(false);
   let batchTagMounted = $state(false);
@@ -422,6 +438,32 @@
     renameMounted = true;
     renameOpen = true;
   }
+
+  function openReplace(item: LibraryTrack, path: string | null = null) {
+    replaceTarget = item;
+    replacePath = path;
+    replaceMounted = true;
+    replaceOpen = true;
+  }
+
+  /** The track under a point: a table row, or the track the Inspector shows. */
+  function trackAt(x: number, y: number): LibraryTrack | null {
+    const element = document.elementFromPoint(x, y);
+    const row = element?.closest<HTMLElement>('[data-track-id]');
+    if (row) return pages.trackById(Number(row.dataset.trackId)) ?? null;
+    if (element?.closest('.inspector')) return track ?? null;
+    return null;
+  }
+
+  // Dropping a file on a track in the desktop app opens Replace with it.
+  $effect(() => {
+    if (!desktop) return;
+    return onFileDrop((paths, x, y) => {
+      const [first] = audioPaths(paths);
+      const target = first ? trackAt(x, y) : null;
+      if (first && target) openReplace(target, first);
+    });
+  });
 
   function openDelete(trackIds: number[]) {
     if (trackIds.length === 0) return;
@@ -926,6 +968,7 @@
             onplay={playTrack}
             onfocustrack={(item) => void preview.focus(item.id)}
             onrelink={openRelink}
+            onreplace={(item) => openReplace(item)}
             onrename={openRename}
             ondelete={openDelete}
             onscan={openScan}
@@ -952,6 +995,7 @@
         onclose={() => (inspectorHidden = true)}
         onpreview={previewTrack}
         onrelink={openRelink}
+        onreplace={(item) => openReplace(item)}
         identifying={identifyingOnline}
         onopeninprep={(item) => openTracksInPrep([item.id])}
         onidentifyonline={(item) => void identifyTracksOnline([item.id])}
@@ -1019,6 +1063,10 @@
       onclose={() => (sheetOpen = false)}
       onpreview={previewTrack}
       onrelink={openRelink}
+      onreplace={(item) => {
+        sheetOpen = false;
+        openReplace(item);
+      }}
       identifying={identifyingOnline}
       onopeninprep={(item) => {
         sheetOpen = false;
@@ -1076,6 +1124,20 @@
   />
 {/if}
 
+{#if replaceMounted}
+  <ReplaceSheet
+    bind:open={replaceOpen}
+    track={replaceTarget ? (pages.trackById(replaceTarget.id) ?? replaceTarget) : null}
+    path={replacePath}
+    client={replaceClient}
+    onreplaced={() => {
+      void pages.refresh();
+      void loadCollections();
+      void refreshActivity();
+    }}
+  />
+{/if}
+
 {#if batchTagMounted}
   <BatchTagSheet
     bind:open={batchTagOpen}
@@ -1113,6 +1175,7 @@
     {renameClient}
     {sourcesRevision}
     focusSection={settingsFocusSection}
+    ffmpegStatus={replaceClient.ffmpegStatus}
     previewStart={preview.settings.start}
     maxStartSeconds={preview.settings.max_start_seconds}
     onpreviewstart={(start) => void preview.changeSettings({ start })}
