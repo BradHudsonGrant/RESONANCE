@@ -100,37 +100,35 @@ pub struct ModelSession {
 }
 
 impl ModelSession {
-    /// Opens the model on the first target in `targets` that loads it. `tensorrt_cache` keeps
-    /// TensorRT's compiled engines between runs.
-    pub fn open(
-        weights: &Path,
-        targets: &[ExecutionTarget],
-        tensorrt_cache: &Path,
-    ) -> Result<Self, AnalysisError> {
-        let environment = environment()?;
-        let mut last_error = None;
-        for &target in targets {
-            if target.uses_gpu() {
-                fs::create_dir_all(tensorrt_cache).map_err(|source| AnalysisError::File {
-                    path: tensorrt_cache.to_path_buf(),
-                    source,
-                })?;
-            }
-            let mut builder = Session::builder(environment)?;
-            if let Err(error) = target.register(&mut builder, tensorrt_cache) {
-                last_error = Some(error);
-                continue;
-            }
-            match builder.commit_from_file(weights) {
-                Ok(session) => return Ok(Self { session, target }),
-                Err(error) => last_error = Some(error),
+    /// Opens the model on the fastest target that loads it. The CPU comes last, and its error is
+    /// the one returned if nothing opens. `tensorrt_cache` keeps TensorRT's compiled engines.
+    pub fn open(weights: &Path, tensorrt_cache: &Path) -> Result<Self, AnalysisError> {
+        for &target in ExecutionTarget::PREFERENCE {
+            if target.uses_gpu()
+                && let Ok(session) = Self::open_on(weights, target, tensorrt_cache)
+            {
+                return Ok(session);
             }
         }
-        Err(last_error
-            .map(AnalysisError::Runtime)
-            .unwrap_or_else(|| AnalysisError::UnknownModel {
-                id: weights.display().to_string(),
-            }))
+        Self::open_on(weights, ExecutionTarget::Cpu, tensorrt_cache)
+    }
+
+    /// Opens the model on `target` only.
+    pub fn open_on(
+        weights: &Path,
+        target: ExecutionTarget,
+        tensorrt_cache: &Path,
+    ) -> Result<Self, AnalysisError> {
+        if target.uses_gpu() {
+            fs::create_dir_all(tensorrt_cache).map_err(|source| AnalysisError::File {
+                path: tensorrt_cache.to_path_buf(),
+                source,
+            })?;
+        }
+        let mut builder = Session::builder(environment()?)?;
+        target.register(&mut builder, tensorrt_cache)?;
+        let session = builder.commit_from_file(weights)?;
+        Ok(Self { session, target })
     }
 
     pub fn target(&self) -> ExecutionTarget {

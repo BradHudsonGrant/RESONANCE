@@ -101,7 +101,7 @@ const EXPECTED: [f32; 5] = [0.0, 4.0, 0.0, 9.0, 0.0];
 fn a_small_graph_runs_on_the_cpu() {
     let (weights, cache) = written_model("runtime_cpu");
     let mut session =
-        ModelSession::open(&weights, &[ExecutionTarget::Cpu], &cache).expect("session opens");
+        ModelSession::open_on(&weights, ExecutionTarget::Cpu, &cache).expect("session opens");
     assert_eq!(session.target(), ExecutionTarget::Cpu);
     let outputs = session.run("x", input()).expect("inference runs");
     assert_eq!(outputs.len(), 1);
@@ -112,8 +112,7 @@ fn a_small_graph_runs_on_the_cpu() {
 #[test]
 fn the_preferred_targets_fall_back_until_one_opens_and_agree_with_the_cpu() {
     let (weights, cache) = written_model("runtime_preferred");
-    let mut session =
-        ModelSession::open(&weights, ExecutionTarget::PREFERENCE, &cache).expect("a target opens");
+    let mut session = ModelSession::open(&weights, &cache).expect("a target opens");
     println!("opened on {}", session.target().name());
     let outputs = session.run("x", input()).expect("inference runs");
     assert_eq!(outputs[0].data, EXPECTED);
@@ -152,7 +151,7 @@ fn installed_weights_are_checked_before_they_are_kept() {
     let registry = ModelRegistry::new(&data, vec![good.clone()], false);
 
     let path = registry
-        .install(&good, model.as_slice())
+        .install(good.id, model.as_slice())
         .expect("matching weights install");
     assert_eq!(path, data.join("models/doubled-relu/1/model.onnx"));
     assert_eq!(fs::read(&path).expect("weights read"), model);
@@ -165,7 +164,7 @@ fn installed_weights_are_checked_before_they_are_kept() {
     let mut tampered = model.clone();
     tampered[10] ^= 0xff;
     let error = registry
-        .install(&good, tampered.as_slice())
+        .install(good.id, tampered.as_slice())
         .expect_err("tampered weights are rejected");
     assert!(
         matches!(error, AnalysisError::WrongChecksum { .. }),
@@ -173,13 +172,13 @@ fn installed_weights_are_checked_before_they_are_kept() {
     );
     let short = &model[..model.len() - 1];
     let error = registry
-        .install(&good, short)
+        .install(good.id, short)
         .expect_err("short weights are rejected");
     assert!(matches!(error, AnalysisError::WrongSize { .. }), "{error}");
     let mut long = model.clone();
     long.push(0);
     let error = registry
-        .install(&good, long.as_slice())
+        .install(good.id, long.as_slice())
         .expect_err("long weights are rejected");
     assert!(matches!(error, AnalysisError::WrongSize { .. }), "{error}");
 
@@ -201,14 +200,14 @@ fn non_commercial_models_fetch_only_once_allowed() {
         matches!(error, AnalysisError::NonCommercial { licence, .. } if licence == "CC BY-NC 4.0")
     );
     let error = default
-        .install(&restricted, model.as_slice())
+        .install(restricted.id, model.as_slice())
         .expect_err("blocked by default");
     assert!(matches!(error, AnalysisError::NonCommercial { .. }));
     assert!(!default.weights_path(&restricted).exists());
 
     let allowed = ModelRegistry::new(&data, vec![restricted.clone()], true);
     let path = allowed
-        .install(&restricted, model.as_slice())
+        .install(restricted.id, model.as_slice())
         .expect("installs once allowed");
     assert!(path.exists());
 

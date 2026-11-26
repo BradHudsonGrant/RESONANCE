@@ -136,12 +136,18 @@ impl Database {
             .query_row(
                 "SELECT bpm, beats, first_downbeat FROM beat_grid_user WHERE track_id = ?1",
                 [track_id],
-                read_grid,
+                |row| {
+                    Ok((
+                        row.get::<_, f64>(0)?,
+                        row.get::<_, Vec<u8>>(1)?,
+                        row.get::<_, u32>(2)?,
+                    ))
+                },
             )
             .optional()?;
-        if let Some(grid) = user {
+        if let Some((bpm, beats, first_downbeat)) = user {
             return Ok(Some(EffectiveBeatGrid {
-                grid: grid?,
+                grid: stored_grid(bpm, &beats, first_downbeat)?,
                 provenance: AnalysisProvenance::ConfirmedByUser,
             }));
         }
@@ -157,7 +163,9 @@ impl Database {
                 [track_id],
                 |row| {
                     Ok((
-                        read_grid(row)?,
+                        row.get::<_, f64>(0)?,
+                        row.get::<_, Vec<u8>>(1)?,
+                        row.get::<_, u32>(2)?,
                         row.get::<_, f64>(3)?,
                         row.get::<_, i64>(4)?,
                         row.get::<_, f64>(5)?,
@@ -166,13 +174,16 @@ impl Database {
                 },
             )
             .optional()?;
-        let Some((grid, confidence, offset_samples, tempo_ratio, sample_rate)) = auto else {
+        let Some((bpm, beats, first_downbeat, confidence, offset_samples, tempo_ratio, rate)) =
+            auto
+        else {
             return Ok(None);
         };
-        let grid = grid?;
+        let grid = stored_grid(bpm, &beats, first_downbeat)?;
         let alignment =
             AssetAlignment::new(offset_samples, tempo_ratio).unwrap_or(AssetAlignment::IDENTITY);
-        let grid = match sample_rate {
+        // A grid is only made from decoded audio, so its file always has a sample rate.
+        let grid = match rate {
             Some(rate) if rate > 0 => grid.asset_to_track(&alignment, rate),
             _ => grid,
         };
@@ -185,19 +196,14 @@ impl Database {
     }
 }
 
-/// Reads `bpm, beats, first_downbeat` from the first three columns.
-fn read_grid(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<BeatGrid, DbError>> {
-    let bpm: f64 = row.get(0)?;
-    let beats: Vec<u8> = row.get(1)?;
-    let first_downbeat: u32 = row.get(2)?;
-    Ok(decode_beats(&beats)
-        .map(|beats_s| BeatGrid {
-            bpm,
-            beats_s,
-            first_downbeat,
-        })
-        .ok_or(DbError::UnknownName {
-            column: "beat_grid.beats",
-            name: format!("{} bytes", beats.len()),
-        }))
+fn stored_grid(bpm: f64, beats: &[u8], first_downbeat: u32) -> Result<BeatGrid, DbError> {
+    let beats_s = decode_beats(beats).ok_or_else(|| DbError::UnknownName {
+        column: "beat_grid.beats",
+        name: format!("{} bytes (expected a multiple of 8)", beats.len()),
+    })?;
+    Ok(BeatGrid {
+        bpm,
+        beats_s,
+        first_downbeat,
+    })
 }

@@ -77,7 +77,8 @@ impl ModelRegistry {
             .join("model.onnx")
     }
 
-    /// The model's weights, fetched and checked first if they are not here yet.
+    /// The model's weights, fetched and checked first if they are not here yet. A file only
+    /// takes its final name once it has been checked, so one of the right size is trusted.
     pub fn weights(&self, id: &str) -> Result<PathBuf, AnalysisError> {
         let spec = self.allowed(id)?;
         let path = self.weights_path(spec);
@@ -91,55 +92,33 @@ impl ModelRegistry {
                 url: spec.url,
                 source: Box::new(source),
             })?;
-        let body = response.into_body().into_reader();
-        self.install(spec, body)
+        self.install(id, response.into_body().into_reader())
     }
 
     /// Writes the weights read from `body` into place. They land under a temporary name first
     /// and only take the real one once their size and checksum match the spec, so a broken or
     /// tampered download is never loaded.
-    pub fn install(&self, spec: &ModelSpec, mut body: impl Read) -> Result<PathBuf, AnalysisError> {
-        let spec = self.allowed(spec.id)?;
+    pub fn install(&self, id: &str, body: impl Read) -> Result<PathBuf, AnalysisError> {
+        let spec = self.allowed(id)?;
         let path = self.weights_path(spec);
-        let folder = path.parent().unwrap_or(&self.folder).to_path_buf();
-        fs::create_dir_all(&folder).map_err(|source| AnalysisError::File {
-            path: folder.clone(),
-            source,
-        })?;
         let partial = path.with_extension("onnx.part");
-        let file_error = |source| AnalysisError::File {
-            path: partial.clone(),
-            source,
+        let file_error = |path: &Path| {
+            let path = path.to_path_buf();
+            move |source| AnalysisError::File { path, source }
         };
-
-        let mut file = File::create(&partial).map_err(file_error)?;
-        let mut hasher = Sha256::new();
-        let mut size = 0u64;
-        let mut buffer = vec![0u8; 1 << 16];
-        let copied = loop {
-            let read = match body.read(&mut buffer) {
-                Ok(0) => break Ok(()),
-                Ok(read) => read,
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) => break Err(error),
-            };
-            hasher.update(&buffer[..read]);
-            size += read as u64;
-            if size > spec.size_bytes {
-                break Ok(());
-            }
-            if let Err(error) = file.write_all(&buffer[..read]) {
-                break Err(error);
-            }
-        };
-        let flushed = copied.and_then(|()| file.sync_all());
-        drop(file);
-        if let Err(source) = flushed {
-            let _ = fs::remove_file(&partial);
-            return Err(file_error(source));
+        if let Some(folder) = path.parent() {
+            fs::create_dir_all(folder).map_err(file_error(folder))?;
         }
 
-        let found = hex(&hasher.finalize());
+        // One byte past the expected size is enough to tell that a download is too long.
+        let (size, found) =
+            write_hashed(body.take(spec.size_bytes + 1), &partial).map_err(|source| {
+                let _ = fs::remove_file(&partial);
+                AnalysisError::File {
+                    path: partial.clone(),
+                    source,
+                }
+            })?;
         let mismatch = if size != spec.size_bytes {
             Some(AnalysisError::WrongSize {
                 id: spec.id.to_owned(),
@@ -159,7 +138,7 @@ impl ModelRegistry {
             let _ = fs::remove_file(&partial);
             return Err(error);
         }
-        fs::rename(&partial, &path).map_err(file_error)?;
+        fs::rename(&partial, &path).map_err(file_error(&partial))?;
         Ok(path)
     }
 
@@ -193,6 +172,28 @@ fn agent() -> ureq::Agent {
         .into()
 }
 
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+/// Copies `body` into a new file at `path` and returns its size and lowercase hex SHA-256.
+fn write_hashed(mut body: impl Read, path: &Path) -> io::Result<(u64, String)> {
+    let mut file = File::create(path)?;
+    let mut hasher = Sha256::new();
+    let mut size = 0u64;
+    let mut buffer = vec![0u8; 1 << 16];
+    loop {
+        let read = match body.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        };
+        hasher.update(&buffer[..read]);
+        file.write_all(&buffer[..read])?;
+        size += read as u64;
+    }
+    file.sync_all()?;
+    let found = hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Ok((size, found))
 }
