@@ -1142,6 +1142,7 @@
           <TableRow
             id="{id}-row-{index}"
             aria-rowindex={index + 2}
+            data-track-id={track?.id}
             selected={isSelected}
             checked={isChecked && !isSelected}
             style="grid-template-columns: var(--active-columns)"

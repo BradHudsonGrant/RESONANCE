@@ -1,6 +1,7 @@
 pub mod artwork;
 pub mod collections;
 pub mod columns;
+pub mod convert;
 pub mod duplicates;
 pub mod filter;
 pub mod identify;
@@ -15,6 +16,7 @@ pub mod preview;
 pub mod providers;
 pub mod quality;
 pub mod quick_filters;
+pub mod replace;
 pub mod search;
 pub mod staging;
 pub mod template;

@@ -361,6 +361,21 @@ impl Database {
         stamp: FileStamp,
         identity: &AssetIdentity,
     ) -> Result<bool, DbError> {
+        let tx = self.connection.transaction()?;
+        let changed = record_identity_in(&tx, asset_id, stamp, identity)?;
+        tx.commit()?;
+        Ok(changed)
+    }
+}
+
+/// Records `identity` on `asset_id` inside `tx` if the file still has `stamp`.
+pub(crate) fn record_identity_in(
+    tx: &Transaction<'_>,
+    asset_id: i64,
+    stamp: FileStamp,
+    identity: &AssetIdentity,
+) -> Result<bool, DbError> {
+    {
         let audio_bytes = identity
             .audio
             .as_ref()
@@ -370,7 +385,6 @@ impl Database {
         let fp_raw = identity.chromaprint.as_ref().map(Chromaprint::raw_le_bytes);
         let fp_duration = identity.chromaprint.as_ref().map(|fp| fp.duration_s);
 
-        let tx = self.connection.transaction()?;
         let changed = tx.execute(
             "UPDATE asset
              SET byte_hash = ?2,
@@ -397,12 +411,13 @@ impl Database {
         if changed > 0
             && let Some(quality) = &identity.quality
         {
-            record_quality(&tx, asset_id, quality)?;
+            record_quality(tx, asset_id, quality)?;
         }
-        tx.commit()?;
         Ok(changed > 0)
     }
+}
 
+impl Database {
     /// Records a batch of computed identities inside a single SQLite WAL transaction so background
     /// identity passes do not pay per-file autocommit overhead.
     pub fn record_asset_identities(

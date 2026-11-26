@@ -104,6 +104,99 @@ impl ClickTrack {
     }
 }
 
+/// A short loop of kick, snare, hats and chords that never repeats exactly, written as a
+/// function of time so the same music can be rendered at any fractional shift or speed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Groove {
+    pub tempo_bpm: f64,
+    /// Picks the hat accents, snare fills and chords, so two seeds give unrelated music.
+    pub seed: u64,
+}
+
+/// A number from 0 to 1 that depends only on `seed` and `index`.
+fn scatter(seed: u64, index: i64) -> f64 {
+    let mut x = seed ^ (index as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    x ^= x >> 30;
+    x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x ^= x >> 27;
+    x = x.wrapping_mul(0x94D0_49BB_1331_11EB);
+    x ^= x >> 31;
+    (x >> 11) as f64 / (1u64 << 53) as f64
+}
+
+/// A 1 ms raised-cosine attack, so a hit has no step in it.
+fn attack(t: f64) -> f64 {
+    const RISE_S: f64 = 0.001;
+    if t >= RISE_S {
+        1.0
+    } else {
+        0.5 - 0.5 * (std::f64::consts::PI * t / RISE_S).cos()
+    }
+}
+
+impl Groove {
+    /// The groove `t` seconds in. Silent before 0.
+    pub fn value(&self, t: f64) -> f64 {
+        if t < 0.0 {
+            return 0.0;
+        }
+        let beat_s = 60.0 / self.tempo_bpm;
+        let beat = (t / beat_s).floor() as i64;
+        let mut sum = 0.0;
+        for hit in (beat - 2)..=beat {
+            if hit < 0 {
+                continue;
+            }
+            let since = t - hit as f64 * beat_s;
+            let kick_hz = 48.0 + 110.0 * (-since / 0.03).exp();
+            sum += 0.5 * attack(since) * (-since / 0.25).exp() * (TAU * kick_hz * since).sin();
+            if hit % 2 == 1 || scatter(self.seed, hit) > 0.8 {
+                let snare = 0.3 * attack(since) * (-since / 0.08).exp();
+                sum += snare
+                    * ((TAU * 185.0 * since).sin()
+                        + 0.6 * (TAU * 4_400.0 * since).sin()
+                        + 0.5 * (TAU * 5_730.0 * since).sin());
+            }
+            let off = since - beat_s / 2.0;
+            if off >= 0.0 {
+                let accent = 0.05 + 0.15 * scatter(self.seed.wrapping_add(1), hit);
+                sum += accent
+                    * attack(off)
+                    * (-off / 0.02).exp()
+                    * ((TAU * 7_100.0 * off).sin()
+                        + (TAU * 9_350.0 * off).sin()
+                        + (TAU * 11_830.0 * off).sin());
+            }
+        }
+        let bar_s = 4.0 * beat_s;
+        let bar = (t / bar_s).floor() as i64;
+        let in_bar = t - bar as f64 * bar_s;
+        let root =
+            110.0 * 2f64.powf((scatter(self.seed.wrapping_add(2), bar) * 12.0).floor() / 12.0);
+        let swell = (std::f64::consts::PI * in_bar / bar_s).sin();
+        sum += 0.08
+            * swell
+            * ((TAU * root * in_bar).sin()
+                + (TAU * root * 1.5 * in_bar).sin()
+                + (TAU * root * 2.52 * in_bar).sin());
+        sum
+    }
+
+    /// `seconds` of the groove as a mono signal, with the groove's start `shift_s` seconds in
+    /// and played `speed` times as fast: frame `n` holds `value((n / rate - shift_s) * speed)`.
+    pub fn render(&self, seconds: f64, sample_rate: u32, shift_s: f64, speed: f64) -> Signal {
+        let rate = f64::from(sample_rate);
+        let samples = (0..frames_in(seconds, sample_rate))
+            .map(|frame| (0.45 * self.value((frame as f64 / rate - shift_s) * speed)) as f32)
+            .collect();
+        Signal {
+            sample_rate,
+            channels: 1,
+            samples,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

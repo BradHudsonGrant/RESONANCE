@@ -29,6 +29,8 @@
     onclose: () => void;
     onpreview?: (track: LibraryTrack) => void;
     onrelink?: (track: LibraryTrack) => void;
+    /** Replaces the track's file with a better copy. */
+    onreplace?: (track: LibraryTrack) => void;
     onopeninprep?: (track: LibraryTrack) => void;
     onidentifyonline?: (track: LibraryTrack) => void;
     identifying?: boolean;
@@ -58,6 +60,7 @@
     onclose,
     onpreview,
     onrelink,
+    onreplace,
     onopeninprep,
     onidentifyonline,
     identifying = false,
@@ -389,6 +392,12 @@
             <p class="quality-clean">No problems found</p>
           {/if}
         </section>
+      {/if}
+
+      {#if onreplace && track.missing_since == null}
+        <div class="file-actions">
+          <Button size="sm" onclick={() => track && onreplace(track)}>Replace file…</Button>
+        </div>
       {/if}
 
       {#if related}
@@ -752,6 +761,12 @@
     margin: 0;
     color: var(--color-muted);
     font-size: var(--text-sm);
+  }
+
+  .file-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2-5);
   }
 
   .detail-row.compact {

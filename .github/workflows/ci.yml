@@ -19,8 +19,9 @@ jobs:
           # The attribution check reads every commit message between master and the PR head.
           fetch-depth: 0
       - run: rustup toolchain install
-      # cpal builds its ALSA backend on Linux.
-      - run: sudo apt-get update && sudo apt-get install --yes libasound2-dev
+      # cpal builds its ALSA backend on Linux. The alignment, Convert and Repair tests encode
+      # their fixtures with FFmpeg.
+      - run: sudo apt-get update && sudo apt-get install --yes libasound2-dev ffmpeg
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:

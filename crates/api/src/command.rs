@@ -295,6 +295,40 @@ pub enum Request {
         #[serde(default)]
         for_good: bool,
     },
+    /// Measures a new file against the track's file, lines the two up, and says what Apply
+    /// would do. `template` names the placed file; without one it keeps the old file's name.
+    CompareReplacement {
+        #[ts(type = "number")]
+        track_id: i64,
+        path: String,
+        #[serde(default)]
+        template: Option<String>,
+    },
+    /// Replaces the track's file with `path`, or adds `path` beside it as a track of its own,
+    /// as one journaled operation that can be undone.
+    ApplyReplacement {
+        #[ts(type = "number")]
+        track_id: i64,
+        path: String,
+        #[serde(default)]
+        template: Option<String>,
+        choice: ReplaceChoiceName,
+    },
+    /// Whether FFmpeg is installed for Convert and Repair, and the presets it offers.
+    FfmpegStatus,
+    /// Makes a copy of the track's file from a preset, checked against it, in the app's data
+    /// folder. The track's file is not touched; the copy can then replace it.
+    ConvertTrack {
+        #[ts(type = "number")]
+        track_id: i64,
+        preset: ConvertPresetName,
+    },
+    /// Remuxes the track's file into a fresh container, checked against it, in the app's data
+    /// folder. The track's file is not touched; the repaired copy can then replace it.
+    RepairTrack {
+        #[ts(type = "number")]
+        track_id: i64,
+    },
     /// What the quality check measured and flagged in the file a track plays.
     TrackQuality {
         #[ts(type = "number")]
@@ -572,6 +606,11 @@ pub enum Response {
     TrackCopies(TrackCopies),
     KeepCopy(TrackCopies),
     DeleteTracks(DeleteReport),
+    CompareReplacement(Box<ReplaceComparison>),
+    ApplyReplacement(ReplaceResult),
+    FfmpegStatus(FfmpegStatus),
+    ConvertTrack(ConvertedFile),
+    RepairTrack(ConvertedFile),
     TrackQuality(TrackQuality),
     TrackArtwork(TrackArtwork),
     AcceptProposedArtwork(TrackArtwork),
@@ -660,6 +699,8 @@ pub enum OperationKindName {
     RenameFiles,
     DeleteFiles,
     DeleteFilesForGood,
+    ReplaceFile,
+    AddFile,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
@@ -760,6 +801,110 @@ pub struct JournalOperation {
 pub struct DeleteReport {
     pub operation: Option<JournalOperation>,
     pub no_bin: Option<String>,
+}
+
+/// What Apply does with the new file on the compare sheet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ReplaceChoiceName {
+    Replace,
+    AddSeparateTrack,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ReplaceVerdictName {
+    SameRecordingAndBetter,
+    SameRecordingNotBetter,
+    DifferentVersion,
+}
+
+/// One side of the compare sheet.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct ReplaceFileFacts {
+    pub path: String,
+    pub format: String,
+    pub bitrate_kbps: Option<u32>,
+    pub sample_rate: Option<u32>,
+    pub bit_depth: Option<u8>,
+    #[ts(type = "number | null")]
+    pub duration_ms: Option<u64>,
+    pub integrated_lufs: Option<f64>,
+    pub true_peak_dbtp: Option<f64>,
+    pub spectral_cutoff_hz: Option<f64>,
+    /// The reasons the quality check gave, most serious first.
+    pub flags: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct ReplaceComparison {
+    #[ts(type = "number")]
+    pub track_id: i64,
+    pub old: ReplaceFileFacts,
+    pub new: ReplaceFileFacts,
+    /// How the two files relate, such as "Another encode" or "Different length".
+    pub relation: String,
+    pub fingerprint_similarity: Option<f32>,
+    /// Where the old file's audio starts in the new file, in milliseconds. `null` when the two
+    /// could not be lined up.
+    pub offset_ms: Option<f64>,
+    /// Seconds of the old file per second of the new one. 1 for two encodes of one master.
+    pub tempo_ratio: Option<f64>,
+    pub verdict: ReplaceVerdictName,
+    pub verdict_label: String,
+    pub default_choice: ReplaceChoiceName,
+    pub replace_name: String,
+    pub separate_name: String,
+    pub cues_to_carry: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct ReplaceResult {
+    pub operation: JournalOperation,
+    /// The track the placed file belongs to: the same track for a replace.
+    #[ts(type = "number")]
+    pub track_id: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ConvertPresetName {
+    #[serde(rename = "mp3_cbr_320")]
+    Mp3Cbr320,
+    #[serde(rename = "flac_24")]
+    Flac24,
+    AiffCdj,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct ConvertPresetInfo {
+    pub preset: ConvertPresetName,
+    pub label: String,
+}
+
+/// Whether Convert and Repair can run. `program` and `version` are null when FFmpeg was not
+/// found.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct FfmpegStatus {
+    pub program: Option<String>,
+    pub version: Option<String>,
+    pub presets: Vec<ConvertPresetInfo>,
+}
+
+/// A file Convert or Repair made and checked, ready to compare with the track's file.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct ConvertedFile {
+    pub path: String,
+    pub similarity: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]

@@ -154,6 +154,11 @@ pub(crate) fn has_leading_id3v2(path: &Path) -> io::Result<bool> {
     Ok(start_of_audio_file(&mut File::open(path)?)? > 0)
 }
 
+/// How many bytes of ID3v2 sit in front of an MP4 container. `0` for any other file.
+pub(crate) fn audio_start(path: &Path) -> io::Result<u64> {
+    start_of_audio_file(&mut File::open(path)?)
+}
+
 pub(crate) fn open_audio_reader(path: &Path) -> io::Result<OffsetFile> {
     let mut file = File::open(path)?;
     let total_len = file.metadata()?.len();

@@ -207,6 +207,58 @@ impl AssetAlignment {
         let shifted = asset_sample.saturating_sub(self.offset_samples);
         (shifted as f64 * self.tempo_ratio).round() as i64
     }
+
+    /// Where `track_s` seconds of the track sit in an asset decoded at `sample_rate`. Track
+    /// time is what cues, grids and phrases are stored in, so they survive a replaced file.
+    pub fn track_to_asset_seconds(&self, track_s: f64, sample_rate: u32) -> f64 {
+        self.offset_samples as f64 / f64::from(sample_rate) + track_s / self.tempo_ratio
+    }
+
+    pub fn asset_to_track_seconds(&self, asset_s: f64, sample_rate: u32) -> f64 {
+        (asset_s - self.offset_samples as f64 / f64::from(sample_rate)) * self.tempo_ratio
+    }
+
+    /// The alignment of a new file measured against this one. `measured` says where the old
+    /// file's audio sits in the new file, so the new file's alignment to the track is the two
+    /// chained. `old_rate` and `new_rate` are the files' sample rates.
+    pub fn followed_by(
+        &self,
+        measured: &MeasuredAlignment,
+        old_rate: u32,
+        new_rate: u32,
+    ) -> Option<Self> {
+        let tempo_ratio = self.tempo_ratio * measured.old_per_new;
+        let old_offset_s = self.offset_samples as f64 / f64::from(old_rate);
+        let offset_s = measured.new_at_old_zero_s + old_offset_s / measured.old_per_new;
+        Self::new((offset_s * f64::from(new_rate)).round() as i64, tempo_ratio)
+    }
+}
+
+/// Where one file's audio sits in another of the same recording: a moment `x` seconds into the
+/// old file is heard `new_at_old_zero_s + x / old_per_new` seconds into the new one.
+/// `old_per_new` is `1.0` for two encodes of one master and differs for a rip played at another
+/// speed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MeasuredAlignment {
+    pub new_at_old_zero_s: f64,
+    pub old_per_new: f64,
+    /// Normalised cross-correlation at the peak, from 0 to 1. Below
+    /// [`MIN_ALIGNMENT_CONFIDENCE`] the files did not line up.
+    pub confidence: f32,
+}
+
+/// Least correlation at which two files count as lined up. Two encodes of one master reach
+/// 0.9 and above; unrelated audio stays well under 0.3.
+pub const MIN_ALIGNMENT_CONFIDENCE: f32 = 0.6;
+
+impl MeasuredAlignment {
+    pub fn new_seconds(&self, old_s: f64) -> f64 {
+        self.new_at_old_zero_s + old_s / self.old_per_new
+    }
+
+    pub fn is_confident(&self) -> bool {
+        self.confidence >= MIN_ALIGNMENT_CONFIDENCE
+    }
 }
 
 impl Default for AssetAlignment {
@@ -521,6 +573,28 @@ mod tests {
         let asset_pos = pitched.track_to_asset_sample(102_000);
         assert_eq!(asset_pos, 100_100);
         assert_eq!(pitched.asset_to_track_sample(asset_pos), 102_000);
+    }
+
+    #[test]
+    fn a_measured_file_inherits_the_old_files_alignment() {
+        // The old MP3 starts 528 samples late at 44.1 kHz. The new FLAC at 48 kHz holds the
+        // same audio 20 ms later than the MP3 and plays 0.1% faster.
+        let old = AssetAlignment::new(528, 1.0).expect("valid alignment");
+        let measured = MeasuredAlignment {
+            new_at_old_zero_s: 0.020,
+            old_per_new: 1.001,
+            confidence: 0.95,
+        };
+        let new = old
+            .followed_by(&measured, 44_100, 48_000)
+            .expect("valid alignment");
+        for cue_s in [0.0, 12.5, 300.0] {
+            let in_old = old.track_to_asset_seconds(cue_s, 44_100);
+            let in_new = new.track_to_asset_seconds(cue_s, 48_000);
+            assert!((in_new - measured.new_seconds(in_old)).abs() < 1.0 / 48_000.0);
+            let back = new.asset_to_track_seconds(in_new, 48_000);
+            assert!((back - cue_s).abs() < 1e-9);
+        }
     }
 
     #[test]
