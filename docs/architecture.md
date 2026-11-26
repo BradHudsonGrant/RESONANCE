@@ -19,7 +19,7 @@ In the stack table, a row marked Fixed is settled. A row marked Default is a rec
 | Identity & fingerprint | `blake3` `1.8.7` (`Apache-2.0`), `rusty-chromaprint` `0.3.0` (`MIT`) and AcoustID | Settled ([ADR 0004](adr/0004-identity-model.md)) |
 | Metadata lookups | `ureq` `3.5.2` with `rustls` and the OS certificate store; AcoustID, MusicBrainz, Discogs and pasted Bandcamp pages | Settled ([ADR 0017](adr/0017-identification-providers-over-ureq.md)) |
 | Filesystem watching | `notify` `8.2.2` with quiet-window coalescing | Settled ([ADR 0013](adr/0013-filesystem-watching-with-notify.md)) |
-| Model runtime | ONNX Runtime in-process through the `ort` crate | Default, with the fallback under Model runtime |
+| Model runtime | ONNX Runtime 1.31 in-process through `ort` `=2.0.0-rc.15`; TensorRT, then CUDA, then CPU | Settled ([ADR 0002](adr/0002-model-runtime.md)), with the fallback under Model runtime |
 | Trash | the `trash` crate | Default |
 | Input | midir, hidapi, gilrs | Default |
 | IPC types | Generated from Rust (`ts-rs` `12.0.1`) | Settled ([ADR 0006](adr/0006-command-transport-and-ipc-types.md)) |
@@ -83,7 +83,7 @@ The tables that matter:
 - `source` for library folders and their options.
 - Tags in three layers: `file_tag` (what is in the file), `proposed_tag` (what providers proposed, with provider and confidence) and `user_tag` (what the user set). The user's value wins, then analysis, then the file ([ADR 0018](adr/0018-tag-layers-and-precedence.md)). The asset's sort and search columns hold the effective value.
 - Pictures in the same layers: `asset.artwork_hash` (the file's front cover), `proposed_artwork` and `user_artwork`, each pointing at a row of `artwork`. The bytes are kept once per picture in the `artwork` folder beside `library.db`, named by their BLAKE3 hash, and the page loads them by hash rather than inside track pages ([ADR 0021](adr/0021-artwork-store-and-layers.md)).
-- `analysis_run` (audio hash, analyser, version, parameter hash, status) and one result table per kind: beat grid, key, loudness, energy curve, phrases, embedding. Each has a confidence. Parallel tables hold user corrections.
+- `analysis_run` (audio hash, analyser, version, parameter hash, status, confidence) and one result table per kind, keyed by audio hash: `beat_grid_auto`, `key_auto`, `energy_auto`, `bar_features_auto`, `phrase_auto` and `cue_proposed`, with embeddings to follow. Corrections sit in tables keyed by track, in track time: `beat_grid_user`, `phrase_user` and the user's own `cue` rows. A correction always wins, and a new result never touches it. Key corrections are the key tag's user layer, and loudness is measured per file in `asset_quality`.
 - `cue` and `loop`, stored in track time.
 - `collection`, `collection_item`, `smart_collection`, `set`, `set_item` (with play window and transition).
 - `job` for the queue. `operation` for the journal: steps, inverse steps, state ([ADR 0019](adr/0019-writing-tags-into-files.md)). `operation_rename` holds each file a rename moved ([ADR 0020](adr/0020-renaming-files-from-templates.md)). `operation_step` holds the plan of an operation made of file steps, and unfinished operations are finished or rolled back when the library opens ([ADR 0027](adr/0027-operation-steps-and-recovery.md)). `cue` holds cues in track time, which each file maps onto its samples through `offset_samples` and `tempo_ratio`, so a replaced file keeps them ([ADR 0028](adr/0028-replace-alignment-and-ffmpeg.md)).

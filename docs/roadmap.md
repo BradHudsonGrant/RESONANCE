@@ -134,7 +134,7 @@ Accept:
 
 ## M5 Analysis, v0.6.0
 
-- [ ] ONNX runtime and model registry
+- [x] ONNX runtime and model registry ([#179](https://github.com/BradHudsonGrant/RESONANCE/issues/179)). Evidence: merged in [#180](https://github.com/BradHudsonGrant/RESONANCE/pull/180); `crates/analysis` runs ONNX Runtime 1.31 through `ort` `=2.0.0-rc.15`, trying TensorRT, then CUDA, then the CPU ([ADR 0002](adr/0002-model-runtime.md)), and its registry keeps a download only when its size and SHA-256 match and refuses non-commercial models unless they are allowed; schema v27 (`0027_analysis.sql`) adds `analysis_run` keyed by audio hash, analyser, version and settings hash, with automatic results keyed by audio hash and corrections keyed by track; tests run a two-node graph on the CPU, reject changed and wrong-sized weights, find the run after a rename and a retag, keep a user's grid over a new estimate and hold the GPU for one job at a time.
 - [ ] Beats, downbeats and tempo
 - [ ] Key
 - [ ] Loudness and energy

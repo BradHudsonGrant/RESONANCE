@@ -29,6 +29,12 @@ allow = [
 ]
 unused-allowed-license = "allow"
 
+# Mozilla's root certificates, which only the ort-sys build script uses to fetch the prebuilt ONNX
+# Runtime. They never reach a shipped binary, which uses the OS certificate store (ADR 0002).
+[[licenses.exceptions]]
+crate = "webpki-roots"
+allow = ["CDLA-Permissive-2.0"]
+
 [licenses.private]
 ignore = true
 

@@ -13,6 +13,7 @@ use tokio::sync::watch;
 pub const RECENT_JOBS_LIMIT: u32 = 50;
 const PROGRESS_PUSH_INTERVAL: Duration = Duration::from_millis(100);
 const MIX_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const GPU_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(Debug)]
 pub enum JobError {
@@ -98,6 +99,8 @@ struct Shared {
     mix_live: AtomicBool,
     mix_probe: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
     revisions: watch::Sender<u64>,
+    gpu_busy: Mutex<bool>,
+    gpu_free: Condvar,
 }
 
 impl Shared {
@@ -238,6 +241,30 @@ impl<'a> JobExecution<'a> {
         }
     }
 
+    /// Waits for the GPU, which one job holds at a time, and holds it until the permit drops.
+    /// Gives up if the job is cancelled or the runner stops while it waits.
+    pub fn gpu_permit(&self) -> Result<GpuPermit<'a>, JobInterrupt> {
+        let mut busy = self
+            .shared
+            .gpu_busy
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        while *busy {
+            self.check_interrupted()?;
+            busy = self
+                .shared
+                .gpu_free
+                .wait_timeout(busy, GPU_POLL_INTERVAL)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+        self.check_interrupted()?;
+        *busy = true;
+        Ok(GpuPermit {
+            shared: self.shared,
+        })
+    }
+
     pub fn report_progress(
         &self,
         done_items: u64,
@@ -255,6 +282,22 @@ impl<'a> JobExecution<'a> {
             self.shared.bump_progress_throttled();
         }
         Ok(())
+    }
+}
+
+/// The GPU, held by one job until this drops.
+pub struct GpuPermit<'a> {
+    shared: &'a Shared,
+}
+
+impl Drop for GpuPermit<'_> {
+    fn drop(&mut self) {
+        *self
+            .shared
+            .gpu_busy
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = false;
+        self.shared.gpu_free.notify_one();
     }
 }
 
@@ -308,6 +351,8 @@ impl JobRunner {
             mix_live: AtomicBool::new(initial_mix),
             mix_probe,
             revisions,
+            gpu_busy: Mutex::new(false),
+            gpu_free: Condvar::new(),
         });
 
         let mut workers = Vec::with_capacity(2);

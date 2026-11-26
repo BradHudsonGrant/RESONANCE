@@ -1,0 +1,22 @@
+[package]
+name = "resonance-analysis"
+description = "Analysers, the ONNX Runtime runner and the model registry."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+resonance-core.workspace = true
+ort.workspace = true
+sha2.workspace = true
+ureq.workspace = true
+
+# The CUDA and TensorRT build of ONNX Runtime exists for x86-64 Windows, where the development
+# GPU is. Other targets get the CPU build and fall through to it at run time.
+[target.'cfg(all(windows, target_arch = "x86_64"))'.dependencies]
+ort = { workspace = true, features = ["cuda", "tensorrt"] }
+
+[lints]
+workspace = true
