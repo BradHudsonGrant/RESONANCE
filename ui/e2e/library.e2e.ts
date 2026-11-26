@@ -1402,7 +1402,11 @@ test('a batch of 50 mixed files goes from untagged to tagged in Prep using the k
     expect(files.every((file) => !readFileSync(file).includes(id3ArtistFrame))).toBe(true);
     // The tracks stayed in the list through the save and the undo, so they are still ticked.
     await expect(prep.getByText('50 ticked')).toBeVisible();
-    await prep.getByRole('button', { name: 'Save ticked' }).press('Enter');
+    // The list reloads after an undo, and the button stays disabled until it is back. A key
+    // pressed on a disabled button goes to the page, where Enter searches the current track.
+    const saveTicked = prep.getByRole('button', { name: 'Save ticked' });
+    await expect(saveTicked).toBeEnabled();
+    await saveTicked.press('Enter');
     await expect(prep.getByText('Saved to 50 files')).toBeVisible({ timeout: 30_000 });
 
     // Verify all 50 mixed files on disk now hold their tags and have zero unwritten changes left.
