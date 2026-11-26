@@ -618,10 +618,10 @@ mod tests {
 
     #[test]
     fn a_latin1_playlist_stays_latin1_and_refuses_what_it_cannot_store() {
-        let mut document = M3uDocument::decode(b"Caf\xE9/a.mp3\n");
+        let mut document = M3uDocument::decode(b"Ni\xF1o/a.mp3\n");
         assert_eq!(document.encoding(), TextEncoding::Latin1);
-        assert_eq!(document.entries()[0].raw, "Café/a.mp3");
-        assert_eq!(document.encode().expect("encodes"), b"Caf\xE9/a.mp3\n");
+        assert_eq!(document.entries()[0].raw, "Niño/a.mp3");
+        assert_eq!(document.encode().expect("encodes"), b"Ni\xF1o/a.mp3\n");
         document.set_line(0, "Ωmega/a.mp3".to_owned());
         assert_eq!(
             document.encode(),

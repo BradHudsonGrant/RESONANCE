@@ -110,16 +110,16 @@ fn a_dry_run_writes_nothing_and_apply_backs_up_then_rewrites() {
 fn a_latin1_playlist_that_cannot_hold_the_new_path_is_left_alone() {
     let root = sandbox("m3u-latin1");
     let playlist = root.join("Sets/Old.m3u");
-    fs::write(&playlist, b"Caf\xE9.mp3\n").expect("playlist");
+    fs::write(&playlist, b"Ni\xF1o.mp3\n").expect("playlist");
     let changes = [PathChange {
-        old_path: text(&root.join("Sets/Café.mp3")),
+        old_path: text(&root.join("Sets/Niño.mp3")),
         new_path: text(&root.join("Sets/Ωmega.flac")),
         title: None,
         duration_s: None,
     }];
     let refused = m3u::M3u.apply_changes(&playlist, &changes, &root.join("backups"));
     assert!(matches!(refused, Err(IntegrationError::Text { .. })));
-    assert_eq!(fs::read(&playlist).expect("read"), b"Caf\xE9.mp3\n");
+    assert_eq!(fs::read(&playlist).expect("read"), b"Ni\xF1o.mp3\n");
     assert!(!root.join("backups").exists());
 }
 

@@ -52,6 +52,7 @@
     'mix',
     'replay',
     'collections',
+    'playlist',
     'activity',
     'settings',
     'audio',

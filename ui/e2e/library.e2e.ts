@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import {
   copyFileSync,
   existsSync,
@@ -1470,5 +1471,165 @@ test('a batch of 50 mixed files goes from untagged to tagged in Prep using the k
       socket.close();
     });
     rmSync(prepFolder, { recursive: true, force: true });
+  }
+});
+
+test('an M3U8 playlist mirrors as a collection, follows a replace through a backed-up update and exports', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1586, height: 992 });
+  const sandbox = join(musicFolder, '..', 'playlist-sandbox');
+  const music = join(sandbox, 'music');
+  const sets = join(sandbox, 'sets');
+  rmSync(sandbox, { recursive: true, force: true });
+  mkdirSync(music, { recursive: true });
+  mkdirSync(sets, { recursive: true });
+
+  // A 20 s groove of pitched kicks over quiet noise, so the replace can line the files up.
+  const rate = 44_100;
+  const frames = rate * 20;
+  const wav = Buffer.alloc(44 + frames * 2);
+  wav.write('RIFF', 0, 'ascii');
+  wav.writeUInt32LE(36 + frames * 2, 4);
+  wav.write('WAVEfmt ', 8, 'ascii');
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(rate, 24);
+  wav.writeUInt32LE(rate * 2, 28);
+  wav.writeUInt16LE(2, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write('data', 36, 'ascii');
+  wav.writeUInt32LE(frames * 2, 40);
+  let seed = 7;
+  for (let i = 0; i < frames; i++) {
+    seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+    const beat = Math.floor(i / (rate / 2));
+    const t = (i % (rate / 2)) / rate;
+    const kick = Math.sin(2 * Math.PI * (55 + (beat % 7) * 20) * t) * Math.exp(-t * 18);
+    const sample = 0.7 * kick + 0.05 * (seed / 2_147_483_648 - 0.5);
+    wav.writeInt16LE(Math.round(sample * 32_000), 44 + i * 2);
+  }
+  const master = join(sandbox, 'master.wav');
+  writeFileSync(master, wav);
+  const ffmpeg = (...args: string[]) => {
+    const run = spawnSync('ffmpeg', ['-y', '-hide_banner', '-loglevel', 'error', ...args]);
+    expect(run.status, 'FFmpeg is installed for the replace checks').toBe(0);
+  };
+  ffmpeg('-i', master, '-c:a', 'libmp3lame', '-b:a', '128k', join(music, 'groove.mp3'));
+  const flac = join(sandbox, 'groove.flac');
+  ffmpeg('-i', master, '-c:a', 'flac', flac);
+  rmSync(master);
+
+  const playlist = join(sets, 'Friday.m3u8');
+  const original =
+    '#EXTM3U\r\n#EXTINF:20,Groove\r\n..\\music\\groove.mp3\r\n../music/not here.mp3\r\n';
+  writeFileSync(playlist, original);
+
+  await page.goto('/');
+  await expect(page.getByRole('region', { name: 'Library' })).toBeVisible({ timeout: 10_000 });
+  const call = (command: string, params?: unknown) =>
+    page.evaluate(
+      async ({ command, params }) => {
+        const socket = new WebSocket(new URL('/core', location.href));
+        await new Promise((ready) => (socket.onopen = ready));
+        const result = await new Promise((resolve, reject) => {
+          socket.addEventListener('message', (event) => {
+            if (typeof event.data !== 'string') return;
+            const reply = JSON.parse(event.data);
+            if (reply.id !== 1) return;
+            if (reply.error) reject(new Error(reply.error.message));
+            else resolve(reply.response.result);
+          });
+          socket.send(
+            JSON.stringify({ id: 1, request: params ? { command, params } : { command } }),
+          );
+        });
+        socket.close();
+        return result;
+      },
+      { command, params },
+    );
+
+  const sidebar = page.getByRole('navigation', { name: 'Spaces' });
+  try {
+    await call('scan', { folder: music });
+
+    await sidebar.getByRole('button', { name: 'Import playlist' }).click();
+    const importSheet = page.getByRole('dialog', { name: 'Import playlist' });
+    await importSheet.getByRole('textbox', { name: 'Playlist file' }).fill(playlist);
+    await importSheet.getByRole('button', { name: 'Import', exact: true }).click();
+    await expect(importSheet).toBeHidden();
+    const fridayRow = sidebar.getByRole('button', { name: /^Friday/ });
+    await expect(fridayRow).toContainText('1');
+    await expect(page.getByRole('heading', { name: 'Friday', level: 1 })).toBeVisible();
+    await expect(page.getByRole('grid', { name: 'Tracks' }).getByText('groove')).toBeVisible();
+
+    const collections = (await call('collections')) as Array<{
+      id: number;
+      name: string;
+      mirror: boolean;
+    }>;
+    const friday = collections.find((collection) => collection.name === 'Friday');
+    expect(friday?.mirror).toBe(true);
+    const tracks = (await call('tracks', {
+      offset: 0,
+      limit: 10,
+      query: { collection_id: friday?.id },
+    })) as { tracks: Array<{ id: number }> };
+    await call('apply_replacement', {
+      track_id: tracks.tracks[0]?.id,
+      path: flac,
+      choice: 'replace',
+    });
+    expect(existsSync(join(music, 'groove.flac'))).toBe(true);
+
+    await page.reload();
+    const update = sidebar.getByRole('button', { name: /^Update playlists/ });
+    await expect(update).toContainText('1');
+    await update.click();
+    const changesSheet = page.getByRole('dialog', { name: 'Update playlists' });
+    const edits = changesSheet.getByRole('list', { name: 'Changes to Friday' });
+    await expect(edits).toContainText('..\\music\\groove.mp3');
+    await expect(edits).toContainText('..\\music\\groove.flac');
+    await expect(changesSheet).toContainText('1 file moved');
+    expect(readFileSync(playlist, 'utf8')).toBe(original);
+
+    await changesSheet.getByRole('button', { name: 'Update Friday' }).click();
+    await expect(changesSheet.getByRole('status')).toContainText('Updated Friday');
+    const updated = readFileSync(playlist, 'utf8');
+    expect(updated).toContain('\r\n..\\music\\groove.flac\r\n../music/not here.mp3\r\n');
+    const backups = join(musicFolder, '..', 'data', 'backups', 'playlists');
+    const saved = readdirSync(backups).filter((name) => name.endsWith('-Friday.m3u8'));
+    expect(saved).toHaveLength(1);
+    expect(readFileSync(join(backups, saved[0] ?? ''), 'utf8')).toBe(original);
+    await changesSheet.getByRole('button', { name: 'Close' }).click();
+    await expect(update).toBeHidden();
+
+    await sidebar.getByRole('button', { name: 'Actions for Friday' }).click();
+    await page.getByRole('menuitem', { name: 'Export to M3U8' }).click();
+    const exportSheet = page.getByRole('dialog', { name: 'Export to M3U8' });
+    const exported = join(sets, 'Export.m3u8');
+    await exportSheet.getByRole('textbox', { name: 'Save as' }).fill(exported);
+    await exportSheet.getByRole('button', { name: 'Save' }).click();
+    await expect(exportSheet.getByRole('status')).toContainText('Saved 1 track');
+    const written = readFileSync(exported, 'utf8');
+    expect(written.startsWith('#EXTM3U\n#EXTINF:20,')).toBe(true);
+    expect(written).toContain('groove.flac\n');
+    await exportSheet.getByRole('button', { name: 'Close' }).click();
+
+    await sidebar.getByRole('button', { name: 'Actions for Friday' }).click();
+    await page.getByRole('menuitem', { name: 'Stop following' }).click();
+    await page
+      .getByRole('dialog', { name: 'Stop following playlist' })
+      .getByRole('button', { name: 'Stop following' })
+      .click();
+    await expect(fridayRow).toBeHidden();
+    expect(existsSync(playlist)).toBe(true);
+  } finally {
+    const sources = (await call('sources')) as { sources: Array<{ id: number; folder: string }> };
+    const found = sources.sources.find((source) => source.folder.includes('playlist-sandbox'));
+    if (found) await call('remove_source', { source_id: found.id });
+    rmSync(sandbox, { recursive: true, force: true });
   }
 });

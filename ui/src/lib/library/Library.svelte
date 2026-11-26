@@ -445,7 +445,7 @@
               Move to bin
             </Button>
           {/if}
-          {#if activeCollection}
+          {#if activeCollection && !activeCollection.mirror}
             <Button size="sm" onclick={() => table?.removeSelectionFromCollection()}>
               <span class="collection-name">Remove from {activeCollection.name}</span>
             </Button>
@@ -487,7 +487,13 @@
         <Button onclick={() => (m5Gate = null)}>Show all tracks</Button>
       </div>
     {:else if pages.total === 0}
-      {#if activeCollection && !hasFiltersInView}
+      {#if activeCollection?.mirror && !hasFiltersInView}
+        <div class="state">
+          <h2>No tracks from this playlist are in your library</h2>
+          <p>Scan the folders its files are in, then read the playlist again.</p>
+          <Button onclick={() => onclearcollection?.()}>Show all tracks</Button>
+        </div>
+      {:else if activeCollection && !hasFiltersInView}
         <div class="state">
           <h2>This collection is empty</h2>
           <p>Add tracks from Library using row actions, the C shortcut or the Inspector.</p>

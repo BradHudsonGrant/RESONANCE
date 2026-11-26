@@ -311,13 +311,60 @@ describe('Sidebar', () => {
     expect(screen.getByText('No set yet. Sets arrive in M10.')).toBeTruthy();
   });
 
+  it('lists mirrored playlists apart from collections, with read-only actions', async () => {
+    const onImportPlaylist = vi.fn();
+    const onReadPlaylistAgain = vi.fn(async () => {});
+    const onExportCollection = vi.fn();
+    const onReviewPlaylistChanges = vi.fn();
+    const onDeleteCollection = vi.fn(async () => {});
+    const friday = { id: 4, name: 'Friday', position: 1, track_count: 2, mirror: true };
+    render(Sidebar, {
+      ...props,
+      collections: [
+        { id: 1, name: 'Warm Up', position: 0, track_count: 12, mirror: false },
+        friday,
+      ],
+      onImportPlaylist,
+      onReadPlaylistAgain,
+      onExportCollection,
+      onDeleteCollection,
+      playlistChangeCount: 3,
+      onReviewPlaylistChanges,
+    });
+
+    const playlistList = screen.getByText('Playlists').closest('.collections') as HTMLElement;
+    expect(within(playlistList).getByRole('button', { name: /^Friday/ })).toBeTruthy();
+    expect(within(playlistList).queryByRole('button', { name: /^Warm Up/ })).toBeNull();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Import playlist' }));
+    expect(onImportPlaylist).toHaveBeenCalled();
+    await fireEvent.click(screen.getByRole('button', { name: /^Update playlists/ }));
+    expect(onReviewPlaylistChanges).toHaveBeenCalled();
+
+    const actions = screen.getByRole('button', { name: 'Actions for Friday' });
+    await fireEvent.click(actions);
+    expect(screen.queryByRole('menuitem', { name: 'Rename' })).toBeNull();
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Read again' }));
+    expect(onReadPlaylistAgain).toHaveBeenCalledWith(4);
+    expect(document.activeElement).toBe(actions);
+
+    await fireEvent.click(actions);
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Export to M3U8' }));
+    expect(onExportCollection).toHaveBeenCalledWith(friday);
+
+    await fireEvent.click(actions);
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Stop following' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Stop following' }));
+    expect(onDeleteCollection).toHaveBeenCalledWith(4);
+  });
+
   it('creates, selects, renames and confirms deleting collections', async () => {
     const onSelectSpace = vi.fn();
     const onSelectCollection = vi.fn();
     const onCreateCollection = vi.fn(async () => {});
     const onRenameCollection = vi.fn(async () => {});
     const onDeleteCollection = vi.fn(async () => {});
-    const sample = [{ id: 1, name: 'Warm Up', position: 0, track_count: 12 }];
+    const sample = [{ id: 1, name: 'Warm Up', position: 0, track_count: 12, mirror: false }];
 
     const { rerender } = render(Sidebar, {
       ...props,
@@ -358,9 +405,12 @@ describe('Sidebar', () => {
     const actionsBtn = screen.getByRole('button', { name: 'Actions for Warm Up' });
     await fireEvent.click(actionsBtn);
     const renameItem = screen.getByRole('menuitem', { name: 'Rename' });
+    const exportItem = screen.getByRole('menuitem', { name: 'Export to M3U8' });
     const deleteItem = screen.getByRole('menuitem', { name: 'Delete' });
     expect(document.activeElement).toBe(renameItem);
     await fireEvent.keyDown(window, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(exportItem);
+    await fireEvent.keyDown(window, { key: 'End' });
     expect(document.activeElement).toBe(deleteItem);
     await fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByRole('menu')).toBeNull();

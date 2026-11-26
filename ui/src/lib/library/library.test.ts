@@ -250,7 +250,7 @@ describe('Library', () => {
     await pages.load();
     await pages.setQuery({ collection_id: 7 });
     const onclearcollection = vi.fn();
-    const activeCollection = { id: 7, name: 'Warm Up', position: 0, track_count: 0 };
+    const activeCollection = { id: 7, name: 'Warm Up', position: 0, track_count: 0, mirror: false };
 
     render(Library, { pages, activeCollection, onscan: vi.fn(), onclearcollection });
 
@@ -278,8 +278,8 @@ describe('Library', () => {
     }));
     await pages.load();
     const collections = [
-      { id: 1, name: 'Warm Up', position: 0, track_count: 1 },
-      { id: 2, name: 'Peak Hour', position: 1, track_count: 0 },
+      { id: 1, name: 'Warm Up', position: 0, track_count: 1, mirror: false },
+      { id: 2, name: 'Peak Hour', position: 1, track_count: 0, mirror: false },
     ];
     const onaddtocollection = vi.fn(async () => {});
     const onremovefromcollection = vi.fn(async () => {});
@@ -624,8 +624,8 @@ describe('Inspector and track formatting', () => {
       collections: [{ id: 1, name: 'Warm Up' }],
     };
     const collections = [
-      { id: 1, name: 'Warm Up', position: 0, track_count: 1 },
-      { id: 2, name: 'Peak Hour', position: 1, track_count: 0 },
+      { id: 1, name: 'Warm Up', position: 0, track_count: 1, mirror: false },
+      { id: 2, name: 'Peak Hour', position: 1, track_count: 0, mirror: false },
     ];
 
     render(Inspector, {

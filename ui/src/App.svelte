@@ -23,6 +23,15 @@
   import Library from './lib/library/Library.svelte';
   import DeleteSheet, { type DeleteClient } from './lib/library/DeleteSheet.svelte';
   import RelinkSheet, { type RelinkClient } from './lib/library/RelinkSheet.svelte';
+  import PlaylistChangesSheet, {
+    type PlaylistChangesClient,
+  } from './lib/library/PlaylistChangesSheet.svelte';
+  import PlaylistExportSheet, {
+    type PlaylistExportClient,
+  } from './lib/library/PlaylistExportSheet.svelte';
+  import PlaylistImportSheet, {
+    type PlaylistImportClient,
+  } from './lib/library/PlaylistImportSheet.svelte';
   import RenameSheet, { type RenameClient } from './lib/library/RenameSheet.svelte';
   import ReplaceSheet, { type ReplaceClient } from './lib/library/ReplaceSheet.svelte';
   import ScanFolder from './lib/library/ScanFolder.svelte';
@@ -95,6 +104,18 @@
     apply: (scope, template) => core.call('apply_rename', { scope, template }),
     recentOperations: () => core.call('recent_operations', { limit: 20 }),
     undo: (operation_id) => core.call('undo_operation', { operation_id }),
+  };
+  const playlistImportClient: PlaylistImportClient = {
+    find: () => core.call('find_playlists'),
+    importPlaylist: (path) => core.call('import_playlist', { path }),
+  };
+  const playlistExportClient: PlaylistExportClient = {
+    exportCollection: (collection_id, path) =>
+      core.call('export_collection', { collection_id, path }),
+  };
+  const playlistChangesClient: PlaylistChangesClient = {
+    changes: () => core.call('external_changes'),
+    apply: (library_id) => core.call('apply_external_changes', { library_id }),
   };
   const deleteClient: DeleteClient = {
     deleteTracks: (track_ids, for_good) => core.call('delete_tracks', { track_ids, for_good }),
@@ -198,6 +219,15 @@
   let renameLabel = $state('');
   let deleteOpen = $state(false);
   let deleteMounted = $state(false);
+  let playlistImportOpen = $state(false);
+  let playlistImportMounted = $state(false);
+  let playlistExportOpen = $state(false);
+  let playlistExportMounted = $state(false);
+  let playlistExportTarget = $state<LibraryCollection | null>(null);
+  let playlistExportFolder = $state<string | null>(null);
+  let playlistChangesOpen = $state(false);
+  let playlistChangesMounted = $state(false);
+  let playlistChangeCount = $state(0);
   let deleteTrackIds = $state<number[]>([]);
   let replaceOpen = $state(false);
   let replaceMounted = $state(false);
@@ -273,7 +303,36 @@
     }
   }
 
+  async function refreshPlaylistChanges() {
+    try {
+      const previews = await core.call('external_changes');
+      playlistChangeCount = previews.reduce((sum, preview) => sum + preview.changes, 0);
+    } catch {
+      // The count is a hint; the sheet reports a failure when it is opened.
+    }
+  }
+
+  async function exportCollection(collection: LibraryCollection) {
+    playlistExportTarget = collection;
+    playlistExportFolder = null;
+    try {
+      const { sources } = await core.call('sources');
+      playlistExportFolder = sources[0]?.folder ?? null;
+    } catch {
+      // Without a source the user types the whole path.
+    }
+    playlistExportMounted = true;
+    playlistExportOpen = true;
+  }
+
+  async function readPlaylistAgain(collectionId: number) {
+    const mirror = await core.call('read_playlist_again', { collection_id: collectionId });
+    mergeCollectionSummary(mirror.collection);
+    if (activeCollectionId === collectionId) void pages.refresh();
+  }
+
   async function loadCollections() {
+    void refreshPlaylistChanges();
     try {
       const list = await core.call('collections');
       collections = list;
@@ -880,6 +939,17 @@
         }}
         onRenameCollection={renameCollection}
         onDeleteCollection={deleteCollection}
+        onImportPlaylist={() => {
+          playlistImportMounted = true;
+          playlistImportOpen = true;
+        }}
+        onReadPlaylistAgain={readPlaylistAgain}
+        onExportCollection={(collection) => void exportCollection(collection)}
+        {playlistChangeCount}
+        onReviewPlaylistChanges={() => {
+          playlistChangesMounted = true;
+          playlistChangesOpen = true;
+        }}
         smartViews={filters.views}
         {activeViewId}
         onSelectView={openView}
@@ -1111,7 +1181,39 @@
     scope={renameScope}
     scopeLabel={renameLabel}
     client={renameClient}
-    onrenamed={() => void pages.refresh()}
+    onrenamed={() => {
+      void pages.refresh();
+      void refreshPlaylistChanges();
+    }}
+  />
+{/if}
+
+{#if playlistImportMounted}
+  <PlaylistImportSheet
+    bind:open={playlistImportOpen}
+    client={playlistImportClient}
+    onimported={(mirror) => {
+      mergeCollectionSummary(mirror.collection);
+      space = 'Library';
+      selectCollection(mirror.collection.id);
+    }}
+  />
+{/if}
+
+{#if playlistExportMounted}
+  <PlaylistExportSheet
+    bind:open={playlistExportOpen}
+    collection={playlistExportTarget}
+    folder={playlistExportFolder}
+    client={playlistExportClient}
+  />
+{/if}
+
+{#if playlistChangesMounted}
+  <PlaylistChangesSheet
+    bind:open={playlistChangesOpen}
+    client={playlistChangesClient}
+    onapplied={() => void refreshPlaylistChanges()}
   />
 {/if}
 
@@ -1163,7 +1265,10 @@
     }}
     {historyClient}
     {undoRequest}
-    onundone={() => void pages.refresh()}
+    onundone={() => {
+      void pages.refresh();
+      void refreshPlaylistChanges();
+    }}
   />
 {/if}
 

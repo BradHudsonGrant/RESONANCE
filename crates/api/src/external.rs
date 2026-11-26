@@ -30,7 +30,7 @@ fn typed_path(raw: &str) -> Result<PathBuf, ApiError> {
             "Give the full path of the playlist file.",
         ));
     }
-    path::absolute(path).map_err(|error| ApiError::invalid_input(error))
+    path::absolute(path).map_err(ApiError::invalid_input)
 }
 
 fn kind_of(library: &StoredExternalLibrary) -> Result<ExternalLibraryKind, ApiError> {

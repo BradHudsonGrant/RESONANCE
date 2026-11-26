@@ -56,8 +56,11 @@
   const targetIds = $derived(selectedTracks.map((track) => track.id));
   const onlineTargets = $derived(selectedTracks.filter((track) => track.missing_since == null));
   const singleTrack = $derived(selectedTracks.length === 1 ? selectedTracks[0] : undefined);
+  // A collection that mirrors a playlist file changes only when the file does.
+  const editable = $derived(collections.filter((col) => !col.mirror));
   const canRemoveActive = $derived(
     activeCollection != null &&
+      !activeCollection.mirror &&
       selectedTracks.some((track) =>
         track.collections.some((col) => col.id === activeCollection.id),
       ),
@@ -361,9 +364,9 @@
 
     <div class="section-head">Collections</div>
 
-    {#if collections.length > 0}
+    {#if editable.length > 0}
       <div class="list">
-        {#each collections as col (col.id)}
+        {#each editable as col (col.id)}
           {@const checked = membershipState(col.id)}
           <button
             type="button"
