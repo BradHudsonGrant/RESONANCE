@@ -129,3 +129,7 @@ One change: `main.ts` warms `en-GB` number formatting in its own early task, `Ap
 ### Conclusion
 
 All five startup `toplevel` runs are under the 16 ms UI-thread budget (**11.2–12.5 ms**, median **11.6 ms**, down from **22.2–32.0 ms**). This closes [#55](https://github.com/BradHudsonGrant/RESONANCE/issues/55).
+
+## 26 November 2026, startup task at v0.5.0
+
+The v0.4.0 bench traced a 35.5 ms task while the desktop app started. The v0.5.0 bench, with the same trace of the first 5 s, records 11.4 ms, in line with the 11.2 to 12.5 ms above ([budgets-v0.5.0.md](budgets-v0.5.0.md)). No startup code was changed for it, and one trace does not show what made the v0.4.0 task long. The budget is met, which closes [#154](https://github.com/BradHudsonGrant/RESONANCE/issues/154). If a later bench reports a long startup task again, trace it then.

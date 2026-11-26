@@ -3761,7 +3761,7 @@ dependencies = [
 
 [[package]]
 name = "resonance-api"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "directories",
  "futures-util",
@@ -3783,7 +3783,7 @@ dependencies = [
 
 [[package]]
 name = "resonance-app"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "resonance-api",
@@ -3795,7 +3795,7 @@ dependencies = [
 
 [[package]]
 name = "resonance-cli"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "resonance-api",
@@ -3813,11 +3813,11 @@ dependencies = [
 
 [[package]]
 name = "resonance-core"
-version = "0.4.0"
+version = "0.5.0"
 
 [[package]]
 name = "resonance-db"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "blake3",
  "resonance-core",
@@ -3826,7 +3826,7 @@ dependencies = [
 
 [[package]]
 name = "resonance-engine"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "audio_thread_priority",
  "cpal",
@@ -3840,7 +3840,7 @@ dependencies = [
 
 [[package]]
 name = "resonance-fixtures"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "resonance-core",
  "resonance-db",
@@ -3852,7 +3852,7 @@ dependencies = [
 
 [[package]]
 name = "resonance-identify"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "apple-native-keyring-store",
  "blake3",
@@ -3867,14 +3867,14 @@ dependencies = [
 
 [[package]]
 name = "resonance-integrations"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "resonance-core",
 ]
 
 [[package]]
 name = "resonance-jobs"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "resonance-core",
  "resonance-db",
@@ -3883,7 +3883,7 @@ dependencies = [
 
 [[package]]
 name = "resonance-library"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "blake3",
  "dunce",
