@@ -7,6 +7,8 @@
     "allow-dispatch",
     "allow-pick-audio-file",
     "allow-pick-folder",
+    "allow-pick-playlist-file",
+    "allow-pick-playlist-save-path",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

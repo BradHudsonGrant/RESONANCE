@@ -4,6 +4,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "dispatch",
             "pick_audio_file",
             "pick_folder",
+            "pick_playlist_file",
+            "pick_playlist_save_path",
         ]));
     tauri_build::try_build(attributes).map_err(Into::into)
 }
