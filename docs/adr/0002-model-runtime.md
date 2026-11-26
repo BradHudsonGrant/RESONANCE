@@ -1,6 +1,6 @@
 # 0002: Model runtime
 
-Date: 12 November 2026. Status: accepted as the default.
+Date: 12 November 2026. Status: accepted, settled for the first analysis work on 26 November 2026.
 
 ## Context
 
@@ -28,6 +28,17 @@ In-process calls keep tensors on the GPU between steps and avoid a second proces
 - The old app ran Beat This! through the `beat-this` crate on the pure-Rust `rten` runtime, with no system dependencies. Its database holds per-beat grids for 431 tracks made that way, so that path works on this machine. Keep it in mind as the CPU path for beat tracking if ONNX Runtime's CPU provider turns out slower or heavier to ship. Measure both in M5.
 - One heavy GPU job runs at a time. It yields to anything the user is waiting on and backs off while Mix is live.
 - Accuracy is reported with numbers, on the real library and on public datasets, with the hardware recorded.
+
+## Settled on 26 November 2026
+
+- `ort` `=2.0.0-rc.15` (MIT OR Apache-2.0, released 19 October 2026) is still the newest release, so it is pinned with `=`. It wraps ONNX Runtime 1.31.
+- Its build script fetches a prebuilt ONNX Runtime and checks its SHA-256. `.cargo/config.toml` points `ORT_CACHE_DIR` at `target/ort-cache` so the download stays in the project. It is 89 MB on x86-64 Windows, with the CUDA and TensorRT providers, and 11 MB on x86-64 Linux. ONNX Runtime links statically; the GPU providers are DLLs that land beside the binary.
+- The fetch runs over rustls, which brings `webpki-roots` (CDLA-Permissive-2.0). Only the build script reaches it, so `deny.toml` allows that licence for that one crate. The app keeps the OS certificate store.
+- A session tries TensorRT, with its engine and timing caches in `<data folder>/models/trt-cache`, then CUDA, then the CPU, and keeps the first that opens the model. Only x86-64 Windows builds the GPU providers for now. Other targets run on the CPU.
+- The laptop has no CUDA 13, cuDNN 9 or TensorRT libraries yet, so both GPU providers fail to load and sessions run on the CPU. Those libraries are several GB and are fetched when the first model that needs the GPU lands.
+- One job holds the GPU at a time, through `JobExecution::gpu_permit` in `crates/jobs`.
+- Weights go to `<data folder>/models/<id>/<version>/model.onnx`. A download is written under a temporary name and only takes the real one once its size and SHA-256 match the registry. A model whose licence rules out commercial use is refused unless non-commercial models are turned on. That switch goes into Settings with the first such model.
+- The app does not link `crates/analysis` yet. When it does, the installer has to carry the provider DLLs and ONNX Runtime's notices.
 
 ## What would change it
 

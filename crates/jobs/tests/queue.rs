@@ -416,3 +416,47 @@ fn a_paused_job_stays_paused_after_a_restart() {
         job_status(runner, job.id) == Some(JobStatus::Completed)
     });
 }
+
+#[test]
+fn one_job_holds_the_gpu_at_a_time() {
+    let db = Arc::new(Mutex::new(Database::open_in_memory().expect("db opens")));
+    let holders = Arc::new(AtomicUsize::new(0));
+    let most_holders = Arc::new(AtomicUsize::new(0));
+    let background_holds = Arc::new(Barrier::new(2));
+    let (holders_worker, most_worker, holds_worker) = (
+        Arc::clone(&holders),
+        Arc::clone(&most_holders),
+        Arc::clone(&background_holds),
+    );
+
+    let runner = JobRunner::start(Arc::clone(&db), move |exec| {
+        let Ok(_gpu) = exec.gpu_permit() else {
+            return JobOutcome::Interrupted;
+        };
+        let now = holders_worker.fetch_add(1, Ordering::SeqCst) + 1;
+        most_worker.fetch_max(now, Ordering::SeqCst);
+        if exec.job().tier == JobTier::Heavy {
+            holds_worker.wait();
+        }
+        thread::sleep(Duration::from_millis(150));
+        holders_worker.fetch_sub(1, Ordering::SeqCst);
+        JobOutcome::Completed {
+            done_items: 1,
+            total_items: Some(1),
+        }
+    })
+    .expect("runner starts");
+
+    let heavy = runner
+        .enqueue(&steps_job("Beat grids", JobTier::Heavy))
+        .expect("enqueues");
+    background_holds.wait();
+    let on_demand = runner
+        .enqueue(&steps_job("Analyse this track", JobTier::OnDemand))
+        .expect("enqueues");
+    wait_for(&runner, "both jobs", |runner| {
+        job_status(runner, heavy.id) == Some(JobStatus::Completed)
+            && job_status(runner, on_demand.id) == Some(JobStatus::Completed)
+    });
+    assert_eq!(most_holders.load(Ordering::SeqCst), 1);
+}

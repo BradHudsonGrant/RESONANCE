@@ -6,6 +6,7 @@ members = [
     "crates/library",
     "crates/engine",
     "crates/identify",
+    "crates/analysis",
     "crates/jobs",
     "crates/integrations",
     "crates/api",
@@ -42,6 +43,9 @@ getrandom = "0.4.3"
 keyring-core = "1.0.1"
 lofty = "0.25.5"
 notify = "8.2.2"
+# Still a release candidate, so pinned exactly (ADR 0002). Its build script fetches a prebuilt ONNX
+# Runtime into the cache folder `.cargo/config.toml` names.
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-rustls"] }
 rubato = "0.16.2"
 rusqlite = { version = "0.42.0", features = ["bundled", "fallible_uint"] }
 rustfft = "6.4.1"

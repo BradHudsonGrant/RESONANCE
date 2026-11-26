@@ -1,3 +1,4 @@
+pub mod analysis;
 pub mod artwork;
 pub mod collections;
 pub mod columns;
