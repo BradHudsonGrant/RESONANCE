@@ -12,6 +12,7 @@ resonance-core.workspace = true
 resonance-db.workspace = true
 resonance-engine.workspace = true
 resonance-identify.workspace = true
+resonance-integrations.workspace = true
 resonance-jobs.workspace = true
 resonance-library.workspace = true
 directories.workspace = true

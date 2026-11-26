@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use resonance_core::collections::normalise_collection_name;
 use rusqlite::{Connection, OptionalExtension, Row, params, params_from_iter};
 
+use crate::external::is_mirror;
 use crate::{Database, DbError, TrackRow, search};
 
 /// A manual collection as the sidebar lists it.
@@ -12,6 +13,8 @@ pub struct CollectionSummary {
     pub name: String,
     pub position: i64,
     pub track_count: u32,
+    /// The other app's library this collection mirrors, which makes it read-only.
+    pub external_library_id: Option<i64>,
 }
 
 /// A collection a track belongs to, as shown on track rows and in the inspector.
@@ -35,7 +38,8 @@ const SELECT_COLLECTION: &str = "SELECT
                   WHERE asset.track_id = ci.track_id
                     AND asset.included = 1
               )
-        ) AS track_count
+        ) AS track_count,
+        c.external_library_id
     FROM collection c";
 
 fn collection_exists(connection: &Connection, collection_id: i64) -> Result<bool, DbError> {
@@ -55,6 +59,7 @@ fn collection_summary(row: &Row<'_>) -> rusqlite::Result<CollectionSummary> {
         name: row.get(1)?,
         position: row.get(2)?,
         track_count: row.get(3)?,
+        external_library_id: row.get(4)?,
     })
 }
 
@@ -111,6 +116,7 @@ impl Database {
             name: cleaned,
             position,
             track_count: 0,
+            external_library_id: None,
         })
     }
 
@@ -124,6 +130,9 @@ impl Database {
         let tx = self.connection.transaction()?;
         if !collection_exists(&tx, collection_id)? {
             return Ok(None);
+        }
+        if is_mirror(&tx, collection_id)? {
+            return Err(DbError::MirrorCollection);
         }
         let duplicate: Option<i64> = tx
             .query_row(
@@ -143,11 +152,23 @@ impl Database {
         self.collection(collection_id)
     }
 
-    /// Deletes a manual collection without modifying tracks or files on disk.
+    /// Deletes a collection without modifying tracks or files on disk. Deleting a mirror stops
+    /// following its playlist, and the playlist file stays as it is.
     pub fn delete_collection(&mut self, collection_id: i64) -> Result<bool, DbError> {
-        let changed = self
-            .connection
-            .execute("DELETE FROM collection WHERE id = ?1", [collection_id])?;
+        let tx = self.connection.transaction()?;
+        let library: Option<i64> = tx
+            .query_row(
+                "SELECT external_library_id FROM collection WHERE id = ?1",
+                [collection_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        let changed = tx.execute("DELETE FROM collection WHERE id = ?1", [collection_id])?;
+        if let Some(library) = library {
+            tx.execute("DELETE FROM external_library WHERE id = ?1", [library])?;
+        }
+        tx.commit()?;
         Ok(changed > 0)
     }
 
@@ -160,6 +181,9 @@ impl Database {
         let tx = self.connection.transaction()?;
         if !collection_exists(&tx, collection_id)? {
             return Ok(None);
+        }
+        if is_mirror(&tx, collection_id)? {
+            return Err(DbError::MirrorCollection);
         }
 
         if !track_ids.is_empty() {
@@ -196,6 +220,9 @@ impl Database {
         let tx = self.connection.transaction()?;
         if !collection_exists(&tx, collection_id)? {
             return Ok(None);
+        }
+        if is_mirror(&tx, collection_id)? {
+            return Err(DbError::MirrorCollection);
         }
 
         if !track_ids.is_empty() {

@@ -5,6 +5,7 @@ use resonance_core::replace::CueKind;
 use rusqlite::{OptionalExtension, Transaction, params};
 
 use crate::copies::delete_track_without_files;
+use crate::external::{asset_full_path, queue_path_change};
 use crate::identity::record_identity_in;
 use crate::operations::set_step_state;
 use crate::{Database, DbError, FileStamp, SourceId};
@@ -169,6 +170,12 @@ impl Database {
         if scanned_track != replacement.track_id {
             delete_track_without_files(&tx, scanned_track)?;
         }
+        if let (Some(old_path), Some(new_path)) = (
+            asset_full_path(&tx, replacement.old_asset_id)?,
+            asset_full_path(&tx, asset_id)?,
+        ) {
+            queue_path_change(&tx, replacement.track_id, &old_path, &new_path)?;
+        }
         for cue in replacement.cue_ids {
             tx.execute(
                 "UPDATE cue SET carried_over_check = 1 WHERE id = ?1 AND track_id = ?2",
@@ -209,6 +216,12 @@ impl Database {
                 )
                 .optional()?;
             if let Some(asset_id) = placed {
+                if let (Some(placed_path), Some(old_path)) = (
+                    asset_full_path(&tx, asset_id)?,
+                    asset_full_path(&tx, detachment.old_asset_id)?,
+                ) {
+                    queue_path_change(&tx, detachment.track_id, &placed_path, &old_path)?;
+                }
                 tx.execute("DELETE FROM asset_fts WHERE rowid = ?1", [asset_id])?;
                 tx.execute("DELETE FROM asset WHERE id = ?1", [asset_id])?;
             }

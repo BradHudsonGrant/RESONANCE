@@ -48,6 +48,13 @@
     onCreateCollection?: (name: string) => Promise<void> | void;
     onRenameCollection?: (collectionId: number, name: string) => Promise<void> | void;
     onDeleteCollection?: (collectionId: number) => Promise<void> | void;
+    /** Opens the sheet that reads an M3U or M3U8 file into a mirror collection. */
+    onImportPlaylist?: () => void;
+    onReadPlaylistAgain?: (collectionId: number) => Promise<void> | void;
+    onExportCollection?: (collection: LibraryCollection) => void;
+    /** Path changes other playlists are waiting for, shown under Playlists when non-zero. */
+    playlistChangeCount?: number;
+    onReviewPlaylistChanges?: () => void;
     /** Saved filter sets, listed under the collections. */
     smartViews?: SmartView[];
     activeViewId?: number | null;
@@ -69,6 +76,11 @@
     onCreateCollection,
     onRenameCollection,
     onDeleteCollection,
+    onImportPlaylist,
+    onReadPlaylistAgain,
+    onExportCollection,
+    playlistChangeCount = 0,
+    onReviewPlaylistChanges,
     smartViews = [],
     activeViewId = null,
     onSelectView,
@@ -82,7 +94,7 @@
   let createError = $state<string | null>(null);
   let createInput = $state<HTMLInputElement | undefined>();
 
-  type RowKind = 'collection' | 'view';
+  type RowKind = 'collection' | 'playlist' | 'view';
   interface RowTarget {
     kind: RowKind;
     id: number;
@@ -106,6 +118,8 @@
   const activeCollection = $derived(
     collections.find((col) => col.id === activeCollectionId) ?? null,
   );
+  const manualCollections = $derived(collections.filter((col) => !col.mirror));
+  const playlists = $derived(collections.filter((col) => col.mirror));
 
   // Only the first space still to come takes focus, so Tab does not stop on every placeholder.
   const firstToCome = spaces.find((space) => space.arrives)?.name;
@@ -260,6 +274,14 @@
     }
   }
 
+  /** Closes the row menu, puts focus back on its button, then runs `action`. */
+  function fromMenu(action: () => unknown) {
+    const anchor = menuAnchor;
+    menuTarget = null;
+    if (anchor?.isConnected) anchor.focus();
+    void action();
+  }
+
   function askDelete(target: RowTarget) {
     const anchor = menuAnchor;
     menuTarget = null;
@@ -267,6 +289,14 @@
     deleteTarget = target;
     deleteOpen = true;
   }
+
+  const deleteWords = $derived(
+    deleteTarget?.kind === 'view'
+      ? { title: 'Delete smart view', action: 'Delete smart view' }
+      : deleteTarget?.kind === 'playlist'
+        ? { title: 'Stop following playlist', action: 'Stop following' }
+        : { title: 'Delete collection', action: 'Delete collection' },
+  );
 
   async function confirmDelete() {
     const remove = deleteTarget?.kind === 'view' ? onDeleteView : onDeleteCollection;
@@ -281,6 +311,46 @@
     }
   }
 </script>
+
+{#snippet collectionRow(col: LibraryCollection, kind: RowKind)}
+  <div
+    class={[
+      'collection-row',
+      { active: activeSpace === 'Library' && col.id === activeCollectionId },
+    ]}
+  >
+    <button
+      type="button"
+      class="collection-btn"
+      aria-current={activeSpace === 'Library' && col.id === activeCollectionId ? 'true' : undefined}
+      onclick={() => {
+        onSelectSpace('Library');
+        onSelectCollection?.(col.id);
+      }}
+    >
+      <span class="label">{col.name}</span>
+      <span class="count numeric">{col.track_count.toLocaleString('en-GB')}</span>
+    </button>
+    <button
+      type="button"
+      class="collection-more"
+      aria-label="Actions for {col.name}"
+      aria-haspopup="menu"
+      aria-expanded={menuTarget?.kind === kind && menuTarget.id === col.id}
+      onclick={(event) => {
+        event.stopPropagation();
+        if (menuTarget?.kind === kind && menuTarget.id === col.id) {
+          menuTarget = null;
+        } else {
+          menuAnchor = event.currentTarget;
+          menuTarget = { kind, id: col.id, name: col.name };
+        }
+      }}
+    >
+      <Icon name="more" size="xs" />
+    </button>
+  </div>
+{/snippet}
 
 {#snippet spaceButton(space: Space, index: number)}
   {@const tooltipText = space.arrives
@@ -382,9 +452,9 @@
               {/if}
             </form>
           {/if}
-          {#if collections.length > 0}
+          {#if manualCollections.length > 0}
             <div class="collection-list" role="list">
-              {#each collections as col (col.id)}
+              {#each manualCollections as col (col.id)}
                 <div class="collection-entry" role="listitem">
                   {#if editing?.kind === 'collection' && editing.id === col.id}
                     <form class="collection-form" onsubmit={submitRename}>
@@ -411,52 +481,46 @@
                       {/if}
                     </form>
                   {:else}
-                    <div
-                      class={[
-                        'collection-row',
-                        { active: activeSpace === 'Library' && col.id === activeCollectionId },
-                      ]}
-                    >
-                      <button
-                        type="button"
-                        class="collection-btn"
-                        aria-current={activeSpace === 'Library' && col.id === activeCollectionId
-                          ? 'true'
-                          : undefined}
-                        onclick={() => {
-                          onSelectSpace('Library');
-                          onSelectCollection?.(col.id);
-                        }}
-                      >
-                        <span class="label">{col.name}</span>
-                        <span class="count numeric">{col.track_count.toLocaleString('en-GB')}</span>
-                      </button>
-                      <button
-                        type="button"
-                        class="collection-more"
-                        aria-label="Actions for {col.name}"
-                        aria-haspopup="menu"
-                        aria-expanded={menuTarget?.kind === 'collection' &&
-                          menuTarget.id === col.id}
-                        onclick={(event) => {
-                          event.stopPropagation();
-                          if (menuTarget?.kind === 'collection' && menuTarget.id === col.id) {
-                            menuTarget = null;
-                          } else {
-                            menuAnchor = event.currentTarget;
-                            menuTarget = { kind: 'collection', id: col.id, name: col.name };
-                          }
-                        }}
-                      >
-                        <Icon name="more" size="xs" />
-                      </button>
-                    </div>
+                    {@render collectionRow(col, 'collection')}
                   {/if}
                 </div>
               {/each}
             </div>
           {:else if !creating}
             <p class="waiting">No collections yet.</p>
+          {/if}
+        </div>
+        <div class="collections">
+          <div class="collections-head">
+            <Icon name="playlist" size="sm" />
+            <span class="label">Playlists</span>
+            <Tooltip text="Import playlist" side="right">
+              <Button
+                variant="icon"
+                size="sm"
+                aria-label="Import playlist"
+                onclick={() => onImportPlaylist?.()}
+              >
+                <Icon name="plus" size="xs" />
+              </Button>
+            </Tooltip>
+          </div>
+          {#if playlistChangeCount > 0}
+            <button type="button" class="changes-btn" onclick={() => onReviewPlaylistChanges?.()}>
+              <span class="label">Update playlists</span>
+              <span class="count numeric">{playlistChangeCount.toLocaleString('en-GB')}</span>
+            </button>
+          {/if}
+          {#if playlists.length > 0}
+            <div class="collection-list" role="list">
+              {#each playlists as col (col.id)}
+                <div class="collection-entry" role="listitem">
+                  {@render collectionRow(col, 'playlist')}
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <p class="waiting">No playlists yet.</p>
           {/if}
         </div>
         {#if smartViews.length > 0}
@@ -551,27 +615,66 @@
     bind:this={rowMenuEl}
     class="row-menu"
     role="menu"
-    aria-label={target.kind === 'view' ? 'Smart view actions' : 'Collection actions'}
+    aria-label={target.kind === 'view'
+      ? 'Smart view actions'
+      : target.kind === 'playlist'
+        ? 'Playlist actions'
+        : 'Collection actions'}
     popover="manual"
     style:top="{rowMenuPos.top}px"
     style:left="{rowMenuPos.left}px"
   >
-    <button type="button" class="row-menu-item" role="menuitem" onclick={() => startRename(target)}>
-      Rename
-    </button>
+    {#if target.kind === 'playlist'}
+      <button
+        type="button"
+        class="row-menu-item"
+        role="menuitem"
+        onclick={() => {
+          const id = target.id;
+          fromMenu(() => onReadPlaylistAgain?.(id));
+        }}
+      >
+        Read again
+      </button>
+    {:else}
+      <button
+        type="button"
+        class="row-menu-item"
+        role="menuitem"
+        onclick={() => startRename(target)}
+      >
+        Rename
+      </button>
+    {/if}
+    {#if target.kind !== 'view'}
+      {@const exported = collections.find((col) => col.id === target.id)}
+      {#if exported}
+        <button
+          type="button"
+          class="row-menu-item"
+          role="menuitem"
+          onclick={() => {
+            const chosen = exported;
+            fromMenu(() => onExportCollection?.(chosen));
+          }}
+        >
+          Export to M3U8
+        </button>
+      {/if}
+    {/if}
     <button type="button" class="row-menu-item" role="menuitem" onclick={() => askDelete(target)}>
-      Delete
+      {target.kind === 'playlist' ? 'Stop following' : 'Delete'}
     </button>
   </div>
 {/if}
 
-<Sheet
-  bind:open={deleteOpen}
-  title={deleteTarget?.kind === 'view' ? 'Delete smart view' : 'Delete collection'}
->
+<Sheet bind:open={deleteOpen} title={deleteWords.title}>
   <p class="confirm-copy">
     {#if deleteTarget?.kind === 'view'}
       Delete "{deleteTarget.name}"? Only the saved filters go. Every track stays in your library.
+    {:else if deleteTarget?.kind === 'playlist'}
+      Stop following "{deleteTarget.name}"? The collection goes. The playlist file and your tracks
+      stay as they are.
     {:else}
       Delete "{deleteTarget?.name}"? Tracks and files on disk will stay in your library.
     {/if}
@@ -579,7 +682,7 @@
   {#snippet actions()}
     <Button onclick={() => (deleteOpen = false)} disabled={busy}>Cancel</Button>
     <Button variant="danger" onclick={confirmDelete} disabled={busy}>
-      {deleteTarget?.kind === 'view' ? 'Delete smart view' : 'Delete collection'}
+      {deleteWords.action}
     </Button>
   {/snippet}
 </Sheet>
@@ -769,6 +872,42 @@
     font: inherit;
     text-align: left;
     cursor: pointer;
+  }
+
+  .changes-btn {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+    height: var(--sidebar-collection-height);
+    margin-left: var(--sidebar-collection-indent);
+    margin-right: var(--space-4);
+    padding: 0 var(--space-2-5);
+    border: var(--border-width) solid var(--color-border-control);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    text-align: left;
+    cursor: pointer;
+    transition: background-color var(--duration-fast) var(--ease-out);
+  }
+
+  .changes-btn:hover {
+    background: var(--color-surface-2);
+  }
+
+  .changes-btn .label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .changes-btn .count {
+    color: var(--color-text-2);
   }
 
   .collection-btn .count {

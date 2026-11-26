@@ -20,7 +20,7 @@ Activity and Settings sit here, as `concept-dark.png` shows, and not at the foot
 
 - The two-line mono label MUSIC INTELLIGENCE / FOR DJS (11 px, Text 2, 15 px line height) and a quiet collapse button (`[`).
 - The five spaces as 232 by 38 buttons with 8 px corners, a 16 px icon and a 14 px label. The active space sits on Raised with a 1 px border and the 2 px accent mark at its left. Library shows the track count in 12 px mono. Inactive spaces are clear, in Text 2, and turn Text on hover.
-- Under Library, the collections: a Collections row with an add button, then one 27 px row per collection with its count in 12 px mono and Muted. Live in M2.
+- Under Library, the collections: a Collections row with an add button, then one 27 px row per collection with its count in 12 px mono and Muted. Live in M2. Below them, Playlists: the same rows for collections that mirror an M3U or M3U8 file, an import button, and an Update playlists button with a count while moved files wait to be written into them. Live in M4.
 - An Active set block under the spaces: a divider, the ACTIVE SET label and the current set with a 6 px status dot in Text 2. It arrives with sets in M10.
 - The dot wave at the foot, full width and 78 px tall, fading upward into the surface.
 

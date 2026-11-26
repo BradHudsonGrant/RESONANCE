@@ -51,6 +51,30 @@ pub enum Request {
         #[ts(type = "Array<number>")]
         track_ids: Vec<i64>,
     },
+    /// Reads an M3U or M3U8 playlist into a read-only collection that mirrors it.
+    ImportPlaylist {
+        path: String,
+    },
+    /// Reads a mirrored playlist again, so its collection follows the file.
+    ReadPlaylistAgain {
+        #[ts(type = "number")]
+        collection_id: i64,
+    },
+    /// Playlist files inside the library's sources, for the import sheet.
+    FindPlaylists,
+    /// Writes a collection's tracks to a new M3U8 playlist file.
+    ExportCollection {
+        #[ts(type = "number")]
+        collection_id: i64,
+        path: String,
+    },
+    /// The dry run of every path change other libraries are waiting for.
+    ExternalChanges,
+    /// Writes one library's waiting changes, after backing up its files.
+    ApplyExternalChanges {
+        #[ts(type = "number")]
+        library_id: i64,
+    },
     /// Distinct labels and BPM/year bounds across the library, for filter controls.
     LibraryFacets,
     /// Every column the filter builder offers, with its conditions.
@@ -550,6 +574,12 @@ pub enum Response {
     DeleteCollection(Vec<LibraryCollection>),
     AddTracksToCollection(LibraryCollection),
     RemoveTracksFromCollection(LibraryCollection),
+    ImportPlaylist(PlaylistMirror),
+    ReadPlaylistAgain(PlaylistMirror),
+    FindPlaylists(Vec<FoundPlaylist>),
+    ExportCollection(ExportedPlaylist),
+    ExternalChanges(Vec<ExternalChangePreview>),
+    ApplyExternalChanges(AppliedExternalChanges),
     LibraryFacets(LibraryFacets),
     FilterFields(Vec<FilterField>),
     FilterSummaries(Vec<FilterSummary>),
@@ -1810,6 +1840,70 @@ pub struct LibraryCollection {
     #[ts(type = "number")]
     pub position: i64,
     pub track_count: u32,
+    /// Follows a playlist file, so only that file changes which tracks it holds.
+    pub mirror: bool,
+}
+
+/// What reading a playlist into its mirror collection found.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct PlaylistMirror {
+    pub collection: LibraryCollection,
+    pub matched: u32,
+    /// Entries naming files that are not in the library.
+    pub not_in_library: u32,
+    /// Entries naming a stream or web address rather than a file.
+    pub skipped: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct FoundPlaylist {
+    pub path: String,
+    pub name: String,
+    pub imported: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct ExportedPlaylist {
+    pub path: String,
+    pub tracks: u32,
+}
+
+/// One line of a playlist file before and after a change. `line` counts from 1.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct ExternalLineEdit {
+    pub line: u32,
+    pub before: String,
+    pub after: String,
+}
+
+/// What applying one library's waiting changes would write.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct ExternalChangePreview {
+    #[ts(type = "number")]
+    pub library_id: i64,
+    pub name: String,
+    pub location: String,
+    /// Files whose path changed since the library last named them.
+    pub changes: u32,
+    pub edits: Vec<ExternalLineEdit>,
+    /// Changed files the library no longer names, which applying drops.
+    pub not_found: u32,
+    /// Why the dry run could not read the library, if it could not.
+    pub problem: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct AppliedExternalChanges {
+    #[ts(type = "number")]
+    pub library_id: i64,
+    pub edits: u32,
+    pub backups: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]

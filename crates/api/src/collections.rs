@@ -6,20 +6,21 @@ use crate::Api;
 use crate::command::LibraryCollection;
 use crate::error::ApiError;
 
-fn library_collection(summary: CollectionSummary) -> LibraryCollection {
+pub(crate) fn library_collection(summary: CollectionSummary) -> LibraryCollection {
     LibraryCollection {
         id: summary.id,
         name: summary.name,
         position: summary.position,
         track_count: summary.track_count,
+        mirror: summary.external_library_id.is_some(),
     }
 }
 
 fn map_collection_db_error(error: DbError) -> ApiError {
     match error {
-        DbError::InvalidCollectionName(_) | DbError::DuplicateCollectionName { .. } => {
-            ApiError::invalid_input(error)
-        }
+        DbError::InvalidCollectionName(_)
+        | DbError::DuplicateCollectionName { .. }
+        | DbError::MirrorCollection => ApiError::invalid_input(error),
         other => ApiError::library_unreadable(other),
     }
 }
@@ -102,7 +103,7 @@ impl Api {
             .unwrap_or_else(PoisonError::into_inner);
         let updated = library
             .add_tracks_to_collection(collection_id, track_ids)
-            .map_err(ApiError::library_unreadable)?
+            .map_err(map_collection_db_error)?
             .ok_or_else(|| {
                 ApiError::invalid_input(format!("No collection exists with id {collection_id}."))
             })?;
@@ -121,7 +122,7 @@ impl Api {
             .unwrap_or_else(PoisonError::into_inner);
         let updated = library
             .remove_tracks_from_collection(collection_id, track_ids)
-            .map_err(ApiError::library_unreadable)?
+            .map_err(map_collection_db_error)?
             .ok_or_else(|| {
                 ApiError::invalid_input(format!("No collection exists with id {collection_id}."))
             })?;

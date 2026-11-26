@@ -4,6 +4,7 @@ use resonance_core::library::TagField;
 use resonance_core::staging::effective_tags;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
+use crate::external::{asset_full_path, queue_path_change};
 use crate::search::sync_asset_metadata_in_tx;
 use crate::tags::{file_tags_of_asset, primary_asset, user_tags_of_asset};
 use crate::{Database, DbError};
@@ -66,10 +67,19 @@ fn rename_target(connection: &Connection, asset_id: i64) -> Result<Option<Rename
 }
 
 fn set_asset_path(tx: &Transaction<'_>, asset_id: i64, path: &str) -> Result<(), DbError> {
+    let before = asset_full_path(tx, asset_id)?;
     tx.execute(
         "UPDATE asset SET path = ?2 WHERE id = ?1",
         params![asset_id, path],
     )?;
+    if let (Some(before), Some(after)) = (before, asset_full_path(tx, asset_id)?) {
+        let track_id: i64 = tx.query_row(
+            "SELECT track_id FROM asset WHERE id = ?1",
+            [asset_id],
+            |row| row.get(0),
+        )?;
+        queue_path_change(tx, track_id, &before, &after)?;
+    }
     let tags = file_tags_of_asset(tx, asset_id)?;
     sync_asset_metadata_in_tx(tx, asset_id, path, &tags, true)
 }

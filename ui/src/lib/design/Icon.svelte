@@ -8,6 +8,7 @@
     | 'mix'
     | 'replay'
     | 'collections'
+    | 'playlist'
     | 'activity'
     | 'settings'
     | 'audio'
@@ -56,6 +57,7 @@
   import Disc3 from '@lucide/svelte/icons/disc-3';
   import Ellipsis from '@lucide/svelte/icons/ellipsis';
   import ExternalLink from '@lucide/svelte/icons/external-link';
+  import FileMusic from '@lucide/svelte/icons/file-music';
   import FolderOpen from '@lucide/svelte/icons/folder-open';
   import Headphones from '@lucide/svelte/icons/headphones';
   import Image from '@lucide/svelte/icons/image';
@@ -97,6 +99,7 @@
     mix: Disc3,
     replay: ChartLine,
     collections: FolderOpen,
+    playlist: FileMusic,
     activity: Activity,
     settings: Settings,
     audio: AudioLines,

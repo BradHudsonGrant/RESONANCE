@@ -711,7 +711,7 @@
   }
 
   export function removeSelectionFromCollection() {
-    if (activeCollection) {
+    if (activeCollection && !activeCollection.mirror) {
       void removeTracksFromCollection(activeCollection.id, Array.from(checkedIds));
     }
   }
@@ -915,7 +915,11 @@
           label: 'Add to collection',
         });
       }
-    } else if ((event.key === 'Delete' || event.key === 'Backspace') && activeCollection != null) {
+    } else if (
+      (event.key === 'Delete' || event.key === 'Backspace') &&
+      activeCollection != null &&
+      !activeCollection.mirror
+    ) {
       const targets = targetTracksForAction();
       if (targets.length > 0) {
         event.preventDefault();

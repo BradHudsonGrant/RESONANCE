@@ -87,7 +87,7 @@ The tables that matter:
 - `cue` and `loop`, stored in track time.
 - `collection`, `collection_item`, `smart_collection`, `set`, `set_item` (with play window and transition).
 - `job` for the queue. `operation` for the journal: steps, inverse steps, state ([ADR 0019](adr/0019-writing-tags-into-files.md)). `operation_rename` holds each file a rename moved ([ADR 0020](adr/0020-renaming-files-from-templates.md)). `operation_step` holds the plan of an operation made of file steps, and unfinished operations are finished or rolled back when the library opens ([ADR 0027](adr/0027-operation-steps-and-recovery.md)). `cue` holds cues in track time, which each file maps onto its samples through `offset_samples` and `tempo_ratio`, so a replaced file keeps them ([ADR 0028](adr/0028-replace-alignment-and-ffmpeg.md)).
-- `external_library` and `pending_external_change`.
+- `external_library` for other DJ apps' libraries, each mirrored by a read-only collection, and `pending_external_change` for the paths a rename or replace moved that a library still names ([ADR 0029](adr/0029-external-library-adapters-and-m3u.md)).
 - `session`, `session_event` (the control log) and `transition_score`.
 
 Cues and grids are stored against track time. An asset maps to track time through its offset and ratio, and that mapping function lives in `core`. This is what lets Replace keep cues.
