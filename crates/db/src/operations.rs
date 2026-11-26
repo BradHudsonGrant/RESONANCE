@@ -102,6 +102,23 @@ pub(crate) fn set_step_state(
     Ok(())
 }
 
+/// Moves the operation to `state`, stamping when it was applied or undone.
+pub(crate) fn set_operation_state(
+    connection: &rusqlite::Connection,
+    id: i64,
+    state: OperationState,
+    summary: &str,
+) -> Result<(), DbError> {
+    connection.execute(
+        "UPDATE operation SET state = ?2, summary = ?3,
+             applied_ns = CASE WHEN ?2 = 'applied' THEN ?4 ELSE applied_ns END,
+             undone_ns = CASE WHEN ?2 = 'undone' THEN ?4 ELSE undone_ns END
+         WHERE id = ?1",
+        params![id, state.name(), summary, now_unix_ns()],
+    )?;
+    Ok(())
+}
+
 impl Database {
     /// Journals an operation before it touches any file. Returns its id.
     pub fn begin_operation(
@@ -141,15 +158,7 @@ impl Database {
         state: OperationState,
         summary: &str,
     ) -> Result<(), DbError> {
-        let now = now_unix_ns();
-        self.connection.execute(
-            "UPDATE operation SET state = ?2, summary = ?3,
-                 applied_ns = CASE WHEN ?2 = 'applied' THEN ?4 ELSE applied_ns END,
-                 undone_ns = CASE WHEN ?2 = 'undone' THEN ?4 ELSE undone_ns END
-             WHERE id = ?1",
-            params![id, state.name(), summary, now],
-        )?;
-        Ok(())
+        set_operation_state(&self.connection, id, state, summary)
     }
 
     /// Journals an operation and its whole plan, each step with what puts it back, in one

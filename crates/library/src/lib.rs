@@ -6,6 +6,7 @@ pub mod file_tags;
 pub mod folders;
 pub mod identity;
 pub mod journal;
+pub mod playlist_update;
 pub mod quality;
 pub mod relink;
 pub mod rename;

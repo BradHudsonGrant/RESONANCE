@@ -1474,7 +1474,7 @@ test('a batch of 50 mixed files goes from untagged to tagged in Prep using the k
   }
 });
 
-test('an M3U8 playlist mirrors as a collection, follows a replace through a backed-up update and exports', async ({
+test('an M3U8 playlist mirrors as a collection, follows a replace through a backed-up update, undoes it and exports', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1586, height: 992 });
@@ -1603,6 +1603,26 @@ test('an M3U8 playlist mirrors as a collection, follows a replace through a back
     const saved = readdirSync(backups).filter((name) => name.endsWith('-Friday.m3u8'));
     expect(saved).toHaveLength(1);
     expect(readFileSync(join(backups, saved[0] ?? ''), 'utf8')).toBe(original);
+    await changesSheet.getByRole('button', { name: 'Close' }).click();
+    await expect(update).toBeHidden();
+
+    await page
+      .locator('header')
+      .getByRole('button', { name: /^Activity/ })
+      .click();
+    const activity = page.getByRole('dialog', { name: 'Activity' });
+    const history = activity.getByRole('list', { name: 'Changes to files' });
+    await history.getByRole('button', { name: 'Undo Updated 1 playlist' }).click();
+    await expect(
+      history.getByRole('listitem').filter({ hasText: 'Updated 1 playlist' }).first(),
+    ).toContainText('Undone');
+    expect(readFileSync(playlist, 'utf8')).toBe(original);
+    await activity.getByRole('button', { name: 'Done' }).click();
+    await expect(update).toContainText('1');
+    await update.click();
+    await changesSheet.getByRole('button', { name: 'Update Friday' }).click();
+    await expect(changesSheet.getByRole('status')).toContainText('Updated Friday');
+    expect(readFileSync(playlist, 'utf8')).toBe(updated);
     await changesSheet.getByRole('button', { name: 'Close' }).click();
     await expect(update).toBeHidden();
 

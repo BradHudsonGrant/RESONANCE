@@ -2,9 +2,11 @@
 //! waiting to be written into them.
 
 use resonance_core::collections::normalise_collection_name;
+use resonance_core::journal::OperationState;
 use resonance_core::playlist::{PlaylistTrack, normalise_path, path_inside, same_path};
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 
+use crate::operations::set_operation_state;
 use crate::{CollectionSummary, Database, DbError, search};
 
 /// A library the user set up, with the collection that mirrors it.
@@ -38,6 +40,15 @@ pub struct PendingExternalChange {
     pub new_path: String,
     pub title: String,
     pub duration_s: Option<u32>,
+}
+
+/// A change a playlist update wrote and cleared, as undo queues it again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClearedExternalChange {
+    pub library_id: i64,
+    pub track_id: i64,
+    pub old_path: String,
+    pub new_path: String,
 }
 
 fn stored_library(row: &Row<'_>) -> rusqlite::Result<StoredExternalLibrary> {
@@ -387,6 +398,83 @@ impl Database {
         for id in ids {
             tx.execute("DELETE FROM pending_external_change WHERE id = ?1", [id])?;
         }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Drops the changes a playlist update wrote and records the update applied, in one
+    /// transaction.
+    pub fn finish_playlist_update(
+        &mut self,
+        operation_id: i64,
+        change_ids: &[i64],
+        summary: &str,
+    ) -> Result<(), DbError> {
+        let tx = self.connection.transaction()?;
+        for id in change_ids {
+            tx.execute("DELETE FROM pending_external_change WHERE id = ?1", [id])?;
+        }
+        set_operation_state(&tx, operation_id, OperationState::Applied, summary)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Queues again the changes a playlist update cleared, once its file holds the old paths
+    /// again, and records the update undone, in one transaction. A track that moved on since
+    /// keeps its newer path, now from the path the playlist names again. A library no longer
+    /// followed is skipped.
+    pub fn undo_playlist_update(
+        &mut self,
+        operation_id: i64,
+        changes: &[ClearedExternalChange],
+        summary: &str,
+    ) -> Result<(), DbError> {
+        let tx = self.connection.transaction()?;
+        let queued_ns = search::now_unix_ns();
+        for change in changes {
+            let followed: bool = tx.query_row(
+                "SELECT EXISTS (SELECT 1 FROM external_library WHERE id = ?1)",
+                [change.library_id],
+                |row| row.get(0),
+            )?;
+            if !followed {
+                continue;
+            }
+            let waiting: Option<(i64, String)> = tx
+                .query_row(
+                    "SELECT id, new_path FROM pending_external_change
+                     WHERE external_library_id = ?1 AND track_id = ?2",
+                    params![change.library_id, change.track_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+            match waiting {
+                Some((id, newer)) if same_path(&change.old_path, &newer) => {
+                    tx.execute("DELETE FROM pending_external_change WHERE id = ?1", [id])?;
+                }
+                Some((id, _)) => {
+                    tx.execute(
+                        "UPDATE pending_external_change SET old_path = ?2 WHERE id = ?1",
+                        params![id, change.old_path],
+                    )?;
+                }
+                None => {
+                    tx.execute(
+                        "INSERT INTO pending_external_change
+                             (external_library_id, track_id, old_path, new_path, queued_ns)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![
+                            change.library_id,
+                            change.track_id,
+                            change.old_path,
+                            change.new_path,
+                            queued_ns
+                        ],
+                    )?;
+                }
+            }
+        }
+        set_operation_state(&tx, operation_id, OperationState::Undone, summary)?;
         tx.commit()?;
         Ok(())
     }

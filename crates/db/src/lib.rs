@@ -33,7 +33,9 @@ pub use artwork::{
 };
 pub use collections::{CollectionSummary, TrackCollection};
 pub use copies::StoredCopy;
-pub use external::{MirrorReport, PendingExternalChange, StoredExternalLibrary};
+pub use external::{
+    ClearedExternalChange, MirrorReport, PendingExternalChange, StoredExternalLibrary,
+};
 pub use filters::SmartView;
 pub use identification::{
     AssetAudioIdentity, CachedResponse, IdentificationBatchItem, IdentificationInput,

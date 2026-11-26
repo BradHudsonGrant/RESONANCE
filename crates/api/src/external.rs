@@ -4,15 +4,22 @@ use std::path::{self, Path, PathBuf};
 
 use resonance_core::playlist::{PathChange, same_path};
 use resonance_db::{Database, MirrorReport, PendingExternalChange, StoredExternalLibrary};
-use resonance_integrations::{ExternalLibraryAdapter, ExternalLibraryKind, IntegrationError, m3u};
+use resonance_integrations::{
+    BackedUpFile, ExternalLibraryAdapter, ExternalLibraryKind, IntegrationError, m3u,
+};
+use resonance_library::journal::JournalError;
+use resonance_library::playlist_update::{
+    self, ClearedChange, PlaylistUpdate, RewrittenFile, byte_hash,
+};
 
 use crate::Api;
 use crate::collections::library_collection;
 use crate::command::{
     AppliedExternalChanges, ExportedPlaylist, ExternalChangePreview, ExternalLineEdit,
-    FoundPlaylist, PlaylistMirror,
+    FoundPlaylist, PlaylistMirror, UndoReport,
 };
 use crate::error::ApiError;
+use crate::tag_writes::journal_operation;
 
 /// Where playlist files are copied before Resonance writes to them, inside the data folder.
 const BACKUP_FOLDER: [&str; 2] = ["backups", "playlists"];
@@ -40,6 +47,13 @@ fn kind_of(library: &StoredExternalLibrary) -> Result<ExternalLibraryKind, ApiEr
             library.kind
         ))
     })
+}
+
+fn journal_error(error: JournalError) -> ApiError {
+    match error {
+        JournalError::Database(source) => ApiError::library_unreadable(source),
+        other => ApiError::invalid_input(other),
+    }
 }
 
 fn path_changes(pending: &[&PendingExternalChange]) -> Vec<PathChange> {
@@ -251,18 +265,65 @@ impl Api {
             .iter()
             .filter(|change| change.library_id == library_id)
             .collect();
-        let applied = kind_of(&followed)?
-            .adapter()
-            .apply_changes(
-                Path::new(&followed.location),
-                &path_changes(&waiting),
-                &backups,
-            )
-            .map_err(integration_error)?;
-        let ids: Vec<i64> = waiting.iter().map(|change| change.id).collect();
-        library
-            .clear_external_changes(&ids)
-            .map_err(ApiError::library_unreadable)?;
+        let cleared: Vec<ClearedChange> = waiting
+            .iter()
+            .map(|change| ClearedChange {
+                id: change.id,
+                library_id: change.library_id,
+                track_id: change.track_id,
+                old_path: change.old_path.clone(),
+                new_path: change.new_path.clone(),
+            })
+            .collect();
+        let mut journaled: Option<(i64, PlaylistUpdate)> = None;
+        let applied = kind_of(&followed)?.adapter().apply_changes(
+            Path::new(&followed.location),
+            &path_changes(&waiting),
+            &backups,
+            &mut |files: &[BackedUpFile<'_>]| {
+                if files.is_empty() {
+                    return Ok(());
+                }
+                let update = PlaylistUpdate {
+                    files: files
+                        .iter()
+                        .map(|file| RewrittenFile {
+                            path: file.path.to_owned(),
+                            backup: file.backup.to_owned(),
+                            before_hash: byte_hash(file.before),
+                            after_hash: byte_hash(file.after),
+                        })
+                        .collect(),
+                    cleared: cleared.clone(),
+                };
+                let id = playlist_update::begin(&mut library, &update).map_err(|error| {
+                    IntegrationError::NotJournaled {
+                        reason: error.to_string(),
+                    }
+                })?;
+                journaled = Some((id, update));
+                Ok(())
+            },
+        );
+        let applied = match (applied, journaled) {
+            (Ok(applied), Some((id, update))) => {
+                playlist_update::finish(&mut library, id, &update).map_err(journal_error)?;
+                applied
+            }
+            (Ok(applied), None) => {
+                let ids: Vec<i64> = cleared.iter().map(|change| change.id).collect();
+                library
+                    .clear_external_changes(&ids)
+                    .map_err(ApiError::library_unreadable)?;
+                applied
+            }
+            (Err(error), journaled) => {
+                if let Some((id, update)) = journaled {
+                    playlist_update::roll_back(&mut library, id, &update).map_err(journal_error)?;
+                }
+                return Err(integration_error(error));
+            }
+        };
         Ok(AppliedExternalChanges {
             library_id,
             edits: u32::try_from(applied.edits).unwrap_or(u32::MAX),
@@ -273,4 +334,20 @@ impl Api {
                 .collect(),
         })
     }
+
+    pub(crate) fn undo_playlist_update(&self, operation_id: i64) -> Result<UndoReport, ApiError> {
+        let operation = playlist_update::undo(&mut self.locked_library(), operation_id)
+            .map_err(journal_error)?;
+        let restored = playlist_update_files(&operation);
+        Ok(UndoReport {
+            operation: journal_operation(operation),
+            restored,
+        })
+    }
+}
+
+fn playlist_update_files(operation: &resonance_db::StoredOperation) -> u32 {
+    serde_json::from_str::<PlaylistUpdate>(&operation.forward_json).map_or(0, |update| {
+        u32::try_from(update.files.len()).unwrap_or(u32::MAX)
+    })
 }

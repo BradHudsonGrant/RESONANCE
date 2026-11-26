@@ -14,6 +14,8 @@ pub enum OperationKind {
     ReplaceFile,
     /// Placed a new file beside a track as a track of its own.
     AddFile,
+    /// Rewrote another app's playlist to name the files that moved, keeping a backup.
+    UpdatePlaylist,
 }
 
 impl OperationKind {
@@ -25,6 +27,7 @@ impl OperationKind {
             Self::DeleteFilesForGood => "delete_files_for_good",
             Self::ReplaceFile => "replace_file",
             Self::AddFile => "add_file",
+            Self::UpdatePlaylist => "update_playlist",
         }
     }
 
@@ -36,6 +39,7 @@ impl OperationKind {
             "delete_files_for_good" => Some(Self::DeleteFilesForGood),
             "replace_file" => Some(Self::ReplaceFile),
             "add_file" => Some(Self::AddFile),
+            "update_playlist" => Some(Self::UpdatePlaylist),
             _ => None,
         }
     }
@@ -150,6 +154,52 @@ pub fn recovery(took_effect: &[bool]) -> Recovery {
     )
 }
 
+/// Where a file that an operation rewrote whole stands, from the BLAKE3 hash of what is on disk
+/// now. `None` is a file that is gone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Rewrite {
+    /// The file holds what it held before the write.
+    AsBefore,
+    /// The file holds what the operation wrote.
+    AsWritten,
+    /// Something else wrote the file, or removed it.
+    ChangedSince,
+}
+
+impl Rewrite {
+    pub fn of(current_hash: Option<&str>, before_hash: &str, after_hash: &str) -> Self {
+        match current_hash {
+            Some(hash) if hash == after_hash => Self::AsWritten,
+            Some(hash) if hash == before_hash => Self::AsBefore,
+            _ => Self::ChangedSince,
+        }
+    }
+}
+
+/// Whether a rewrite can be undone. A file another app changed since is never overwritten. One
+/// already as before is an undo that stopped part way, and is skipped.
+pub fn can_undo_rewrite(files: &[Rewrite]) -> bool {
+    !files.contains(&Rewrite::ChangedSince)
+}
+
+/// Decides how to recover a rewrite the app stopped in the middle of. It stands only when every
+/// file holds what was written. Otherwise every file not as before gets its backup back, newest
+/// first: a write beside the file and a move over it leaves the old bytes or the new ones, so a
+/// file holding neither was caught by something else mid-update and goes back to the backup too.
+pub fn rewrite_recovery(files: &[Rewrite]) -> Recovery {
+    if files.iter().all(|file| *file == Rewrite::AsWritten) {
+        return Recovery::Finish;
+    }
+    Recovery::RollBack(
+        files
+            .iter()
+            .enumerate()
+            .rev()
+            .filter_map(|(position, file)| (*file != Rewrite::AsBefore).then_some(position))
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,6 +223,7 @@ mod tests {
             OperationKind::DeleteFilesForGood,
             OperationKind::ReplaceFile,
             OperationKind::AddFile,
+            OperationKind::UpdatePlaylist,
         ] {
             assert_eq!(OperationKind::from_name(kind.name()), Some(kind));
         }
@@ -219,6 +270,43 @@ mod tests {
         assert_eq!(
             recovery(&[true, false, true]),
             Recovery::RollBack(vec![2, 0])
+        );
+    }
+
+    #[test]
+    fn a_rewrite_is_read_from_the_hash_on_disk() {
+        assert_eq!(Rewrite::of(Some("b"), "a", "b"), Rewrite::AsWritten);
+        assert_eq!(Rewrite::of(Some("a"), "a", "b"), Rewrite::AsBefore);
+        assert_eq!(Rewrite::of(Some("c"), "a", "b"), Rewrite::ChangedSince);
+        assert_eq!(Rewrite::of(None, "a", "b"), Rewrite::ChangedSince);
+    }
+
+    #[test]
+    fn a_rewrite_changed_since_cannot_be_undone() {
+        assert!(can_undo_rewrite(&[Rewrite::AsWritten, Rewrite::AsBefore]));
+        assert!(!can_undo_rewrite(&[
+            Rewrite::AsWritten,
+            Rewrite::ChangedSince
+        ]));
+    }
+
+    #[test]
+    fn a_rewrite_stands_only_when_every_file_holds_what_was_written() {
+        assert_eq!(
+            rewrite_recovery(&[Rewrite::AsWritten, Rewrite::AsWritten]),
+            Recovery::Finish
+        );
+        assert_eq!(
+            rewrite_recovery(&[Rewrite::AsWritten, Rewrite::AsBefore]),
+            Recovery::RollBack(vec![0])
+        );
+        assert_eq!(
+            rewrite_recovery(&[Rewrite::AsWritten, Rewrite::ChangedSince]),
+            Recovery::RollBack(vec![1, 0])
+        );
+        assert_eq!(
+            rewrite_recovery(&[Rewrite::AsBefore]),
+            Recovery::RollBack(vec![])
         );
     }
 }
