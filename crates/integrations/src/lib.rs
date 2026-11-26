@@ -97,6 +97,16 @@ impl ChangePlan {
     }
 }
 
+/// A file about to be written, once its backup is checked: what the journal records so the
+/// write can be undone or recovered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BackedUpFile<'a> {
+    pub path: &'a Path,
+    pub backup: &'a Path,
+    pub before: &'a [u8],
+    pub after: &'a [u8],
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppliedChanges {
     pub backups: Vec<PathBuf>,
@@ -127,6 +137,10 @@ pub enum IntegrationError {
     },
     AlreadyExists {
         path: PathBuf,
+    },
+    /// The write could not be journaled, so nothing was written.
+    NotJournaled {
+        reason: String,
     },
 }
 
@@ -163,6 +177,7 @@ impl fmt::Display for IntegrationError {
             Self::AlreadyExists { path } => {
                 write!(f, "{} already exists. Choose another name.", path.display())
             }
+            Self::NotJournaled { reason } => write!(f, "{reason} Nothing was written."),
         }
     }
 }
@@ -192,20 +207,34 @@ pub trait ExternalLibraryAdapter: Sync {
         changes: &[PathChange],
     ) -> Result<ChangePlan, IntegrationError>;
 
-    /// Applies `changes`. Each file is copied into `backup_folder` first, then written, then
-    /// read back through [`Self::read_library`]. If any check fails, every file written is
-    /// put back from its backup.
+    /// Applies `changes`. Each file is copied into `backup_folder` first, then handed to
+    /// `journal` with its backup, then written, then read back through [`Self::read_library`].
+    /// If `journal` fails, nothing is written. If any check fails, every file written is put
+    /// back from its backup.
     fn apply_changes(
         &self,
         location: &Path,
         changes: &[PathChange],
         backup_folder: &Path,
+        journal: &mut dyn FnMut(&[BackedUpFile<'_>]) -> Result<(), IntegrationError>,
     ) -> Result<AppliedChanges, IntegrationError> {
         let plan = self.preview_changes(location, changes)?;
         let mut backups = Vec::new();
         for file in &plan.files {
             backups.push(back_up(file, backup_folder)?);
         }
+        let backed_up: Vec<BackedUpFile<'_>> = plan
+            .files
+            .iter()
+            .zip(&backups)
+            .map(|(file, backup)| BackedUpFile {
+                path: &file.path,
+                backup,
+                before: &file.before,
+                after: &file.after,
+            })
+            .collect();
+        journal(&backed_up)?;
         let mut written = Vec::new();
         for file in &plan.files {
             written.push(file);

@@ -28,6 +28,7 @@ pub(crate) fn journal_operation(operation: StoredOperation) -> JournalOperation 
             OperationKind::DeleteFilesForGood => OperationKindName::DeleteFilesForGood,
             OperationKind::ReplaceFile => OperationKindName::ReplaceFile,
             OperationKind::AddFile => OperationKindName::AddFile,
+            OperationKind::UpdatePlaylist => OperationKindName::UpdatePlaylist,
         },
         state: match operation.state {
             OperationState::Pending => OperationStateName::Pending,
@@ -162,6 +163,7 @@ impl Api {
             Some(OperationKind::ReplaceFile | OperationKind::AddFile) => {
                 return self.undo_replacement(operation_id);
             }
+            Some(OperationKind::UpdatePlaylist) => return self.undo_playlist_update(operation_id),
             _ => {}
         }
         let write_tags::UndoReport {

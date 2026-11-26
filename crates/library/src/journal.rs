@@ -14,7 +14,7 @@ use resonance_core::journal::{OperationKind, OperationState, Recovery, StepState
 use resonance_db::{Database, DbError, StoredOperation, StoredStep};
 use serde::{Deserialize, Serialize};
 
-use crate::{rename, replace, write_tags};
+use crate::{playlist_update, rename, replace, write_tags};
 
 /// One change to the disk or the library.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -163,6 +163,8 @@ pub enum JournalError {
     },
     /// The file was gone or had changed size since the plan was made.
     ChangedOnDisk(PathBuf),
+    /// Another app wrote the file after the operation did, so undo leaves it alone.
+    ChangedSinceWrite(PathBuf),
     /// Another file already has the name a step needs.
     NameTaken(PathBuf),
     /// The copy's bytes do not match the file it was made from.
@@ -207,6 +209,11 @@ impl fmt::Display for JournalError {
             Self::ChangedOnDisk(path) => {
                 write!(f, "{} changed after the plan was made.", path.display())
             }
+            Self::ChangedSinceWrite(path) => write!(
+                f,
+                "{} changed after Resonance wrote it, so it was left as it is.",
+                path.display()
+            ),
             Self::NameTaken(path) => write!(f, "Another file is already at {}.", path.display()),
             Self::CopyDiffers(path) => write!(
                 f,
@@ -744,6 +751,7 @@ pub fn recover(database: &mut Database) -> Result<Vec<Recovered>, JournalError> 
             | OperationKind::DeleteFilesForGood
             | OperationKind::ReplaceFile
             | OperationKind::AddFile => recover_steps(database, &operation),
+            OperationKind::UpdatePlaylist => playlist_update::recover(database, &operation),
         };
         match outcome {
             Ok((state, note)) => {

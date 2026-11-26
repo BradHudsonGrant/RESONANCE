@@ -85,7 +85,7 @@ fn a_dry_run_writes_nothing_and_apply_backs_up_then_rewrites() {
 
     let backups = root.join("backups");
     let applied = m3u::M3u
-        .apply_changes(&playlist, &changes, &backups)
+        .apply_changes(&playlist, &changes, &backups, &mut |_| Ok(()))
         .expect("applied");
     assert_eq!(applied.edits, 2);
     assert_eq!(applied.backups.len(), 1);
@@ -100,7 +100,7 @@ fn a_dry_run_writes_nothing_and_apply_backs_up_then_rewrites() {
     assert!(!root.join("Sets/Friday.m3u8.resonance-tmp").exists());
 
     let again = m3u::M3u
-        .apply_changes(&playlist, &changes, &backups)
+        .apply_changes(&playlist, &changes, &backups, &mut |_| Ok(()))
         .expect("nothing left to change");
     assert_eq!(again.edits, 0);
     assert!(again.backups.is_empty());
@@ -117,7 +117,8 @@ fn a_latin1_playlist_that_cannot_hold_the_new_path_is_left_alone() {
         title: None,
         duration_s: None,
     }];
-    let refused = m3u::M3u.apply_changes(&playlist, &changes, &root.join("backups"));
+    let refused =
+        m3u::M3u.apply_changes(&playlist, &changes, &root.join("backups"), &mut |_| Ok(()));
     assert!(matches!(refused, Err(IntegrationError::Text { .. })));
     assert_eq!(fs::read(&playlist).expect("read"), b"Ni\xF1o.mp3\n");
     assert!(!root.join("backups").exists());
@@ -143,4 +144,51 @@ fn an_export_reads_back_and_never_overwrites() {
         m3u::export(&root.join("Sets/x.txt"), &tracks),
         Err(IntegrationError::NotAPlaylist { .. })
     ));
+}
+
+#[test]
+fn the_journal_sees_each_backed_up_file_before_it_is_written_and_can_stop_the_write() {
+    let root = sandbox("m3u-journal");
+    let playlist = root.join("Sets/Friday.m3u8");
+    let original = "#EXTM3U\n../Music/House/a.mp3\n";
+    fs::write(&playlist, original).expect("playlist");
+    let changes = [PathChange {
+        old_path: text(&root.join("Music/House/a.mp3")),
+        new_path: text(&root.join("Music/House/a.flac")),
+        title: None,
+        duration_s: None,
+    }];
+    let mut seen = Vec::new();
+    let refused =
+        m3u::M3u.apply_changes(&playlist, &changes, &root.join("backups"), &mut |files| {
+            for file in files {
+                seen.push((
+                    file.path.to_owned(),
+                    fs::read(file.backup).expect("backup"),
+                    file.before.to_vec(),
+                    file.after.to_vec(),
+                    fs::read(file.path).expect("playlist"),
+                ));
+            }
+            Err(IntegrationError::NotJournaled {
+                reason: "The journal is full.".to_owned(),
+            })
+        });
+    assert!(matches!(
+        refused,
+        Err(IntegrationError::NotJournaled { .. })
+    ));
+    let [(path, backup, before, after, on_disk)] = seen.as_slice() else {
+        panic!("expected one file");
+    };
+    assert_eq!(path, &playlist);
+    assert_eq!(backup, original.as_bytes());
+    assert_eq!(before, original.as_bytes());
+    assert_eq!(after, b"#EXTM3U\n../Music/House/a.flac\n");
+    assert_eq!(
+        on_disk,
+        original.as_bytes(),
+        "nothing is written before the journal"
+    );
+    assert_eq!(fs::read_to_string(&playlist).expect("playlist"), original);
 }

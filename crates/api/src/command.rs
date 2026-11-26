@@ -731,6 +731,7 @@ pub enum OperationKindName {
     DeleteFilesForGood,
     ReplaceFile,
     AddFile,
+    UpdatePlaylist,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]

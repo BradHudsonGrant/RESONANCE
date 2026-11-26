@@ -13,6 +13,9 @@ use resonance_api::command::{
 };
 use resonance_db::Database;
 use resonance_fixtures::signal::Groove;
+use resonance_library::playlist_update::{
+    self, ClearedChange, PlaylistUpdate, RewrittenFile, byte_hash,
+};
 use serde_json::{Value, json};
 
 fn request(value: Value) -> Request {
@@ -267,4 +270,168 @@ fn a_mirrored_playlist_follows_a_replace_through_a_backed_up_rewrite_and_exports
     };
     assert!(left.is_empty());
     assert!(playlist.is_file(), "removing the mirror keeps the playlist");
+}
+
+fn newest_operation(api: &Api) -> resonance_api::command::JournalOperation {
+    let Response::RecentOperations(operations) =
+        api.handle(Request::RecentOperations { limit: 1 }).unwrap()
+    else {
+        panic!("expected the history");
+    };
+    operations.into_iter().next().unwrap()
+}
+
+#[test]
+fn a_playlist_update_is_undone_from_history_and_recovered_after_a_crash() {
+    let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("api-playlist-undo");
+    let _ = fs::remove_dir_all(&root);
+    let music = root.join("music");
+    let sets = root.join("sets");
+    fs::create_dir_all(&music).unwrap();
+    fs::create_dir_all(&sets).unwrap();
+    Groove {
+        tempo_bpm: 122.0,
+        seed: 4,
+    }
+    .render(20.0, 44_100, 0.0, 1.0)
+    .write_wav(&music.join("first cut.wav"))
+    .unwrap();
+    let playlist = sets.join("Saturday.m3u8");
+    let original = "#EXTM3U\r\n../music/first cut.wav\r\n";
+    fs::write(&playlist, original).unwrap();
+    let database = root.join("library.db");
+
+    let api = Api::new_silent(Database::open(&database).unwrap());
+    api.handle(Request::Scan {
+        folder: text(&music).to_owned(),
+    })
+    .unwrap();
+    api.handle(Request::ImportPlaylist {
+        path: text(&playlist).to_owned(),
+    })
+    .unwrap();
+    api.handle(request(json!({
+        "command": "set_user_tag",
+        "params": {
+            "track_ids": [1],
+            "edits": [{ "field": "artist", "value": "Lena Brook" }, { "field": "title", "value": "Low Sun" }]
+        }
+    })))
+    .unwrap();
+    api.handle(request(json!({
+        "command": "apply_rename",
+        "params": { "scope": { "kind": "tracks", "track_ids": [1] }, "template": "{artist} - {title}" }
+    })))
+    .unwrap();
+    let library_id = changes(&api)[0].library_id;
+
+    let backups = apply(&api, library_id);
+    let written = fs::read(&playlist).unwrap();
+    assert_eq!(written, b"#EXTM3U\r\n../music/Lena Brook - Low Sun.wav\r\n");
+    assert!(changes(&api).is_empty());
+    let update = newest_operation(&api);
+    assert_eq!(update.summary, "Updated 1 playlist");
+    assert_eq!(update.state, OperationStateName::Applied);
+    assert!(update.can_undo);
+
+    let Response::UndoOperation(undone) = api
+        .handle(Request::UndoOperation {
+            operation_id: update.id,
+        })
+        .unwrap()
+    else {
+        panic!("expected an undo");
+    };
+    assert_eq!(undone.operation.state, OperationStateName::Undone);
+    assert_eq!(undone.restored, 1);
+    assert_eq!(fs::read_to_string(&playlist).unwrap(), original);
+    assert!(Path::new(&backups[0]).is_file(), "the backup is kept");
+    let queued = changes(&api);
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].changes, 1);
+    assert_eq!(
+        queued[0].edits[0].after,
+        "../music/Lena Brook - Low Sun.wav"
+    );
+
+    apply(&api, library_id);
+    let update = newest_operation(&api);
+    let mut changed = written.clone();
+    changed.extend_from_slice(b"../music/added elsewhere.wav\r\n");
+    fs::write(&playlist, &changed).unwrap();
+    let refused = api
+        .handle(Request::UndoOperation {
+            operation_id: update.id,
+        })
+        .unwrap_err();
+    assert!(refused.message.contains("changed after Resonance wrote it"));
+    assert_eq!(fs::read(&playlist).unwrap(), changed);
+    assert!(changes(&api).is_empty());
+    assert_eq!(newest_operation(&api).state, OperationStateName::Applied);
+    fs::write(&playlist, &written).unwrap();
+    api.handle(Request::UndoOperation {
+        operation_id: update.id,
+    })
+    .unwrap();
+    assert_eq!(fs::read_to_string(&playlist).unwrap(), original);
+    drop(api);
+
+    // The app stops after the plan is journaled: once half way through writing the file, once
+    // after the new file is in place.
+    let crash = |on_disk: &[u8]| {
+        let mut library = Database::open(&database).unwrap();
+        let cleared = library
+            .pending_external_changes()
+            .unwrap()
+            .into_iter()
+            .map(|change| ClearedChange {
+                id: change.id,
+                library_id: change.library_id,
+                track_id: change.track_id,
+                old_path: change.old_path,
+                new_path: change.new_path,
+            })
+            .collect();
+        let backup = root.join("backups").join("crash.m3u8");
+        fs::write(&backup, original).unwrap();
+        let update = PlaylistUpdate {
+            files: vec![RewrittenFile {
+                path: playlist.clone(),
+                backup,
+                before_hash: byte_hash(original.as_bytes()),
+                after_hash: byte_hash(&written),
+            }],
+            cleared,
+        };
+        playlist_update::begin(&mut library, &update).unwrap();
+        fs::write(&playlist, on_disk).unwrap();
+    };
+
+    crash(&written[..20]);
+    let api = Api::new_silent(Database::open(&database).unwrap());
+    let recovered = newest_operation(&api);
+    assert_eq!(recovered.state, OperationStateName::RolledBack);
+    assert!(
+        recovered
+            .recovery
+            .unwrap()
+            .contains("put back from its backup")
+    );
+    assert_eq!(fs::read_to_string(&playlist).unwrap(), original);
+    assert_eq!(changes(&api).len(), 1, "the change still waits");
+    drop(api);
+
+    crash(&written);
+    let api = Api::new_silent(Database::open(&database).unwrap());
+    let recovered = newest_operation(&api);
+    assert_eq!(recovered.state, OperationStateName::Applied);
+    assert!(recovered.can_undo);
+    assert_eq!(fs::read(&playlist).unwrap(), written);
+    assert!(changes(&api).is_empty());
+    api.handle(Request::UndoOperation {
+        operation_id: recovered.id,
+    })
+    .unwrap();
+    assert_eq!(fs::read_to_string(&playlist).unwrap(), original);
+    assert_eq!(changes(&api).len(), 1);
 }
