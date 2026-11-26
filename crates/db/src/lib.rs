@@ -1,6 +1,7 @@
 mod artwork;
 mod collections;
 mod copies;
+mod external;
 mod filters;
 mod identification;
 mod identification_settings;
@@ -32,6 +33,7 @@ pub use artwork::{
 };
 pub use collections::{CollectionSummary, TrackCollection};
 pub use copies::StoredCopy;
+pub use external::{MirrorReport, PendingExternalChange, StoredExternalLibrary};
 pub use filters::SmartView;
 pub use identification::{
     AssetAudioIdentity, CachedResponse, IdentificationBatchItem, IdentificationInput,
@@ -70,7 +72,7 @@ pub(crate) fn placeholders(count: usize) -> String {
 
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
-const MIGRATIONS: [&str; 25] = [
+const MIGRATIONS: [&str; 26] = [
     include_str!("../migrations/0001_library.sql"),
     include_str!("../migrations/0002_sources.sql"),
     include_str!("../migrations/0003_identity.sql"),
@@ -96,6 +98,7 @@ const MIGRATIONS: [&str; 25] = [
     include_str!("../migrations/0023_quality.sql"),
     include_str!("../migrations/0024_operation_steps.sql"),
     include_str!("../migrations/0025_cues.sql"),
+    include_str!("../migrations/0026_external_libraries.sql"),
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -131,6 +134,8 @@ pub enum DbError {
     DuplicateViewName {
         name: String,
     },
+    /// The collection mirrors another app's playlist, so only that playlist changes it.
+    MirrorCollection,
 }
 
 impl fmt::Display for DbError {
@@ -168,6 +173,9 @@ impl fmt::Display for DbError {
             Self::DuplicateViewName { name } => {
                 write!(f, "A smart view named \"{name}\" already exists.")
             }
+            Self::MirrorCollection => f.write_str(
+                "This collection follows a playlist file. Change the playlist, then read it again.",
+            ),
         }
     }
 }

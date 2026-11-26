@@ -7,6 +7,7 @@ members = [
     "crates/engine",
     "crates/identify",
     "crates/jobs",
+    "crates/integrations",
     "crates/api",
     "crates/cli",
     "crates/fixtures",
@@ -27,6 +28,7 @@ resonance-db = { path = "crates/db" }
 resonance-engine = { path = "crates/engine" }
 resonance-fixtures = { path = "crates/fixtures" }
 resonance-identify = { path = "crates/identify" }
+resonance-integrations = { path = "crates/integrations" }
 resonance-jobs = { path = "crates/jobs" }
 resonance-library = { path = "crates/library" }
 # Dual-licensed CC0-1.0 OR Apache-2.0; used under Apache-2.0 (ADR 0005).

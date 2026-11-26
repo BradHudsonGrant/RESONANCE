@@ -3771,6 +3771,7 @@ dependencies = [
  "resonance-engine",
  "resonance-fixtures",
  "resonance-identify",
+ "resonance-integrations",
  "resonance-jobs",
  "resonance-library",
  "serde",
@@ -3862,6 +3863,13 @@ dependencies = [
  "ureq",
  "windows-native-keyring-store",
  "zbus-secret-service-keyring-store",
+]
+
+[[package]]
+name = "resonance-integrations"
+version = "0.4.0"
+dependencies = [
+ "resonance-core",
 ]
 
 [[package]]

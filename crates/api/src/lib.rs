@@ -6,6 +6,7 @@ mod copies;
 pub mod data_folder;
 mod delete;
 pub mod error;
+mod external;
 mod filters;
 mod identity;
 mod jobs;
@@ -308,6 +309,23 @@ impl Api {
             } => self
                 .remove_tracks_from_collection(collection_id, &track_ids)
                 .map(Response::RemoveTracksFromCollection),
+            Request::ImportPlaylist { path } => {
+                self.import_playlist(&path).map(Response::ImportPlaylist)
+            }
+            Request::ReadPlaylistAgain { collection_id } => self
+                .read_playlist_again(collection_id)
+                .map(Response::ReadPlaylistAgain),
+            Request::FindPlaylists => self.find_playlists().map(Response::FindPlaylists),
+            Request::ExportCollection {
+                collection_id,
+                path,
+            } => self
+                .export_collection(collection_id, &path)
+                .map(Response::ExportCollection),
+            Request::ExternalChanges => self.external_changes().map(Response::ExternalChanges),
+            Request::ApplyExternalChanges { library_id } => self
+                .apply_external_changes(library_id)
+                .map(Response::ApplyExternalChanges),
             Request::LibraryFacets => self.library_facets().map(Response::LibraryFacets),
             Request::FilterFields => Ok(Response::FilterFields(self.filter_fields())),
             Request::FilterSummaries { query } => {
