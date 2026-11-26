@@ -4,6 +4,15 @@ Clean and incremental builds of the Rust workspace in the dev profile. `just bui
 
 Machine: Core Ultra 9 285H, 64 GB RAM, Windows 11 Pro, rustc 1.100.0. Real-time antivirus scanning is on and the build folder is inside the repo with no exclusion.
 
+## 26 November 2026, M4 at v0.5.0
+
+| Build | Time |
+| --- | --- |
+| Clean dev build | 125.7 s (125.7, 126.8, 125.2) |
+| After a change in `core` | 6.2 s (6.2, 6.3, 6.1) |
+
+Since v0.3.0 the workspace has gained `identify` and `integrations`, which both depend on `core`. The clean build is close to its v0.3.0 time, and the build after a change in `core` takes 1.6 s longer.
+
 ## 18 November 2026, M2 at v0.3.0
 
 | Build | Time |

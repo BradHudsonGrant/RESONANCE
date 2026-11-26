@@ -2,6 +2,22 @@
 
 Every release, newest first. Made from the commit history with git-cliff.
 
+## 0.5.0, 26 November 2026
+
+### Added
+
+- Add decode integrity, loudness and transcode checks ([#164](https://github.com/BradHudsonGrant/RESONANCE/pull/164))
+- Classify duplicates and distinct versions ([#165](https://github.com/BradHudsonGrant/RESONANCE/pull/165))
+- Add crash-safe journal, recovery and bin undo ([#168](https://github.com/BradHudsonGrant/RESONANCE/pull/168))
+- Add Replace with alignment, Convert and Repair ([#171](https://github.com/BradHudsonGrant/RESONANCE/pull/171))
+- Add external library adapter seam and M3U8 support ([#172](https://github.com/BradHudsonGrant/RESONANCE/pull/172))
+- Add file pickers for playlist sheets ([#175](https://github.com/BradHudsonGrant/RESONANCE/pull/175))
+- Undo playlist updates from History ([#176](https://github.com/BradHudsonGrant/RESONANCE/pull/176))
+
+### Fixed
+
+- List changes to files in Activity, undo with Ctrl+Z ([#170](https://github.com/BradHudsonGrant/RESONANCE/pull/170))
+
 ## 0.4.0, 25 November 2026
 
 ### Added
