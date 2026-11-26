@@ -397,12 +397,9 @@
     const job = recentOnlineJob;
     if (job && job.id !== finishedJob) {
       finishedJob = job.id;
-      notice =
-        job.status === 'failed'
-          ? (job.error_message ?? 'Search failed')
-          : job.status === 'cancelled'
-            ? 'Search cancelled'
-            : '';
+      // A search that ends cleanly reports in its own strip, so a save notice shown meanwhile stays.
+      if (job.status === 'failed') notice = job.error_message ?? 'Search failed';
+      else if (job.status === 'cancelled') notice = 'Search cancelled';
       untrack(() => {
         if (job.status !== 'failed' && job.status !== 'cancelled') void summariseSearch();
         refresh++;
