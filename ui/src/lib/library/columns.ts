@@ -71,6 +71,7 @@ const text: Record<string, (track: LibraryTrack) => string> = {
   catno: (track) => track.catno ?? '',
   year: (track) => track.year ?? '',
   artwork: () => '',
+  waveform: () => '',
   format: (track) => track.format.toUpperCase(),
   bitrate: (track) => (track.audio?.bitrate_kbps ? `${track.audio.bitrate_kbps} kbps` : ''),
   sample_rate: (track) => (track.audio?.sample_rate ? sampleRate(track.audio.sample_rate) : ''),

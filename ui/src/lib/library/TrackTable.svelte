@@ -12,6 +12,8 @@
   import type { LibraryTrack } from '../ipc/bindings/LibraryTrack';
   import type { TableColumn } from '../ipc/bindings/TableColumn';
   import type { TableLayoutChange } from '../ipc/bindings/TableLayoutChange';
+  import { fetchOverviews } from '../ipc/waveforms';
+  import Waveform from '../mix/Waveform.svelte';
   import CollectionMenu from './CollectionMenu.svelte';
   import ColumnMenu, { type MenuAnchor } from './ColumnMenu.svelte';
   import {
@@ -24,12 +26,15 @@
     tableWidth,
   } from './columns';
   import FilterMenu, { type FilterMenuAnchor, type FilterMenuItem } from './FilterMenu.svelte';
+  import { TrackOverviews } from './overviews.svelte';
   import { RowHeights } from './row-heights';
   import { TableLayoutState } from './table-layout.svelte';
   import type { TrackPages } from './track-pages.svelte';
 
   interface Props {
     pages: TrackPages;
+    /** The waveform overviews the Waveform column draws. */
+    overviews?: TrackOverviews;
     /** The place in library order of the selected track. */
     selected?: number | null;
     previewTrackId?: number | null;
@@ -68,6 +73,7 @@
 
   let {
     pages,
+    overviews = new TrackOverviews(fetchOverviews),
     selected = $bindable(null),
     previewTrackId = null,
     previewPlaying = false,
@@ -197,6 +203,18 @@
     ),
   );
   const shown = $derived(Math.min(unclippedShown, rowCap));
+
+  // Overviews are read for the rows drawn, and only while the Waveform column shows.
+  const showsWaveform = $derived(shownColumns.some((column) => column.id === 'waveform'));
+  $effect(() => {
+    if (!showsWaveform) return;
+    const ids: number[] = [];
+    for (let offset = 0; offset < shown; offset++) {
+      const track = pages.track(first + offset);
+      if (track) ids.push(track.id);
+    }
+    if (ids.length > 0) overviews.want(ids);
+  });
   const rowsInView = $derived(Math.max(1, Math.floor(rowsHeight / rowHeight)));
 
   let filledOnce = false;
@@ -1232,7 +1250,18 @@
               {track ? index + 1 : ''}
             </TableCell>
             {#each shownColumns as column (column.id)}
-              {#if column.id === 'artwork'}
+              {#if column.id === 'waveform'}
+                <TableCell compact>
+                  <span class="wave">
+                    <Waveform
+                      mode="inline"
+                      columns={track ? (overviews.get(track.id) ?? null) : null}
+                      durationSec={(track?.audio?.duration_ms ?? 0) / 1000}
+                      label={track ? `Waveform of ${track.title}` : 'Waveform'}
+                    />
+                  </span>
+                </TableCell>
+              {:else if column.id === 'artwork'}
                 <TableCell compact>
                   <span
                     class="thumb"
@@ -1652,6 +1681,14 @@
   .head-button[aria-expanded='true'] {
     background: var(--color-surface-2);
     color: var(--color-text);
+  }
+
+  .wave {
+    --waveform-inline-width: 100%;
+
+    display: block;
+    width: 100%;
+    min-width: 0;
   }
 
   .thumb {

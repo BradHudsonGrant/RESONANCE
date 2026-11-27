@@ -19,6 +19,7 @@ mod search;
 mod sources;
 mod table_layout;
 mod tags;
+mod waveform;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -76,7 +77,7 @@ pub(crate) fn placeholders(count: usize) -> String {
 
 /// Numbered and forward-only. A database is brought up to date by running the ones it has not
 /// seen, in order, and an old one is never edited.
-const MIGRATIONS: [&str; 27] = [
+const MIGRATIONS: [&str; 28] = [
     include_str!("../migrations/0001_library.sql"),
     include_str!("../migrations/0002_sources.sql"),
     include_str!("../migrations/0003_identity.sql"),
@@ -104,6 +105,7 @@ const MIGRATIONS: [&str; 27] = [
     include_str!("../migrations/0025_cues.sql"),
     include_str!("../migrations/0026_external_libraries.sql"),
     include_str!("../migrations/0027_analysis.sql"),
+    include_str!("../migrations/0028_waveform_overview.sql"),
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

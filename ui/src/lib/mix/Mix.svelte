@@ -159,8 +159,8 @@
       renderer.palette = {
         background: tone('--color-background'),
         divider: tone('--color-border'),
-        peak: tone('--color-text-2'),
-        rms: tone('--color-text'),
+        upcoming: tone('--color-text-2'),
+        played: tone('--color-text'),
         playhead: tone('--color-accent'),
         meterTrack: tone('--color-surface-2'),
         meter: tone('--color-text-2'),

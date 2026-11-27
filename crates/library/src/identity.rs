@@ -13,6 +13,7 @@ use resonance_core::identity::{
 };
 use resonance_core::library::AudioFormat;
 use resonance_core::quality::{self, QualityInput, QualityMeasurements};
+use resonance_core::waveform::{Overview, Summariser};
 use resonance_db::{Database, DbError, IdentityMatch, PendingAsset};
 use rusty_chromaprint::{Configuration, FingerprintCompressor, Fingerprinter};
 use symphonia::core::codecs::audio::well_known::{
@@ -332,6 +333,7 @@ fn identity_of(path: &Path, always_measure_spectrum: bool) -> io::Result<AssetId
         chromaprint: decoded.chromaprint,
         decoded_facts: decoded.facts,
         quality,
+        overview: decoded.overview,
     })
 }
 
@@ -341,9 +343,11 @@ struct DecodedIdentity {
     chromaprint: Option<Chromaprint>,
     facts: Option<DecodedAudioFacts>,
     measurements: Option<QualityMeasurements>,
+    overview: Option<Overview>,
 }
 
-/// Decodes every packet once, feeding the audio hash, the fingerprint and the quality meter.
+/// Decodes every packet once, feeding the audio hash, the fingerprint, the quality meter and the
+/// waveform.
 fn decode_audio_identity(path: &Path, always_measure_spectrum: bool) -> DecodedIdentity {
     let Ok(reader) = open_audio_reader(path) else {
         return DecodedIdentity::default();
@@ -365,6 +369,7 @@ fn decode_audio_identity(path: &Path, always_measure_spectrum: bool) -> DecodedI
         || AudioFormat::of(path)
             .is_some_and(|format| quality::checks_for_transcode(format, lossless, sample_rate));
     let mut meter = QualityMeter::new(sample_rate, channels, spectrum);
+    let mut summariser = Summariser::new(sample_rate, channels);
 
     let mut audio_hasher = blake3::Hasher::new();
     audio_hasher.update(AUDIO_HASH_DOMAIN);
@@ -424,6 +429,7 @@ fn decode_audio_identity(path: &Path, always_measure_spectrum: bool) -> DecodedI
                 .map(|&sample| sample as f32 / I32_FULL_SCALE),
         );
         meter.push(&pcm_f32);
+        summariser.push(&pcm_f32);
 
         if fp_enabled && fp_samples_fed < max_fp_samples {
             decoded.copy_to_vec_interleaved(&mut pcm16);
@@ -481,6 +487,7 @@ fn decode_audio_identity(path: &Path, always_measure_spectrum: bool) -> DecodedI
         chromaprint,
         facts,
         measurements: Some(meter.finish()),
+        overview: Some(summariser.finish().overview()),
     }
 }
 

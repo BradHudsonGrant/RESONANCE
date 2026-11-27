@@ -3831,7 +3831,9 @@ name = "resonance-analysis"
 version = "0.5.0"
 dependencies = [
  "ort",
+ "realfft",
  "resonance-core",
+ "rubato",
  "sha2 0.11.1",
  "ureq",
 ]

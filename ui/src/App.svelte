@@ -13,6 +13,7 @@
   import type { TrackQuality } from './lib/ipc/bindings/TrackQuality';
   import type { TrackQuery } from './lib/ipc/bindings/TrackQuery';
   import { pictureBase64 } from './lib/ipc/artwork';
+  import { fetchOverviews } from './lib/ipc/waveforms';
   import BatchTagSheet from './lib/prep/BatchTagSheet.svelte';
   import type { PrepClient } from './lib/prep/Prep.svelte';
   import { CoreError } from './lib/ipc/client';
@@ -37,6 +38,7 @@
   import ScanFolder from './lib/library/ScanFolder.svelte';
   import type { SourcesClient } from './lib/library/SourcesSettings.svelte';
   import { TableLayoutState } from './lib/library/table-layout.svelte';
+  import { TrackOverviews } from './lib/library/overviews.svelte';
   import { TrackPages } from './lib/library/track-pages.svelte';
   import ActivitySheet, { type ActivityClient } from './lib/shell/ActivitySheet.svelte';
   import type { HistoryClient } from './lib/shell/OperationHistory.svelte';
@@ -52,6 +54,7 @@
   type Fold = 'collapsed' | 'expanded';
 
   const commandInput = 'command-bar';
+  const overviews = new TrackOverviews(fetchOverviews);
   const pages = new TrackPages((offset, limit, query) =>
     core.call('tracks', { offset, limit, query }),
   );
@@ -775,6 +778,8 @@
 
   $effect(() =>
     core.onActivityChange(() => {
+      // Identification draws waveforms as it reads files, so rows that had none ask again.
+      overviews.forgetMissing();
       void refreshActivity();
     }),
   );
@@ -1025,6 +1030,7 @@
         {:else}
           <Library
             {pages}
+            {overviews}
             {filters}
             bind:selected={pages.selected}
             previewTrackId={preview.trackId}

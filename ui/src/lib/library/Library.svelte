@@ -18,12 +18,14 @@
   import { FilterState, termsOf, withTerms } from './filters.svelte';
   import QuickFilterBar from './QuickFilterBar.svelte';
   import { trackCount } from './format';
+  import type { TrackOverviews } from './overviews.svelte';
   import { sameSort, sortQuery, TableLayoutState } from './table-layout.svelte';
   import { countActiveDrawerFilters, hasQueryFilters, type TrackPages } from './track-pages.svelte';
   import TrackTable from './TrackTable.svelte';
 
   interface Props {
     pages: TrackPages;
+    overviews?: TrackOverviews;
     selected?: number | null;
     previewTrackId?: number | null;
     previewPlaying?: boolean;
@@ -91,6 +93,7 @@
 
   let {
     pages,
+    overviews,
     selected = $bindable(null),
     previewTrackId = null,
     previewPlaying = false,
@@ -512,6 +515,7 @@
         bind:checkedCount
         bind:allChecked
         {pages}
+        {overviews}
         {progressiveStartup}
         bind:selected
         {previewTrackId}

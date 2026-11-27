@@ -12,6 +12,7 @@ mod identity;
 mod jobs;
 pub mod mix_frame;
 mod online;
+pub mod overviews;
 mod prep;
 mod providers;
 mod quality;

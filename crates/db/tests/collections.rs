@@ -435,6 +435,7 @@ fn exclusion_source_removal_and_external_file_moves_keep_collections_consistent(
         chromaprint: None,
         decoded_facts: None,
         quality: None,
+        overview: None,
     };
     assert!(
         db.reconcile_moved_asset(asset_t2, duplicate_bravo_asset, &identity)

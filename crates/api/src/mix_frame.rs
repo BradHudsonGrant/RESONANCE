@@ -47,7 +47,8 @@
 //! | 16 | u32 | generation, 0 when unloaded |
 //! | 20 | u8 | 1 while playing |
 //!
-//! A waveform frame is a 16-byte header and then a peak and an RMS byte for each bin:
+//! A waveform frame is a 16-byte header and then four bytes for each bin: its peak and the RMS levels
+//! of its low, mid and high bands, each with 255 at full scale.
 //!
 //! | Offset | Type | Field |
 //! | --- | --- | --- |
@@ -57,7 +58,7 @@
 //! | 8 | u32 | bins per second |
 //! | 12 | u32 | bins |
 
-use resonance_core::waveform::{BINS_PER_SECOND, Waveform};
+use resonance_core::waveform::{BIN_BYTES, BINS_PER_SECOND, Waveform};
 use resonance_engine::{DeckId, DeckTelemetry, PreviewTelemetry, Telemetry};
 
 pub const TELEMETRY: u8 = 1;
@@ -157,14 +158,14 @@ fn write_deck(frame: &mut Writer, deck: &DeckTelemetry) {
 
 pub fn waveform(deck: DeckId, generation: u32, waveform: &Waveform) -> Vec<u8> {
     let bins = waveform.bins.len();
-    let mut frame = Writer::new(WAVEFORM, WAVEFORM_HEADER_LENGTH + 2 * bins);
+    let mut frame = Writer::new(WAVEFORM, WAVEFORM_HEADER_LENGTH + BIN_BYTES * bins);
     frame.bytes[1] = deck.index() as u8;
     frame
         .u32(generation)
         .u32(BINS_PER_SECOND)
         .u32(u32::try_from(bins).unwrap_or(u32::MAX));
     for bin in &waveform.bins {
-        frame.u8(bin.peak).u8(bin.rms);
+        frame.bytes.extend_from_slice(&bin.to_bytes());
     }
     frame.bytes
 }
@@ -260,7 +261,20 @@ mod tests {
     #[test]
     fn a_waveform_frame_carries_its_deck_generation_and_bins_in_order() {
         let waveform = Waveform {
-            bins: vec![Bin { peak: 10, rms: 5 }, Bin { peak: 255, rms: 90 }],
+            bins: vec![
+                Bin {
+                    peak: 10,
+                    low: 5,
+                    mid: 4,
+                    high: 3,
+                },
+                Bin {
+                    peak: 255,
+                    low: 90,
+                    mid: 60,
+                    high: 20,
+                },
+            ],
             frames: 300,
             sample_rate: 44_100,
         };
@@ -271,6 +285,6 @@ mod tests {
         assert_eq!(u32_at(&frame, 4), 7);
         assert_eq!(u32_at(&frame, 8), BINS_PER_SECOND);
         assert_eq!(u32_at(&frame, 12), 2);
-        assert_eq!(frame[16..], [10, 5, 255, 90]);
+        assert_eq!(frame[16..], [10, 5, 4, 3, 255, 90, 60, 20]);
     }
 }

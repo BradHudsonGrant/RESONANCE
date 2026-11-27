@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { get, type IncomingMessage } from 'node:http';
+import { get, type IncomingMessage, type ServerResponse } from 'node:http';
 import { connect } from 'node:net';
 import type { Duplex } from 'node:stream';
 import type { Plugin } from 'vite';
@@ -79,37 +79,48 @@ export function coreProxy(connectionFile: string): Plugin {
         socket.on('error', () => core.destroy());
       });
 
-      // Pictures load as plain images, so `<img>` can show them. A page on another site gets
-      // nothing: its requests are marked cross-site.
-      server.middlewares.use('/artwork/', (request, response) => {
-        const connection = readConnection(connectionFile);
-        if (request.headers['sec-fetch-site'] === 'cross-site' || request.method !== 'GET') {
-          response.statusCode = 403;
-          response.end();
-          return;
-        }
-        if (!connection) {
-          response.statusCode = 503;
-          response.end();
-          return;
-        }
-        const asked = get(
-          {
-            host: '127.0.0.1',
-            port: connection.port,
-            path: `/artwork${request.url ?? '/'}`,
-            headers: { authorization: `Bearer ${connection.token}` },
-          },
-          (answer) => {
-            response.writeHead(answer.statusCode ?? 502, answer.headers);
-            answer.pipe(response);
-          },
-        );
-        asked.on('error', () => {
-          response.statusCode = 502;
-          response.end();
-        });
-      });
+      // Pictures load as plain images, so `<img>` can show them, and waveform overviews load as
+      // binary bodies. A page on another site gets nothing: its requests are marked cross-site.
+      const passThrough =
+        (path: (rest: string) => string) =>
+        (request: IncomingMessage, response: ServerResponse) => {
+          const connection = readConnection(connectionFile);
+          if (request.headers['sec-fetch-site'] === 'cross-site' || request.method !== 'GET') {
+            response.statusCode = 403;
+            response.end();
+            return;
+          }
+          if (!connection) {
+            response.statusCode = 503;
+            response.end();
+            return;
+          }
+          const asked = get(
+            {
+              host: '127.0.0.1',
+              port: connection.port,
+              path: path(request.url ?? '/'),
+              headers: { authorization: `Bearer ${connection.token}` },
+            },
+            (answer) => {
+              response.writeHead(answer.statusCode ?? 502, answer.headers);
+              answer.pipe(response);
+            },
+          );
+          asked.on('error', () => {
+            response.statusCode = 502;
+            response.end();
+          });
+        };
+      server.middlewares.use(
+        '/artwork/',
+        passThrough((rest) => `/artwork${rest}`),
+      );
+      // Connect hands over `/?tracks=...` for `/waveforms?tracks=...`.
+      server.middlewares.use(
+        '/waveforms',
+        passThrough((rest) => `/waveforms${rest.replace(/^\//, '')}`),
+      );
     },
   };
 }

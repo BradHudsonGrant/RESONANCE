@@ -103,3 +103,15 @@ The view's own work is not the limit. It takes at most 0.6 ms of UI-thread time 
 Because a still `gl.clear` canvas of the same width in both Edge and WebView2 waits two display intervals in `DXGISwapChainImageBacking::Present` on roughly two percent of frames, the 99th percentile on a 240 Hz (`4.2 ms`) panel lands at `8.4 ms` (`2 × 4.2 ms`, 120 Hz) rather than under `8.0 ms`. Across `42,857` full-window frames (three minutes) at `2178 × 276` device pixels on the `RTX 5090 Laptop GPU`, the median frame held `4.2 ms`, the 99th percentile held `8.4 ms` and no frame exceeded `8.8 ms`. [architecture.md](../architecture.md#performance-budgets) and `resonance bench` therefore judge the Mix view on keeping its median frame at the display's refresh rate, its 99th percentile within two display intervals and no frame over `16 ms`.
 
 Audio was stable at the device's 480-frame shared period: over about 18 minutes of two decks playing across the spike and M1 runs, no underruns, late callbacks, starved callbacks or stream errors occurred, and no callback exceeded 0.38 ms of its 10 ms. Exclusive mode reaches a 256-frame period inside a 256-frame buffer ([ADR 0015](../adr/0015-wasapi-exclusive-output.md)) and held it for a full hour (`3,600 s`, `675,010` callbacks) with `0` underruns, `1` late callback, `0` starved callbacks, `0` stream errors and a `0.34 ms` longest callback ([#47](https://github.com/BradHudsonGrant/RESONANCE/issues/47)).
+
+## 26 November 2026, three-band lanes ([#186](https://github.com/BradHudsonGrant/RESONANCE/issues/186))
+
+The lanes now read four bytes a bin (peak and three band levels) from an RGBA texture. Same machine, Edge, a `1418 × 810` viewport, dev build of the core, a 48 kHz output with a 480-frame period, display refresh 6.1 ms (164 Hz). Two real tracks played on both decks, three short runs of 1,200 frames.
+
+| Run | Refresh | 99th percentile | Longest | Missed | View, longest | Underruns |
+| --- | ------- | --------------- | ------- | ------ | ------------- | --------- |
+| 1   | 6.1 ms  | 6.2 ms          | 6.3 ms  | 0      | 0.2 ms        | 0         |
+| 2   | 6.1 ms  | 6.2 ms          | 12.1 ms | 4      | 0.2 ms        | 0         |
+| 3   | 6.1 ms  | 6.2 ms          | 6.2 ms  | 0      | 0.2 ms        | 0         |
+
+The three bands cost nothing measurable: the median stays at the refresh, the 99th percentile inside two intervals and every frame under 16 ms.

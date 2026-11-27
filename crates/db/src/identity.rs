@@ -6,6 +6,7 @@ use resonance_core::library::{AudioFormat, TagField, is_asset_path_included};
 use rusqlite::{OptionalExtension, Transaction, params};
 
 use crate::quality::record_quality;
+use crate::waveform::record_overview;
 use crate::{Database, DbError, FileStamp, ScannedFile, SourceId, search, sources, tag_field};
 
 /// An asset whose identity has not been computed yet, or whose file or lossy decoder changed.
@@ -128,6 +129,13 @@ const PENDING_IDENTITY_CONDITION: &str = "asset.included = 1
            AND asset.audio_decoder != ?
        )
        OR NOT EXISTS (SELECT 1 FROM asset_quality WHERE asset_quality.asset_id = asset.id)
+       OR (
+           asset.audio_hash IS NOT NULL
+           AND NOT EXISTS (
+               SELECT 1 FROM waveform_overview
+               WHERE waveform_overview.audio_hash = asset.audio_hash
+           )
+       )
    )";
 
 #[allow(clippy::type_complexity)]
@@ -408,10 +416,11 @@ pub(crate) fn record_identity_in(
                 stamp.modified_ns,
             ],
         )?;
-        if changed > 0
-            && let Some(quality) = &identity.quality
-        {
-            record_quality(tx, asset_id, quality)?;
+        if changed > 0 {
+            if let Some(quality) = &identity.quality {
+                record_quality(tx, asset_id, quality)?;
+            }
+            record_overview(tx, identity)?;
         }
         Ok(changed > 0)
     }
@@ -462,10 +471,11 @@ impl Database {
                     stamp.size_bytes,
                     stamp.modified_ns,
                 ])?;
-                if updated > 0
-                    && let Some(quality) = &identity.quality
-                {
-                    record_quality(&tx, *asset_id, quality)?;
+                if updated > 0 {
+                    if let Some(quality) = &identity.quality {
+                        record_quality(&tx, *asset_id, quality)?;
+                    }
+                    record_overview(&tx, identity)?;
                 }
                 changed += updated;
             }
@@ -744,6 +754,7 @@ impl Database {
                 chromaprint,
                 decoded_facts: None,
                 quality: None,
+                overview: None,
             }
         });
 
@@ -1136,6 +1147,7 @@ impl Database {
         if let Some(quality) = &identity.quality {
             record_quality(&tx, original_asset_id, quality)?;
         }
+        record_overview(&tx, identity)?;
 
         tx.commit()?;
         Ok(true)
@@ -1354,6 +1366,7 @@ mod tests {
             }),
             decoded_facts: None,
             quality: None,
+            overview: None,
         };
         assert!(
             db.record_asset_identity(pending[0].asset_id, pending[0].stamp, &id)
@@ -1418,6 +1431,9 @@ mod tests {
                 quality: Some(resonance_core::identity::AssetQuality {
                     measurements: Default::default(),
                     flags: Vec::new(),
+                }),
+                overview: Some(resonance_core::waveform::Overview {
+                    columns: [Default::default(); resonance_core::waveform::OVERVIEW_COLUMNS],
                 }),
             };
             assert!(

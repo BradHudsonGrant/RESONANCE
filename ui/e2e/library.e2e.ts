@@ -404,6 +404,52 @@ test('columns are chosen, moved, sized, wrapped and sorted from the keyboard, an
     .toBe('nowrap');
 });
 
+test('the Waveform column draws identified tracks from their overviews, read as binary', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1586, height: 992 });
+  const overviews: string[] = [];
+  page.on('response', (response) => {
+    if (response.url().includes('/waveforms?tracks='))
+      overviews.push(response.headers()['content-type'] ?? '');
+  });
+  await page.goto('/');
+  await expect(page.getByText('6 tracks', { exact: true })).toBeVisible({ timeout: 10_000 });
+
+  const table = page.getByRole('grid', { name: 'Tracks' });
+  const chooser = table.getByRole('button', { name: 'Choose columns' });
+  await chooser.click();
+  const menu = page.getByRole('menu', { name: 'Columns' });
+  await page.keyboard.type('wave');
+  await menu.getByRole('menuitemcheckbox', { name: 'Waveform' }).click();
+  await page.keyboard.press('Escape');
+  await expect(table.getByRole('columnheader', { name: 'Waveform' })).toBeVisible();
+
+  // Pixels with any opacity, across every row's waveform. Files are identified in the
+  // background, and a row that had no overview asks again as the job moves on.
+  const litPixels = () =>
+    table.getByRole('img', { name: /^Waveform of / }).evaluateAll((waves) =>
+      waves.reduce((lit, wave) => {
+        const canvas = wave.querySelector('canvas');
+        const pixels = canvas
+          ?.getContext('2d')
+          ?.getImageData(0, 0, canvas.width, canvas.height).data;
+        let count = 0;
+        for (let at = 3; at < (pixels?.length ?? 0); at += 4) if (pixels![at]! > 0) count++;
+        return lit + count;
+      }, 0),
+    );
+  await expect.poll(litPixels, { timeout: 20_000 }).toBeGreaterThan(0);
+  expect(overviews.length).toBeGreaterThan(0);
+  expect(overviews.every((type) => type === 'application/octet-stream')).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1586);
+
+  await chooser.click();
+  await menu.getByRole('menuitem', { name: 'Reset to default' }).click();
+  await page.keyboard.press('Escape');
+  await expect(table.getByRole('columnheader', { name: 'Waveform' })).toBeHidden();
+});
+
 test('missing-tag, header and command-bar filters, pinning and recommendation toggles filter without moving the table', async ({
   page,
 }) => {
