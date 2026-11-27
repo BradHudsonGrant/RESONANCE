@@ -27,10 +27,10 @@ use tokio_tungstenite::tungstenite::http::{StatusCode, header::AUTHORIZATION};
 use tokio_tungstenite::tungstenite::{Bytes, Message};
 use ts_rs::TS;
 
-use crate::{Api, overviews};
 use crate::command::{ActivityChanged, LibraryChanged, Request, Response};
 use crate::error::ApiError;
 use crate::mix_frame;
+use crate::{Api, overviews};
 
 /// How often the decks are read for the page, within the 60 Hz the architecture allows. The page
 /// moves the playheads on between readings.

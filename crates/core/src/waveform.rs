@@ -73,7 +73,9 @@ impl Waveform {
         }
         for (index, column) in columns.iter_mut().enumerate() {
             let from = index * count / OVERVIEW_COLUMNS;
-            let to = ((index + 1) * count / OVERVIEW_COLUMNS).max(from + 1).min(count);
+            let to = ((index + 1) * count / OVERVIEW_COLUMNS)
+                .max(from + 1)
+                .min(count);
             *column = self.bins[from.min(count - 1)..to]
                 .iter()
                 .fold(Bin::default(), |loudest, bin| loudest.louder(*bin));
@@ -232,7 +234,10 @@ impl Summariser {
                 self.peak = self.peak.max(sample.abs());
                 sum += f64::from(sample);
             }
-            for (squares, level) in self.band_squares.iter_mut().zip(self.bands.split(sum * scale))
+            for (squares, level) in self
+                .band_squares
+                .iter_mut()
+                .zip(self.bands.split(sum * scale))
             {
                 *squares += level * level;
             }
@@ -410,9 +415,13 @@ mod tests {
                 high: 3
             }
         );
-        assert!(overview.columns.iter().enumerate().all(|(index, column)| {
-            index == 1 || *column == Bin::default()
-        }));
+        assert!(
+            overview
+                .columns
+                .iter()
+                .enumerate()
+                .all(|(index, column)| { index == 1 || *column == Bin::default() })
+        );
     }
 
     #[test]

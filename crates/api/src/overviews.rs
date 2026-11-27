@@ -41,11 +41,14 @@ pub fn track_ids(query: &str) -> Option<Vec<i64>> {
 }
 
 pub fn encode(overviews: &[Option<Overview>]) -> Vec<u8> {
-    let mut bytes =
-        Vec::with_capacity(HEADER_LENGTH + overviews.len() * (1 + Overview::BYTES));
+    let mut bytes = Vec::with_capacity(HEADER_LENGTH + overviews.len() * (1 + Overview::BYTES));
     bytes.extend_from_slice(&[OVERVIEWS, 0, 0, 0]);
     bytes.extend_from_slice(&(OVERVIEW_COLUMNS as u32).to_le_bytes());
-    bytes.extend_from_slice(&u32::try_from(overviews.len()).unwrap_or(u32::MAX).to_le_bytes());
+    bytes.extend_from_slice(
+        &u32::try_from(overviews.len())
+            .unwrap_or(u32::MAX)
+            .to_le_bytes(),
+    );
     for overview in overviews {
         match overview {
             Some(overview) => {

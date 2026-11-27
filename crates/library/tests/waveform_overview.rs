@@ -38,7 +38,11 @@ fn identifying_a_file_keeps_its_overview_and_a_moved_copy_finds_it() {
     // A 700 Hz tone at -6 dBFS peaks at half scale and sits in the mid band.
     assert!(overview.columns.iter().all(|column| column.peak == 128));
     let settled = &overview.columns[10..130];
-    assert!(settled.iter().all(|column| column.mid > 80 && column.low < 10));
+    assert!(
+        settled
+            .iter()
+            .all(|column| column.mid > 80 && column.low < 10)
+    );
     assert!(
         db.pending_identity_assets(0, "", 10)
             .expect("pending")

@@ -20,7 +20,7 @@ A virtualised table: a 31 px header and 33 px rows, with 1 px lines between rows
 | Status   | 22 px                     | 14 px icon: sound lines on the row being heard, play on the loaded or selected row, tick when analysed | never                                    | #52 for play, M5 for tick |
 | #        | 36 px                     | 12 px mono, right aligned, Muted                                    | never                                    | #52                       |
 | Title    | `minmax(150px, 1.8fr)`    | 13 px sans 500, Text, cut with an ellipsis                          | never                                    | #52                       |
-| Waveform | 140 px, 88 px when narrow | `Waveform mode="inline"`                                            | narrows below 740 px, hides below 640 px | #52, peaks from M5        |
+| Waveform | 140 px                    | `Waveform mode="inline"`, from the overview kept by audio hash      | in the chooser under Audio, off by default | #52, overviews in M5      |
 | Artist   | `minmax(120px, 1.3fr)`    | 13 px sans, Text 2                                                  | never                                    | #52                       |
 | BPM      | 58 px                     | 13 px mono, right aligned                                           | never                                    | #52, analysed in M5       |
 | Key      | 52 px                     | 13 px mono, in the notation chosen in Settings                      | never                                    | #52, analysed in M5       |
@@ -28,7 +28,7 @@ A virtualised table: a 31 px header and 33 px rows, with 1 px lines between rows
 | Time     | 56 px                     | 13 px mono, right aligned, Text 2                                   | never                                    | #52                       |
 | Actions  | 56 px                     | 24 px favourite button and 24 px more button                        | never                                    | #52 for more, M2 for star |
 
-The table is a container (`container-type: inline-size`), so it drops columns by its own width, whatever narrowed it: the window, the sidebar or the inspector. Below 820 px Energy goes first, and energy stays in the inspector. Below 740 px the waveform narrows to 88 px. Below 640 px it goes, and the track's waveform stays in the dock. Every other column stays at every size.
+The table is a container (`container-type: inline-size`), so it drops columns by its own width, whatever narrowed it: the window, the sidebar or the inspector. Below 820 px Energy goes first, and energy stays in the inspector. Every other column stays at every size.
 
 A selected row sits on Raised inside a 1 px control border frame with 6 px corners. Its tick box is filled in Text with a dark tick, its status cell shows the play icon, and the 2 px accent mark sits at its left. The accent goes nowhere else on the row.
 

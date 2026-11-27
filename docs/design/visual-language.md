@@ -136,13 +136,13 @@ One outline icon set with a 1.5 px stroke: Lucide. Icons come in 13, 16 and 18 p
 
 ## Waveforms
 
-Bars are one device pixel wide, on whole pixel positions, with no anti-aliasing. Two tones show peak and RMS. Band energy is shown as brightness. No rainbow colouring. The accent is only for the playhead and cue markers.
+Bars are one device pixel wide, on whole pixel positions, with no anti-aliasing. Each bar is drawn in layers of one tone: the peak as a faint outline, then the RMS level of the high (above 2.5 kHz), mid and low (below 150 Hz) bands, each brighter than the last. Kicks and bass read as the solid core of a bar and hats as a fringe. Band energy is shown as brightness, never as colour. The accent is only for the playhead and cue markers.
 
-Draw them in WebGL2 from precomputed multi-resolution peak data, passed as binary. The overview and the scrolling view share one renderer.
+The data is precomputed and passed as binary: a 140-column overview per recording, kept by audio hash and drawn by table rows and the dock, and 300 bins a second for a loaded deck.
 
 Played bars use `--color-text` and bars still to play use `--color-text-2`. The energy curve in the inspector is a flat line of bars over a 1 px baseline, with no fill under it.
 
-`MixRenderer` (`ui/src/lib/mix/renderer.ts`) draws the scrolling deck lanes in WebGL2 from binary peak and RMS frames. `Waveform.svelte` draws the static `inline`, `crossfade` and `curve` waveforms on whole device pixels.
+`MixRenderer` (`ui/src/lib/mix/renderer.ts`) draws the scrolling deck lanes in WebGL2 from binary waveform frames. `Waveform.svelte` draws the static `inline`, `crossfade` and `curve` waveforms on whole device pixels in a 2D canvas, since a table row cannot hold a WebGL context of its own.
 
 ## The dot wave
 

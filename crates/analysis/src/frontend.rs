@@ -144,7 +144,9 @@ impl FrontEnd {
                     summary,
                     ..
                 } = self;
-                stft.push(mono, &mut |magnitude| hpss.push(magnitude, summary, on_frame));
+                stft.push(mono, &mut |magnitude| {
+                    hpss.push(magnitude, summary, on_frame)
+                });
             }
         }
         Ok(())
@@ -180,7 +182,9 @@ impl FrontEnd {
             summary,
             ..
         } = self;
-        stft.push(resampled, &mut |magnitude| hpss.push(magnitude, summary, on_frame));
+        stft.push(resampled, &mut |magnitude| {
+            hpss.push(magnitude, summary, on_frame)
+        });
     }
 }
 
@@ -291,9 +295,7 @@ impl Stft {
         let fft = RealFftPlanner::<f32>::new().plan_fft_forward(FFT_SIZE);
         // The periodic Hann window, which overlaps to a constant at a quarter-window hop.
         let window = (0..FFT_SIZE)
-            .map(|n| {
-                0.5 - 0.5 * (std::f32::consts::TAU * n as f32 / FFT_SIZE as f32).cos()
-            })
+            .map(|n| 0.5 - 0.5 * (std::f32::consts::TAU * n as f32 / FFT_SIZE as f32).cos())
             .collect();
         Self {
             input: fft.make_input_vec(),
@@ -329,9 +331,9 @@ impl Stft {
             *input = sample * weight;
         }
         // The buffers come from the plan, so their lengths always match it.
-        let _ = self
-            .fft
-            .process_with_scratch(&mut self.input, &mut self.spectrum, &mut self.scratch);
+        let _ =
+            self.fft
+                .process_with_scratch(&mut self.input, &mut self.spectrum, &mut self.scratch);
         for (magnitude, bin) in self.magnitude.iter_mut().zip(&self.spectrum) {
             *magnitude = bin.norm();
         }
@@ -450,7 +452,11 @@ mod tests {
         let mut indices = Vec::new();
         let mut on_frame = |frame: SeparatedFrame<'_>| {
             assert_eq!(frame.magnitude.len(), SPECTRUM_BINS);
-            for ((magnitude, h), p) in frame.magnitude.iter().zip(frame.harmonic).zip(frame.percussive)
+            for ((magnitude, h), p) in frame
+                .magnitude
+                .iter()
+                .zip(frame.harmonic)
+                .zip(frame.percussive)
             {
                 assert!(h + p <= magnitude * 1.0001 + 1e-9);
             }
@@ -467,7 +473,9 @@ mod tests {
     fn sine(frequency: f32, sample_rate: u32, seconds: f32) -> Vec<f32> {
         let frames = (sample_rate as f32 * seconds) as usize;
         (0..frames)
-            .map(|i| 0.5 * (i as f32 * frequency * std::f32::consts::TAU / sample_rate as f32).sin())
+            .map(|i| {
+                0.5 * (i as f32 * frequency * std::f32::consts::TAU / sample_rate as f32).sin()
+            })
             .collect()
     }
 
@@ -533,7 +541,10 @@ mod tests {
         resampler.finish(&mut out).expect("finish");
 
         assert_eq!(out.len(), SAMPLE_RATE as usize);
-        let first_loud = out.iter().position(|sample| sample.abs() > 0.05).expect("tone");
+        let first_loud = out
+            .iter()
+            .position(|sample| sample.abs() > 0.05)
+            .expect("tone");
         let expected = SAMPLE_RATE as usize / 2;
         assert!(first_loud.abs_diff(expected) < 30, "{first_loud}");
     }

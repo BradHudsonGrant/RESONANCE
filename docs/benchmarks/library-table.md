@@ -363,3 +363,18 @@ Machine: the same ROG Zephyrus G16, Core Ultra 9 285H, 64 GB RAM, Windows 11 Pro
 ### Conclusion
 
 Every condition type (text, missing/present, artwork, generic tag, numeric range and bound, date, choice, location) and both three-condition combinations run in 4.6 to 48.7 ms median on 100,000 tracks, inside the 50 ms filter budget. None of the query plans touches `file_tag`.
+
+## 26 November 2026, Waveform column ([#186](https://github.com/BradHudsonGrant/RESONANCE/issues/186))
+
+Machine: ROG Zephyrus G16, Core Ultra 9 285H, Windows 11 Pro. Edge, 1920 by 1080, 40 rows in view, display refresh 6.1 ms (164 Hz), dev build of the core. A copy of the synthetic library had an overview on every one of its 100,000 tracks, so every row drew bars. `measureTableScroll()` as above, three runs each, 600 frames a pass.
+
+| Waveform column | Pass  | Median frame | 99th percentile | Longest frame | Missed frames |
+| --------------- | ----- | ------------ | --------------- | ------------- | ------------- |
+| Shown           | Fling | 12.1 ms      | 18.2 ms         | 18.2 to 18.3 ms | 474 to 483  |
+| Shown           | Jumps | 6.1 ms       | 12.1 to 12.2 ms | 18.1 to 18.2 ms | 13 to 20    |
+| Hidden          | Fling | 6.1 ms       | 12.2 to 12.3 ms | 12.2 to 18.3 ms | 32 to 154   |
+| Hidden          | Jumps | 6.1 ms       | 12.2 ms         | 12.3 to 18.2 ms | 15 to 23    |
+
+Tried once: keeping each track's drawn bars in a small canvas and copying it into the row, so a row that takes its neighbour's track copies rather than draws. The fling median stayed at 12.1 ms and the longest frame rose to 24.3 ms, so it was taken out.
+
+Conclusion: the default table, without the column, holds the budget. With the column shown a fling misses it. The Waveform column is off by default, and [#187](https://github.com/BradHudsonGrant/RESONANCE/issues/187) carries the budget into v0.7.0.
