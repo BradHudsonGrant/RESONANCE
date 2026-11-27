@@ -1,3 +1,4 @@
+pub mod beats;
 pub mod frontend;
 pub mod registry;
 pub mod runtime;

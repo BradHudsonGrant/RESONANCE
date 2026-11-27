@@ -132,7 +132,11 @@ A neural beat tracker gets the pulse right to the nearest spectrogram frame, whi
 `Beat This!` emits beat and downbeat activations at 50 frames a second (20 ms per frame). A 10 to 20 ms offset causes low-end comb filtering or a double attack when two decks play in sync, and slices mid-cycle when a cue or loop fires. After `Beat This!` sets the coarse beat positions in Tier 2, a deterministic Rust pass refines every beat marker inside a `+-15 ms` search window:
 
 1. On percussive bars (`percussive_ratio >= 0.15`), pick the steepest positive rise on the `< 150 Hz` percussive envelope so the marker sits at the start of the kick transient rather than the body peak behind it. On beatless bars (`percussive_ratio < 0.15`), fall back to broadband onset flux (`150 Hz–8 kHz`), or keep the interpolated tempo grid when no transient is present.
-2. Walk backwards up to `0.5 ms` (`22` samples at `44.1 kHz`) to the nearest zero-crossing of the summed mono signal (`L + R`) so hot cues and loops jump cleanly without a click.
+2. Walk backwards up to `0.5 ms` (`22` samples at `44.1 kHz`) to the nearest upward zero-crossing of the summed mono signal (`L + R`) so hot cues and loops jump cleanly without a click. When the mix has none there, take the first one up to `0.5 ms` after, which is the kick's own start when the estimate landed a few samples early, and failing that the quietest sample.
+
+The envelope is the analytic-signal energy of the `< 150 Hz` band, low-passed forwards and backwards. A low sine leaves ripple in its plain square that stops any search for the start of the rise, and a zero-phase filter adds no delay, so the steepest rise sits on the kick's start. Through a causal filter it sits `3.8 ms` later, and walking back to a fifth of that slope still lands `1.2 ms` late.
+
+On a steady grid the tempo comes from a least-squares line through the beats that landed on a kick. A beat that found no kick, or sits more than `0.5 ms` off the line, searches again from its place on the line and settles there if nothing turns up.
 
 ### Downbeat bar phase and pickup bars
 

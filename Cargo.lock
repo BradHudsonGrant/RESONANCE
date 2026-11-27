@@ -3830,6 +3830,7 @@ dependencies = [
 name = "resonance-analysis"
 version = "0.5.0"
 dependencies = [
+ "blake3",
  "ort",
  "realfft",
  "resonance-core",
