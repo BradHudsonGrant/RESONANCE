@@ -10,6 +10,7 @@ use resonance_api::Api;
 use resonance_api::command::{Request, Response};
 use resonance_api::data_folder::default_data_folder;
 use resonance_api::error::ApiError;
+use resonance_api::overviews;
 use resonance_db::{Database, FILE_NAME};
 use tauri::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use tauri::http::{Request as ProtocolRequest, Response as ProtocolResponse, StatusCode};
@@ -202,6 +203,31 @@ fn artwork_response(
     }
 }
 
+/// Waveform overviews for `waveforms://localhost/?tracks=<id>,<id>`, the desktop's way to the
+/// same body the local socket serves at `/waveforms`.
+fn overviews_response(
+    api: Option<&Api>,
+    request: &ProtocolRequest<Vec<u8>>,
+) -> ProtocolResponse<Vec<u8>> {
+    let Some(track_ids) = request.uri().query().and_then(overviews::track_ids) else {
+        return ProtocolResponse::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Vec::new())
+            .unwrap_or_default();
+    };
+    match api.map(|api| api.waveform_overviews(&track_ids)) {
+        Some(Ok(body)) => ProtocolResponse::builder()
+            .header(CONTENT_TYPE, "application/octet-stream")
+            .header(CACHE_CONTROL, "no-store")
+            .body(body)
+            .unwrap_or_default(),
+        _ => ProtocolResponse::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(Vec::new())
+            .unwrap_or_default(),
+    }
+}
+
 fn local_page(url: &Url) -> bool {
     url.username().is_empty()
         && url.password().is_none()
@@ -241,6 +267,18 @@ fn run(options: Options) -> Result<(), AppError> {
                 .map(Arc::clone);
             tauri::async_runtime::spawn_blocking(move || {
                 responder.respond(artwork_response(api.as_deref(), &request));
+            });
+        })
+        .register_asynchronous_uri_scheme_protocol("waveforms", |context, request, responder| {
+            let api = context
+                .app_handle()
+                .state::<Result<Arc<Api>, ApiError>>()
+                .inner()
+                .as_ref()
+                .ok()
+                .map(Arc::clone);
+            tauri::async_runtime::spawn_blocking(move || {
+                responder.respond(overviews_response(api.as_deref(), &request));
             });
         })
         .invoke_handler(tauri::generate_handler![

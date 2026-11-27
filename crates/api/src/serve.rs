@@ -4,8 +4,9 @@
 //! upgrade request does not carry the token as a bearer credential. A web page cannot set
 //! that header on a WebSocket, so a page in the user's browser cannot reach the core.
 //!
-//! The same port answers `GET /artwork/<hash>` with a stored picture, under the same token, so
-//! the page loads pictures as plain images rather than inside the JSON of a track page.
+//! The same port answers `GET /artwork/<hash>` with a stored picture and `GET /waveforms?tracks=`
+//! with waveform overviews, under the same token, so the page loads pictures as plain images and
+//! overviews as binary rather than inside the JSON of a track page.
 
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::{Ipv4Addr, SocketAddr};
@@ -26,7 +27,7 @@ use tokio_tungstenite::tungstenite::http::{StatusCode, header::AUTHORIZATION};
 use tokio_tungstenite::tungstenite::{Bytes, Message};
 use ts_rs::TS;
 
-use crate::Api;
+use crate::{Api, overviews};
 use crate::command::{ActivityChanged, LibraryChanged, Request, Response};
 use crate::error::ApiError;
 use crate::mix_frame;
@@ -122,22 +123,34 @@ fn sample_telemetry(api: &Api, readings: &watch::Sender<Option<TelemetryFrame>>)
     }
 }
 
-const ARTWORK_REQUEST: &[u8] = b"GET /artwork/";
+const ARTWORK_REQUEST: &str = "/artwork/";
+const OVERVIEWS_REQUEST: &str = "/waveforms?";
+/// The starts of the plain requests the port answers, as they arrive on the wire.
+const PLAIN_REQUESTS: [&[u8]; 2] = [b"GET /artwork/", b"GET /waveforms?"];
 /// More than any browser sends for an image request.
 const MAX_REQUEST_HEAD: u64 = 16 * 1024;
 
-/// Whether the connection opens with a picture request rather than a WebSocket upgrade.
-async fn asks_for_artwork(stream: &TcpStream) -> bool {
-    let mut start = [0u8; ARTWORK_REQUEST.len()];
+/// Whether the connection opens with a picture or overview request rather than a WebSocket
+/// upgrade.
+async fn asks_for_plain_request(stream: &TcpStream) -> bool {
+    let mut start = [0u8; 15];
     for _ in 0..8 {
         let Ok(read) = stream.peek(&mut start).await else {
             return false;
         };
-        if read == 0 || start[..read] != ARTWORK_REQUEST[..read] {
-            return false;
+        let arrived = &start[..read];
+        let mut could_be = false;
+        for request in PLAIN_REQUESTS {
+            let length = read.min(request.len());
+            if arrived[..length] == request[..length] {
+                if read >= request.len() {
+                    return true;
+                }
+                could_be = true;
+            }
         }
-        if read == start.len() {
-            return true;
+        if read == 0 || !could_be {
+            return false;
         }
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
@@ -154,9 +167,8 @@ fn respond(stream: &mut std::net::TcpStream, status: &str, extra: &str, body: &[
         .and_then(|()| stream.write_all(body));
 }
 
-/// Answers one picture request and closes. A picture never changes under its hash, so the
-/// browser may keep it as long as it likes.
-fn serve_artwork(stream: std::net::TcpStream, api: &Api, expected: &str) {
+/// Answers one picture or overview request and closes.
+fn serve_plain_request(stream: std::net::TcpStream, api: &Api, expected: &str) {
     let Ok(mut writer) = stream.try_clone() else {
         return;
     };
@@ -184,18 +196,24 @@ fn serve_artwork(stream: std::net::TcpStream, api: &Api, expected: &str) {
         respond(&mut writer, "401 Unauthorized", "", b"");
         return;
     }
-    let hash = request_line
-        .split_whitespace()
-        .nth(1)
-        .and_then(|target| target.strip_prefix("/artwork/"))
-        .unwrap_or_default();
+    let target = request_line.split_whitespace().nth(1).unwrap_or_default();
+    if let Some(query) = target.strip_prefix(OVERVIEWS_REQUEST) {
+        serve_overviews(&mut writer, api, query);
+        return;
+    }
+    let hash = target.strip_prefix(ARTWORK_REQUEST).unwrap_or_default();
+    serve_artwork(&mut writer, api, hash);
+}
+
+/// A picture never changes under its hash, so the browser may keep it as long as it likes.
+fn serve_artwork(writer: &mut std::net::TcpStream, api: &Api, hash: &str) {
     let Some(file) = api.artwork_file(hash) else {
-        respond(&mut writer, "404 Not Found", "", b"");
+        respond(writer, "404 Not Found", "", b"");
         return;
     };
     match std::fs::read(&file.path) {
         Ok(bytes) => respond(
-            &mut writer,
+            writer,
             "200 OK",
             &format!(
                 "Content-Type: {}\r\nCache-Control: private, max-age=31536000, immutable\r\n",
@@ -203,7 +221,24 @@ fn serve_artwork(stream: std::net::TcpStream, api: &Api, expected: &str) {
             ),
             &bytes,
         ),
-        Err(_) => respond(&mut writer, "404 Not Found", "", b""),
+        Err(_) => respond(writer, "404 Not Found", "", b""),
+    }
+}
+
+/// Overviews change when a file is read again, so the browser keeps none of them.
+fn serve_overviews(writer: &mut std::net::TcpStream, api: &Api, query: &str) {
+    let Some(track_ids) = overviews::track_ids(query) else {
+        respond(writer, "400 Bad Request", "", b"");
+        return;
+    };
+    match api.waveform_overviews(&track_ids) {
+        Ok(body) => respond(
+            writer,
+            "200 OK",
+            "Content-Type: application/octet-stream\r\nCache-Control: no-store\r\n",
+            &body,
+        ),
+        Err(_) => respond(writer, "500 Internal Server Error", "", b""),
     }
 }
 
@@ -213,7 +248,7 @@ async fn serve_connection(
     expected: Arc<str>,
     telemetry: watch::Receiver<Option<TelemetryFrame>>,
 ) {
-    if asks_for_artwork(&stream).await {
+    if asks_for_plain_request(&stream).await {
         let Ok(stream) = stream.into_std() else {
             return;
         };
@@ -225,7 +260,8 @@ async fn serve_connection(
         {
             return;
         }
-        let _ = tokio::task::spawn_blocking(move || serve_artwork(stream, &api, &expected)).await;
+        let _ =
+            tokio::task::spawn_blocking(move || serve_plain_request(stream, &api, &expected)).await;
         return;
     }
     #[expect(

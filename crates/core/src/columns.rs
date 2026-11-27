@@ -43,6 +43,8 @@ pub enum LibraryColumn {
     CatNo,
     Year,
     Artwork,
+    /// The track's waveform overview, drawn in its row.
+    Waveform,
     Format,
     Bitrate,
     SampleRate,
@@ -59,7 +61,7 @@ pub enum LibraryColumn {
     Tag(TagField),
 }
 
-const FIXED: [LibraryColumn; 26] = [
+const FIXED: [LibraryColumn; 27] = [
     LibraryColumn::Title,
     LibraryColumn::Artist,
     LibraryColumn::Bpm,
@@ -75,6 +77,7 @@ const FIXED: [LibraryColumn; 26] = [
     LibraryColumn::CatNo,
     LibraryColumn::Year,
     LibraryColumn::Artwork,
+    LibraryColumn::Waveform,
     LibraryColumn::Format,
     LibraryColumn::Bitrate,
     LibraryColumn::SampleRate,
@@ -150,6 +153,7 @@ impl LibraryColumn {
             Self::CatNo => "catno",
             Self::Year => "year",
             Self::Artwork => "artwork",
+            Self::Waveform => "waveform",
             Self::Format => "format",
             Self::Bitrate => "bitrate",
             Self::SampleRate => "sample_rate",
@@ -200,6 +204,7 @@ impl LibraryColumn {
             Self::CatNo => "Catalogue number",
             Self::Year => "Year",
             Self::Artwork => "Artwork",
+            Self::Waveform => "Waveform",
             Self::Format => "Format",
             Self::Bitrate => "Bitrate",
             Self::SampleRate => "Sample rate",
@@ -229,7 +234,8 @@ impl LibraryColumn {
             Self::Album | Self::Genre | Self::Label | Self::CatNo | Self::Year | Self::Artwork => {
                 ColumnGroup::Release
             }
-            Self::Format
+            Self::Waveform
+            | Self::Format
             | Self::Bitrate
             | Self::SampleRate
             | Self::BitDepth
@@ -250,6 +256,7 @@ impl LibraryColumn {
             Self::Key => Some(52),
             Self::Time => Some(56),
             Self::Artwork => Some(44),
+            Self::Waveform => Some(140),
             Self::Channels | Self::BitDepth => Some(64),
             Self::Format | Self::Year => Some(64),
             Self::Bitrate | Self::SampleRate | Self::FileSize => Some(84),
@@ -292,7 +299,7 @@ impl LibraryColumn {
         )
     }
 
-    /// How a click on the column's header sorts. Artwork and quality have no order.
+    /// How a click on the column's header sorts. Artwork, the waveform and quality have no order.
     pub fn sort_field(self) -> Option<TrackSortField> {
         Some(match self {
             Self::Title => TrackSortField::Title,
@@ -309,7 +316,7 @@ impl LibraryColumn {
             Self::Label => TrackSortField::Label,
             Self::CatNo => TrackSortField::CatNo,
             Self::Year => TrackSortField::Year,
-            Self::Artwork | Self::Quality => return None,
+            Self::Artwork | Self::Waveform | Self::Quality => return None,
             Self::Format => TrackSortField::Format,
             Self::Bitrate => TrackSortField::Bitrate,
             Self::SampleRate => TrackSortField::SampleRate,

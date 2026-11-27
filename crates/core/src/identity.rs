@@ -1,6 +1,7 @@
 use std::fmt;
 
 use crate::quality::{QualityFlag, QualityMeasurements};
+use crate::waveform::Overview;
 
 /// Maximum seconds of audio fed into Chromaprint, matching `fpcalc`'s default `-length 120`.
 pub const CHROMAPRINT_MAX_SECONDS: u32 = 120;
@@ -154,6 +155,8 @@ pub struct AssetIdentity {
     pub decoded_facts: Option<DecodedAudioFacts>,
     /// What the same decode found about the file's quality. `None` when it was not checked.
     pub quality: Option<AssetQuality>,
+    /// The waveform overview the same decode drew. `None` when the file did not decode.
+    pub overview: Option<Overview>,
 }
 
 /// A file's quality numbers and the flags they earned.

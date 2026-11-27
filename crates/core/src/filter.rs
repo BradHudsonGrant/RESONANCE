@@ -25,6 +25,7 @@ pub enum FieldKind {
     Number,
     Date,
     Choice,
+    /// Something a track has or lacks, such as a picture or a waveform.
     Picture,
     /// Where the file is. Always known, and too long for "is".
     Location,
@@ -184,7 +185,7 @@ impl LibraryColumn {
             | Self::FileSize => FieldKind::Number,
             Self::Added | Self::Modified => FieldKind::Date,
             Self::Key | Self::Format | Self::Quality => FieldKind::Choice,
-            Self::Artwork => FieldKind::Picture,
+            Self::Artwork | Self::Waveform => FieldKind::Picture,
             Self::Path | Self::Folder => FieldKind::Location,
         }
     }

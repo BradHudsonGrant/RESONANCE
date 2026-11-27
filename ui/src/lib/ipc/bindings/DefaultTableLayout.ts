@@ -247,6 +247,18 @@ export const DEFAULT_TABLE_LAYOUT: LibraryTableLayout = {
       "removable": true
     },
     {
+      "id": "waveform",
+      "label": "Waveform",
+      "group": "audio",
+      "shown": false,
+      "width_px": null,
+      "default_width_px": 140,
+      "floor_width_px": 140,
+      "numeric": false,
+      "sortable": false,
+      "removable": true
+    },
+    {
       "id": "format",
       "label": "Format",
       "group": "audio",

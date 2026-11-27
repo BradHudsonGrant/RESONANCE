@@ -278,3 +278,48 @@ async fn a_picture_set_over_the_socket_is_served_by_hash_with_the_token() {
         "The picture is not a JPEG or PNG"
     );
 }
+
+#[tokio::test]
+async fn overviews_are_served_for_the_tracks_asked_for_in_their_order() {
+    let folder = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("socket-overviews");
+    let _ = fs::remove_dir_all(&folder);
+    fs::create_dir_all(&folder).unwrap();
+    Signal::tone(700.0, 2.0, -6.0, 44_100)
+        .write_flac(&folder.join("tone.flac"))
+        .unwrap();
+    let mut database = Database::open_in_memory().unwrap();
+    resonance_library::scan::scan(&mut database, &folder, &[]).unwrap();
+    resonance_library::identity::identify_pending(&mut database).unwrap();
+    let track_id = database.tracks().unwrap()[0].track_id;
+    let server = Server::bind().await.unwrap();
+    let address = server.address().unwrap().to_string();
+    let token = server.token().to_owned();
+    tokio::spawn(server.run(Arc::new(Api::new(database))));
+
+    let target = format!("/waveforms?tracks={},{track_id}", track_id + 1);
+    let (served, refused, malformed) = tokio::task::spawn_blocking(move || {
+        (
+            get(&address, &target, Some(&token)),
+            get(&address, &target, None),
+            get(&address, "/waveforms?tracks=one", Some(&token)),
+        )
+    })
+    .await
+    .unwrap();
+
+    assert!(served.0.starts_with("HTTP/1.1 200 OK"), "{}", served.0);
+    assert!(served.0.contains("Content-Type: application/octet-stream"));
+    assert!(served.0.contains("no-store"));
+    let body = served.1;
+    let entry = 1 + 140 * 4;
+    assert_eq!(body[0], 3);
+    assert_eq!(body[4..12], [140, 0, 0, 0, 2, 0, 0, 0]);
+    assert_eq!(body.len(), 12 + 2 * entry);
+    assert_eq!(body[12], 0);
+    let shown = &body[12 + entry..];
+    assert_eq!(shown[0], 1);
+    // The first column's peak: a -6 dBFS tone peaks at half scale.
+    assert_eq!(shown[1], 128);
+    assert!(refused.0.starts_with("HTTP/1.1 401"), "{}", refused.0);
+    assert!(malformed.0.starts_with("HTTP/1.1 400"), "{}", malformed.0);
+}

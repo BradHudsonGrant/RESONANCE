@@ -1,3 +1,4 @@
+pub mod frontend;
 pub mod registry;
 pub mod runtime;
 
@@ -70,6 +71,9 @@ pub enum AnalysisError {
     UnexpectedOutput {
         output: String,
     },
+    /// The front end could not resample from the file's rate.
+    ResamplerSetup(rubato::ResamplerConstructionError),
+    Resample(rubato::ResampleError),
 }
 
 impl fmt::Display for AnalysisError {
@@ -103,6 +107,8 @@ impl fmt::Display for AnalysisError {
             Self::UnexpectedOutput { output } => {
                 write!(f, "The model's output {output} is not a float tensor.")
             }
+            Self::ResamplerSetup(source) => write!(f, "Could not set up resampling: {source}"),
+            Self::Resample(source) => write!(f, "Resampling failed: {source}"),
         }
     }
 }

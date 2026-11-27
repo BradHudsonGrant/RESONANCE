@@ -4,6 +4,8 @@ import {
   countSince,
   emptyTelemetry,
   frameKind,
+  OVERVIEWS,
+  readOverviews,
   readTelemetry,
   readWaveform,
   TELEMETRY,
@@ -99,14 +101,14 @@ describe('readTelemetry', () => {
 
 describe('readWaveform', () => {
   it('reads the deck, generation and bins after the header', () => {
-    const frame = new Uint8Array(20);
+    const frame = new Uint8Array(24);
     const view = new DataView(frame.buffer);
     view.setUint8(0, WAVEFORM);
     view.setUint8(1, 1);
     view.setUint32(4, 7, true);
     view.setUint32(8, 300, true);
     view.setUint32(12, 2, true);
-    frame.set([10, 5, 255, 90], 16);
+    frame.set([10, 5, 4, 3, 255, 90, 60, 20], 16);
 
     const waveform = readWaveform(frame.buffer);
 
@@ -114,7 +116,36 @@ describe('readWaveform', () => {
     expect(waveform.deck).toBe(1);
     expect(waveform.generation).toBe(7);
     expect(waveform.binsPerSecond).toBe(300);
-    expect([...waveform.bins]).toEqual([10, 5, 255, 90]);
+    expect([...waveform.bins]).toEqual([10, 5, 4, 3, 255, 90, 60, 20]);
+  });
+});
+
+describe('readOverviews', () => {
+  it('reads each track in the order asked for, with null where a track has none', () => {
+    const columns = 2;
+    const entry = 1 + 4 * columns;
+    const body = new Uint8Array(12 + 2 * entry);
+    const view = new DataView(body.buffer);
+    view.setUint8(0, OVERVIEWS);
+    view.setUint32(4, columns, true);
+    view.setUint32(8, 2, true);
+    body.set([1, 200, 90, 40, 10, 7, 6, 5, 4], 12 + entry);
+
+    const overviews = readOverviews(body.buffer);
+
+    expect(overviews[0]).toBeNull();
+    expect([...overviews[1]!]).toEqual([200, 90, 40, 10, 7, 6, 5, 4]);
+  });
+
+  it('refuses a body that is cut short or is not overviews', () => {
+    const body = new Uint8Array(12);
+    const view = new DataView(body.buffer);
+    view.setUint8(0, OVERVIEWS);
+    view.setUint32(4, 140, true);
+    view.setUint32(8, 1, true);
+
+    expect(() => readOverviews(body.buffer)).toThrow('cut short');
+    expect(() => readOverviews(new ArrayBuffer(12))).toThrow('wrong header');
   });
 });
 

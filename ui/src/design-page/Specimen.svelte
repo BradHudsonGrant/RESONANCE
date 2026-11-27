@@ -110,10 +110,26 @@
     return out;
   }
 
-  const inlinePeaks = specimenPeaks(1);
+  /** A made-up overview: four bytes a column, the peak and the low, mid and high band levels. */
+  function specimenColumns(trackSeed: number, total = 140): Uint8Array {
+    const peaks = specimenPeaks(trackSeed, total);
+    const out = new Uint8Array(total * 4);
+    for (let index = 0; index < total; index++) {
+      const peak = peaks[index] ?? 0;
+      const kick = 0.35 + 0.3 * Math.abs(Math.sin(index * 0.9 + trackSeed));
+      const air = 0.15 + 0.2 * Math.abs(Math.cos(index * 1.7 + trackSeed * 3));
+      out.set(
+        [peak, peak * kick, peak * 0.45, peak * air].map((level) => Math.round(level * 255)),
+        index * 4,
+      );
+    }
+    return out;
+  }
+
+  const inlineColumns = specimenColumns(1);
   const curvePeaks = specimenPeaks(2);
-  const crossfadePeaksA = specimenPeaks(3);
-  const crossfadePeaksB = specimenPeaks(20);
+  const crossfadeColumnsA = specimenColumns(3);
+  const crossfadeColumnsB = specimenColumns(20);
 
   function removeTag(tag: string) {
     removableTags = removableTags.filter((item) => item !== tag);
@@ -359,7 +375,7 @@
     <div class="waveforms">
       <Waveform
         mode="inline"
-        peaks={inlinePeaks}
+        columns={inlineColumns}
         durationSec={332}
         progress={0.45}
         label="Inline track waveform"
@@ -367,8 +383,8 @@
       <Waveform mode="curve" peaks={curvePeaks} durationSec={422} label="Energy curve waveform" />
       <Waveform
         mode="crossfade"
-        peaks={crossfadePeaksA}
-        secondaryPeaks={crossfadePeaksB}
+        columns={crossfadeColumnsA}
+        secondaryColumns={crossfadeColumnsB}
         durationSec={422}
         progress={0.55}
         mixPoint={0.6}

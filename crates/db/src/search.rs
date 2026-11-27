@@ -691,6 +691,8 @@ enum FilterTarget {
     /// A generic tag, held in `asset_tag_value` and `asset_tag_missing`.
     Tag(&'static str),
     Artwork,
+    /// An overview in `waveform_overview`, which the file has once identification has read it.
+    Waveform,
     /// Flags in `quality_flag`.
     Quality,
     /// When the track came in, kept on `track`.
@@ -742,6 +744,7 @@ fn filter_target(column: LibraryColumn) -> FilterTarget {
         // The path inside the music folder up to its last slash.
         LibraryColumn::Folder => column_of("rtrim(asset.path, replace(asset.path, '/', ''))"),
         LibraryColumn::Artwork => FilterTarget::Artwork,
+        LibraryColumn::Waveform => FilterTarget::Waveform,
         LibraryColumn::Quality => FilterTarget::Quality,
         LibraryColumn::Tag(field) => FilterTarget::Tag(field.name()),
     }
@@ -802,6 +805,14 @@ fn filter_sql(filter: &FieldFilter, plain: bool, params: &mut Vec<Value>) -> Str
             match filter.condition {
                 Condition::Missing => format!("(asset.artwork_hash IS NULL AND NOT {user})"),
                 _ => format!("(asset.artwork_hash IS NOT NULL OR {user})"),
+            }
+        }
+        FilterTarget::Waveform => {
+            let drawn = "EXISTS (SELECT 1 FROM waveform_overview
+                 WHERE waveform_overview.audio_hash = asset.audio_hash)";
+            match filter.condition {
+                Condition::Missing => format!("NOT {drawn}"),
+                _ => drawn.to_owned(),
             }
         }
         FilterTarget::Quality => {

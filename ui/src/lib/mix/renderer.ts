@@ -1,4 +1,4 @@
-import type { WaveformFrame } from './frames';
+import { BIN_BYTES, type WaveformFrame } from './frames';
 
 /** Seconds of music across a deck's lane. */
 export const SECONDS_IN_VIEW = 10;
@@ -17,8 +17,10 @@ void main() {
 }`;
 
 // Each fragment finds the bins under its column and compares its distance from the centre line
-// with their peak and RMS. Columns are whole device pixels and nothing is blended, so the bars are
-// one pixel wide with hard edges. Played bars use Text; upcoming bars use Text 2.
+// with their peak and their high, mid and low band levels. The peak is a faint outline and each
+// band inside it is brighter the lower it is, so kicks and bass read as the solid core and hats as
+// a fringe, with no colour. Columns are whole device pixels and nothing is blended, so the bars
+// are one pixel wide with hard edges. Played bars use Text; upcoming bars use Text 2.
 const FRAGMENT = `#version 300 es
 precision highp float;
 precision highp int;
@@ -31,8 +33,8 @@ uniform float uPlayheadColumn;
 uniform float uPlayheadCapHalf;
 uniform float uPlayheadCapHeight;
 uniform vec3 uBackground;
-uniform vec3 uPeak;
-uniform vec3 uRms;
+uniform vec3 uUpcoming;
+uniform vec3 uPlayed;
 uniform vec3 uPlayhead;
 out vec4 outColor;
 
@@ -52,22 +54,23 @@ void main() {
   float from = (uFirstColumn + column) * uBinsPerColumn;
   int first = int(floor(from));
   int last = max(first, int(ceil(from + uBinsPerColumn)) - 1);
-  vec2 level = vec2(0.0);
+  vec4 level = vec4(0.0);
   for (int i = 0; i < MOST_BINS; i++) {
     int bin = first + i;
     if (bin > last) break;
     if (bin < 0 || float(bin >= 0 ? bin : 0) >= uBinCount) continue;
-    level = max(level, texelFetch(uBins, ivec2(bin % ROW, bin / ROW), 0).rg);
+    level = max(level, texelFetch(uBins, ivec2(bin % ROW, bin / ROW), 0));
   }
   float halfHeight = uLane.w * 0.5;
   float fromCentre = abs(floor(p.y) + 0.5 - halfHeight) / halfHeight;
-  bool played = column < uPlayheadColumn;
-  vec3 peakTone = played ? uRms : uPeak;
-  vec3 rmsTone = played ? uRms : mix(uPeak, uRms, 0.35);
-  vec3 colour = uBackground;
-  if (fromCentre < level.r) colour = peakTone;
-  if (fromCentre < level.g) colour = rmsTone;
-  outColor = vec4(colour, 1.0);
+  vec3 tone = column < uPlayheadColumn ? uPlayed : uUpcoming;
+  // Texels are peak, low, mid, high. A brighter layer wins where two cover the same pixel.
+  float brightness = 0.0;
+  if (fromCentre < level.r) brightness = 0.3;
+  if (fromCentre < level.a) brightness = max(brightness, 0.5);
+  if (fromCentre < level.b) brightness = max(brightness, 0.72);
+  if (fromCentre < level.g) brightness = 1.0;
+  outColor = vec4(mix(uBackground, tone, brightness), 1.0);
 }`;
 
 const UNIFORMS = [
@@ -80,8 +83,8 @@ const UNIFORMS = [
   'uPlayheadCapHalf',
   'uPlayheadCapHeight',
   'uBackground',
-  'uPeak',
-  'uRms',
+  'uUpcoming',
+  'uPlayed',
   'uPlayhead',
 ] as const;
 
@@ -91,8 +94,9 @@ type Locations = Record<(typeof UNIFORMS)[number], WebGLUniformLocation | null>;
 export interface Palette {
   background: Rgb;
   divider: Rgb;
-  peak: Rgb;
-  rms: Rgb;
+  /** Bars still to play. */
+  upcoming: Rgb;
+  played: Rgb;
   playhead: Rgb;
   meterTrack: Rgb;
   meter: Rgb;
@@ -126,8 +130,8 @@ export class MixRenderer {
   palette: Palette = {
     background: [0, 0, 0],
     divider: [0.2, 0.2, 0.2],
-    peak: [0.7, 0.7, 0.7],
-    rms: [1, 1, 1],
+    upcoming: [0.7, 0.7, 0.7],
+    played: [1, 1, 1],
     playhead: [1, 0, 0],
     meterTrack: [0.2, 0.2, 0.2],
     meter: [0.7, 0.7, 0.7],
@@ -182,7 +186,17 @@ export class MixRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG8, 1, 1, 0, gl.RG, gl.UNSIGNED_BYTE, new Uint8Array(2));
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA8,
+      1,
+      1,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      new Uint8Array(4),
+    );
     return { texture, binCount: 0, binsPerSecond: 1 };
   }
 
@@ -190,12 +204,12 @@ export class MixRenderer {
   setWaveform(frame: WaveformFrame): void {
     const gl = this.#gl;
     const lane = this.#lanes[frame.deck];
-    const count = frame.bins.length / 2;
+    const count = frame.bins.length / BIN_BYTES;
     const rows = Math.max(1, Math.ceil(count / ROW));
-    const padded = new Uint8Array(ROW * rows * 2);
+    const padded = new Uint8Array(ROW * rows * BIN_BYTES);
     padded.set(frame.bins);
     gl.bindTexture(gl.TEXTURE_2D, lane.texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG8, ROW, rows, 0, gl.RG, gl.UNSIGNED_BYTE, padded);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, ROW, rows, 0, gl.RGBA, gl.UNSIGNED_BYTE, padded);
     lane.binCount = count;
     lane.binsPerSecond = frame.binsPerSecond;
   }
@@ -269,8 +283,8 @@ export class MixRenderer {
     gl.uniform1f(at.uPlayheadCapHeight, capSize);
     const p = this.palette;
     gl.uniform3f(at.uBackground, p.background[0], p.background[1], p.background[2]);
-    gl.uniform3f(at.uPeak, p.peak[0], p.peak[1], p.peak[2]);
-    gl.uniform3f(at.uRms, p.rms[0], p.rms[1], p.rms[2]);
+    gl.uniform3f(at.uUpcoming, p.upcoming[0], p.upcoming[1], p.upcoming[2]);
+    gl.uniform3f(at.uPlayed, p.played[0], p.played[1], p.played[2]);
     gl.uniform3f(at.uPlayhead, p.playhead[0], p.playhead[1], p.playhead[2]);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }

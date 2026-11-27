@@ -1,15 +1,20 @@
 /**
- * Reads the core's binary Mix frames. The layout is set in `crates/api/src/mix_frame.rs`, and the
- * offsets here have to match it. Numbers are little-endian.
+ * Reads the core's binary frames. The layouts are set in `crates/api/src/mix_frame.rs` and
+ * `crates/api/src/overviews.rs`, and the offsets here have to match them. Numbers are
+ * little-endian.
  */
 
 export const TELEMETRY = 1;
 export const WAVEFORM = 2;
+export const OVERVIEWS = 3;
+/** Bytes in one waveform bin or overview column: peak, then the low, mid and high band levels. */
+export const BIN_BYTES = 4;
 const TELEMETRY_LENGTH = 144;
 const DECKS_AT = 56;
 const DECK_LENGTH = 32;
 const PREVIEW_AT = 120;
 const WAVEFORM_HEADER_LENGTH = 16;
+const OVERVIEWS_HEADER_LENGTH = 12;
 
 export interface DeckReading {
   /** Zero while the deck is empty. Matches the waveform for the same load. */
@@ -58,7 +63,7 @@ export interface WaveformFrame {
   deck: 0 | 1;
   generation: number;
   binsPerSecond: number;
-  /** A peak byte and an RMS byte for each bin, 255 at full scale. */
+  /** Four bytes for each bin, peak then the low, mid and high band RMS, 255 at full scale. */
   bins: Uint8Array;
 }
 
@@ -147,14 +152,37 @@ export function readTelemetry(frame: ArrayBuffer, into: Telemetry): void {
 export function readWaveform(frame: ArrayBuffer): WaveformFrame {
   const view = new DataView(frame);
   const count = view.getUint32(12, true);
-  if (frame.byteLength < WAVEFORM_HEADER_LENGTH + 2 * count)
+  if (frame.byteLength < WAVEFORM_HEADER_LENGTH + BIN_BYTES * count)
     throw new Error('A waveform frame was cut short.');
   return {
     deck: view.getUint8(1) === 1 ? 1 : 0,
     generation: view.getUint32(4, true),
     binsPerSecond: view.getUint32(8, true),
-    bins: new Uint8Array(frame, WAVEFORM_HEADER_LENGTH, 2 * count),
+    bins: new Uint8Array(frame, WAVEFORM_HEADER_LENGTH, BIN_BYTES * count),
   };
+}
+
+/**
+ * Reads the overviews of the tracks a request named, in the order it named them. A track
+ * without an overview yet reads as null.
+ */
+export function readOverviews(body: ArrayBuffer): (Uint8Array | null)[] {
+  const view = new DataView(body);
+  if (body.byteLength < OVERVIEWS_HEADER_LENGTH || view.getUint8(0) !== OVERVIEWS)
+    throw new Error('An overview body has the wrong header.');
+  const columns = view.getUint32(4, true);
+  const tracks = view.getUint32(8, true);
+  const entry = 1 + BIN_BYTES * columns;
+  if (body.byteLength < OVERVIEWS_HEADER_LENGTH + tracks * entry)
+    throw new Error('An overview body was cut short.');
+  const overviews: (Uint8Array | null)[] = [];
+  for (let index = 0; index < tracks; index++) {
+    const at = OVERVIEWS_HEADER_LENGTH + index * entry;
+    overviews.push(
+      view.getUint8(at) === 1 ? new Uint8Array(body, at + 1, BIN_BYTES * columns) : null,
+    );
+  }
+  return overviews;
 }
 
 /** The difference between two readings of a count that wraps at 2^32. */
