@@ -40,6 +40,13 @@ In-process calls keep tensors on the GPU between steps and avoid a second proces
 - Weights go to `<data folder>/models/<id>/<version>/model.onnx`. A download is written under a temporary name and only takes the real one once its size and SHA-256 match the registry. A model whose licence rules out commercial use is refused unless non-commercial models are turned on. That switch goes into Settings with the first such model.
 - The app does not link `crates/analysis` yet. When it does, the installer has to carry the provider DLLs and ONNX Runtime's notices.
 
+## Beat This! on 27 November 2026
+
+- The beat tracker is `Beat This!` `final0` (MIT code and weights, `CPJKU/beat_this`). `tools/models/export_beat_this.py` exports it with opset 17 and a variable frame count. It uses the TorchScript exporter because the dynamo one cannot yet decompose the rotary embeddings.
+- `tools/models/verify_beat_this.py` runs the checkpoint and the ONNX file on the same fixed log-mel tensors, a full 1,500-frame chunk and a 437-frame one. The worst logit difference is 5.7e-6, against a limit of 1e-4. The Rust log-mel front end matches torchaudio within 1e-3 on the script's test tone.
+- The authors publish only the PyTorch checkpoint, so the ONNX file is a release asset on this repository under its own tag, `models-beat-this-final0`, kept apart from app releases. It is 83,162,655 bytes, and the registry checks its size and SHA-256 before keeping it.
+- `the_model_finds_the_grid_of_a_made_up_track` in `crates/analysis/tests/beats.rs` runs the whole tracker on that file when `RESONANCE_BEAT_THIS_ONNX` names a copy. CI does not download it.
+
 ## What would change it
 
 If a model a milestone depends on can't be exported after a two-day spike, it runs in an optional Python worker behind the same analyser trait. That needs its own ADR, and the default install stays free of Python.

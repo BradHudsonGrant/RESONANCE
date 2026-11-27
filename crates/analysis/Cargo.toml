@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 resonance-core.workspace = true
+blake3.workspace = true
 ort.workspace = true
 realfft.workspace = true
 rubato.workspace = true

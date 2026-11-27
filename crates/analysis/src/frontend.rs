@@ -98,7 +98,7 @@ impl FrontEnd {
         let resampler = if sample_rate == SAMPLE_RATE {
             None
         } else {
-            Some(MonoResampler::new(sample_rate)?)
+            Some(MonoResampler::new(sample_rate, SAMPLE_RATE)?)
         };
         Ok(Self {
             channels: channels.max(1),
@@ -188,9 +188,9 @@ impl FrontEnd {
     }
 }
 
-/// Resamples mono audio to 44.1 kHz with a synchronous FFT resampler, dropping its delay so
+/// Resamples mono audio with a synchronous FFT resampler, dropping its delay so
 /// frame `n` still starts at sample `n * HOP` of the track.
-struct MonoResampler {
+pub(crate) struct MonoResampler {
     inner: FftFixedIn<f32>,
     input: Vec<f32>,
     output: Vec<f32>,
@@ -201,10 +201,10 @@ struct MonoResampler {
 }
 
 impl MonoResampler {
-    fn new(sample_rate: u32) -> Result<Self, AnalysisError> {
+    pub(crate) fn new(from: u32, to: u32) -> Result<Self, AnalysisError> {
         let inner = FftFixedIn::<f32>::new(
-            sample_rate.max(1) as usize,
-            SAMPLE_RATE as usize,
+            from.max(1) as usize,
+            to.max(1) as usize,
             RESAMPLE_CHUNK,
             2,
             1,
@@ -219,11 +219,11 @@ impl MonoResampler {
             delay_to_skip,
             input_frames: 0,
             output_frames: 0,
-            ratio: f64::from(SAMPLE_RATE) / f64::from(sample_rate.max(1)),
+            ratio: f64::from(to.max(1)) / f64::from(from.max(1)),
         })
     }
 
-    fn push(&mut self, mono: &[f32], out: &mut Vec<f32>) -> Result<(), AnalysisError> {
+    pub(crate) fn push(&mut self, mono: &[f32], out: &mut Vec<f32>) -> Result<(), AnalysisError> {
         self.input_frames += mono.len() as u64;
         let mut rest = mono;
         while !rest.is_empty() {
@@ -243,7 +243,7 @@ impl MonoResampler {
         Ok(())
     }
 
-    fn finish(&mut self, out: &mut Vec<f32>) -> Result<(), AnalysisError> {
+    pub(crate) fn finish(&mut self, out: &mut Vec<f32>) -> Result<(), AnalysisError> {
         let expected = (self.input_frames as f64 * self.ratio).round() as u64;
         // rubato reads an empty chunk as a channel to leave out, so the leftovers go in only when
         // there are some.
@@ -535,7 +535,7 @@ mod tests {
         for (i, sample) in input[onset..].iter_mut().enumerate() {
             *sample = 0.5 * (i as f32 * 440.0 * std::f32::consts::TAU / rate as f32).sin();
         }
-        let mut resampler = MonoResampler::new(rate).expect("resampler");
+        let mut resampler = MonoResampler::new(rate, SAMPLE_RATE).expect("resampler");
         let mut out = Vec::new();
         resampler.push(&input, &mut out).expect("push");
         resampler.finish(&mut out).expect("finish");

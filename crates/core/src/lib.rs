@@ -1,5 +1,6 @@
 pub mod analysis;
 pub mod artwork;
+pub mod beat_grid;
 pub mod collections;
 pub mod columns;
 pub mod convert;
